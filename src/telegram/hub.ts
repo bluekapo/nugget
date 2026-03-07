@@ -14,6 +14,9 @@ export class HubRenderer {
   private advancedMode = false;
   private execStateMap: Map<string, 'busy' | 'idle'> = new Map();
 
+  /** Sequential promise chain to serialize render() calls and prevent duplicate sendMessage. */
+  private renderQueue: Promise<void> = Promise.resolve();
+
   /** Update the execution state for a session (busy = processing, idle = waiting for input). */
   setExecState(sessionName: string, state: 'busy' | 'idle'): void {
     this.execStateMap.set(sessionName, state);
@@ -55,73 +58,81 @@ export class HubRenderer {
   /** Render or re-render the hub message. Sends new or edits existing.
    *  When forceNew is true, deletes the old hub message and sends a fresh one
    *  at the bottom of the chat (used by /hub command to ensure visibility).
+   *
+   *  Serialized via renderQueue to prevent duplicate sendMessage calls when
+   *  multiple render() calls fire before the first sendMessage resolves.
    */
   async render(opts?: { forceNew?: boolean }): Promise<void> {
-    if (opts?.forceNew && this.hubMessageId !== null) {
-      try {
-        await this.api.deleteMessage(this.chatId, this.hubMessageId);
-      } catch {
-        // Message may already be gone -- ignore
+    const task = this.renderQueue.then(async () => {
+      if (opts?.forceNew && this.hubMessageId !== null) {
+        try {
+          await this.api.deleteMessage(this.chatId, this.hubMessageId);
+        } catch {
+          // Message may already be gone -- ignore
+        }
+        this.hubMessageId = null;
+        if (this.store) this.store.clear();
       }
-      this.hubMessageId = null;
-      if (this.store) this.store.clear();
-    }
 
-    // Merge local DB sessions with router's full list (includes remote sessions)
-    const dbSessions = this.sessionManager.getActive();
-    const allNames = this.getAllSessionNames?.() ?? dbSessions.map(s => s.name);
+      // Merge local DB sessions with router's full list (includes remote sessions)
+      const dbSessions = this.sessionManager.getActive();
+      const allNames = this.getAllSessionNames?.() ?? dbSessions.map(s => s.name);
 
-    // Build session list: use DB info when available, synthesize for remote-only sessions
-    const sessions: Array<{ name: string; status: string; pid?: number | null; createdAt?: string }> = [];
-    const dbMap = new Map(dbSessions.map(s => [s.name, s]));
+      // Build session list: use DB info when available, synthesize for remote-only sessions
+      const sessions: Array<{ name: string; status: string; pid?: number | null; createdAt?: string }> = [];
+      const dbMap = new Map(dbSessions.map(s => [s.name, s]));
 
-    for (const name of allNames) {
-      const dbEntry = dbMap.get(name);
-      if (dbEntry) {
-        sessions.push({ name: dbEntry.name, status: dbEntry.status, pid: (dbEntry as any).pid, createdAt: (dbEntry as any).createdAt });
+      for (const name of allNames) {
+        const dbEntry = dbMap.get(name);
+        if (dbEntry) {
+          sessions.push({ name: dbEntry.name, status: dbEntry.status, pid: (dbEntry as any).pid, createdAt: (dbEntry as any).createdAt });
+        } else {
+          // Remote session -- not in local DB
+          sessions.push({ name, status: 'remote' });
+        }
+      }
+
+      const activeSession = this.getActiveSession();
+      const text = buildText(sessions, activeSession, this.advancedMode, this.execStateMap);
+      const keyboard = buildKeyboard(sessions, activeSession, this.advancedMode);
+
+      if (this.hubMessageId === null) {
+        // Send new message
+        try {
+          const result = await this.api.sendMessage(this.chatId, text, {
+            parse_mode: 'HTML',
+            reply_markup: keyboard,
+          });
+          this.hubMessageId = result.message_id;
+          if (this.store) this.store.save(result.message_id);
+        } catch (err) {
+          logError('Hub sendMessage failed:', err);
+        }
       } else {
-        // Remote session -- not in local DB
-        sessions.push({ name, status: 'remote' });
-      }
-    }
-
-    const activeSession = this.getActiveSession();
-    const text = buildText(sessions, activeSession, this.advancedMode, this.execStateMap);
-    const keyboard = buildKeyboard(sessions, activeSession, this.advancedMode);
-
-    if (this.hubMessageId === null) {
-      // Send new message
-      try {
-        const result = await this.api.sendMessage(this.chatId, text, {
-          parse_mode: 'HTML',
-          reply_markup: keyboard,
-        });
-        this.hubMessageId = result.message_id;
-        if (this.store) this.store.save(result.message_id);
-      } catch (err) {
-        logError('Hub sendMessage failed:', err);
-      }
-    } else {
-      // Edit existing message
-      try {
-        await this.api.editMessageText(this.chatId, this.hubMessageId, text, {
-          parse_mode: 'HTML',
-          reply_markup: keyboard,
-        });
-      } catch (err: unknown) {
-        if (isNotModifiedError(err)) {
-          // Suppress -- content identical
-          return;
+        // Edit existing message
+        try {
+          await this.api.editMessageText(this.chatId, this.hubMessageId, text, {
+            parse_mode: 'HTML',
+            reply_markup: keyboard,
+          });
+        } catch (err: unknown) {
+          if (isNotModifiedError(err)) {
+            // Suppress -- content identical
+            return;
+          }
+          if (isMessageNotFoundError(err)) {
+            // Message was deleted -- reset and re-send on next queued render
+            this.hubMessageId = null;
+            return;
+          }
+          logError('Hub editMessageText failed:', err);
         }
-        if (isMessageNotFoundError(err)) {
-          // Message was deleted -- reset and re-send
-          this.hubMessageId = null;
-          await this.render();
-          return;
-        }
-        logError('Hub editMessageText failed:', err);
       }
-    }
+    });
+    this.renderQueue = task.catch((err) => {
+      logError('Hub render queue error:', err);
+    });
+    return task;
   }
 
   /** Delete the hub message entirely and clear persisted state. */

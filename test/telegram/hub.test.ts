@@ -490,7 +490,8 @@ describe('HubRenderer', () => {
       await hub.render(); // creates message
       const sendCallsBefore = api.calls.filter(c => c.method === 'sendMessage').length;
 
-      await hub.render(); // edit fails -> should re-send
+      await hub.render(); // edit fails -> resets hubMessageId to null
+      await hub.render(); // next render re-sends since hubMessageId is null
 
       const sendCallsAfter = api.calls.filter(c => c.method === 'sendMessage').length;
       assert.ok(sendCallsAfter > sendCallsBefore, 'should have sent a new message after edit-not-found');
