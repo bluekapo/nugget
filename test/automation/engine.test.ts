@@ -131,9 +131,31 @@ describe('AutomationEngine', () => {
     assert.equal(engine.state, 'stopped', 'stop() should transition to stopped');
   });
 
-  // ---------- Test 2: worker idle triggers state transition ----------
+  // ---------- Test 2: first cycle triggers immediately on start() ----------
 
-  it('worker idle triggers capturing-worker state', async () => {
+  it('first cycle triggers immediately on start() without waiting for worker output', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+    assert.equal(engine.state, 'idle', 'start() sets idle synchronously');
+
+    // Fire the deferred setTimeout(0) -- no session:output emitted at all
+    timer.advance(0);
+
+    // Engine should have transitioned out of idle into clearing-orchestrator
+    // (capturing-worker is transient within onWorkerIdle)
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'engine should start first cycle immediately via deferred timer, without any worker output');
+
+    // Verify /clear was written to orchestrator (proves first cycle started)
+    const clearWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('/clear'));
+    assert.ok(clearWrite, 'engine should send /clear to orchestrator on first cycle');
+
+    // No session:output was emitted -- proves this is purely the deferred start, not prompt detection
+  });
+
+  // ---------- Test 3: subsequent cycle triggers via prompt completion (existing behavior) ----------
+
+  it('subsequent cycle triggers via worker prompt completion detection', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     engine.start();
 
