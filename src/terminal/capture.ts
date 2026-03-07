@@ -72,6 +72,8 @@ export class ScreenCapture {
   onPromptComplete: (() => void) | null = null;
   private idleTimer: unknown = null;
   private readonly idleDelay: number;
+  /** When false, onPromptComplete fires on data-idle alone without requiring a completion marker. */
+  requireMarker = true;
   /** Whether a completion marker was detected in screen output. */
   private crunched = false;
   /** The last completion marker text that fired a notification — prevents re-firing for the same marker. */
@@ -227,6 +229,7 @@ export class ScreenCapture {
     this.captureCount = 0;
     this._scrollLocked = true;
     this.crunched = false;
+    this.requireMarker = true;
     this.lastFiredMarker = null;
     this._execBusy = false;
   }
@@ -362,7 +365,8 @@ export class ScreenCapture {
 
     // Only start idle timer when crunched — prevents false notifications on
     // arbitrary idle periods (plugin loads, output pauses, etc.).
-    if (this.crunched) {
+    // When requireMarker=false, skip the crunched check and fire on data-idle alone.
+    if (this.crunched || !this.requireMarker) {
       this.startIdleTimer();
     }
   }
@@ -378,7 +382,8 @@ export class ScreenCapture {
     this.cancelIdleTimer();
     this.idleTimer = this.timer.setTimeout(() => {
       this.idleTimer = null;
-      if (!this.crunched || !this.onPromptComplete) return;
+      if (!this.onPromptComplete) return;
+      if (this.requireMarker && !this.crunched) return;
 
       // Subagent guard: check for active spinner (\u273B) on lines that do NOT
       // contain a completion marker. The \u273B appears on the completion line

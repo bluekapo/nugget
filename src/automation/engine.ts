@@ -230,10 +230,14 @@ export class AutomationEngine {
     // Send /clear to orchestrator
     this.sessionManager.writeToSession(this.config.orchestratorSession, '/clear\r');
 
-    // Reset orchestrator monitor baseline and mark input sent
+    // Reset orchestrator monitor baseline and mark input sent.
+    // /clear does not produce a completion marker, so disable marker requirement
+    // so onPromptComplete fires on data-idle alone. resetBaseline() in onClearComplete()
+    // restores requireMarker=true for the subsequent prompt response step.
     if (this.orchestratorMonitor) {
       this.orchestratorMonitor.capture.resetBaseline();
       this.orchestratorMonitor.capture.markInputSent();
+      this.orchestratorMonitor.capture.requireMarker = false;
       this.orchestratorMonitor.capture.onPromptComplete = () => this.onClearComplete();
     }
 
