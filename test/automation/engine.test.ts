@@ -139,7 +139,8 @@ describe('AutomationEngine', () => {
     assert.equal(engine.state, 'idle', 'start() sets idle synchronously');
 
     // Fire the deferred setTimeout(0) -- no session:output emitted at all
-    timer.advance(0);
+    // advance(1) because ManualTimer needs _now < target to enter the loop
+    timer.advance(1);
 
     // Engine should have transitioned out of idle into clearing-orchestrator
     // (capturing-worker is transient within onWorkerIdle)

@@ -123,6 +123,15 @@ export class AutomationEngine {
 
     this.setState('idle');
 
+    // Kick off the first cycle immediately -- the worker is already idle
+    // at its prompt when automation starts. Subsequent cycles use
+    // onPromptComplete detection from workerMonitor.
+    this.timer.setTimeout(() => {
+      if (this._state === 'idle') {
+        this.onWorkerIdle();
+      }
+    }, 0);
+
     // SAF-03: Listen for session disconnect
     this.sessionExitHandler = (name: string, _exitCode: number) => {
       if (this._state === 'stopped') return;
