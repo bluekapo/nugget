@@ -8,6 +8,7 @@
  */
 
 import { TerminalEmulator } from './emulator.js';
+import type { EventBus } from '../events/bus.js';
 
 /**
  * OutputEvent — the contract between ScreenCapture and downstream consumers.
@@ -76,6 +77,9 @@ export class ScreenCapture {
   /** The last completion marker text that fired a notification — prevents re-firing for the same marker. */
   private lastFiredMarker: string | null = null;
 
+  private readonly bus?: EventBus;
+  private readonly sessionNameFn?: () => string | null;
+
   constructor(
     private readonly emulator: TerminalEmulator,
     private readonly onOutput: (event: OutputEvent) => void,
@@ -87,6 +91,8 @@ export class ScreenCapture {
       maxWait?: number;
       idleDelay?: number;
       timer?: TimerProvider;
+      bus?: EventBus;
+      sessionNameFn?: () => string | null;
     },
   ) {
     this.burstThreshold = opts?.burstThreshold ?? 5;
@@ -96,6 +102,8 @@ export class ScreenCapture {
     this.maxWait = opts?.maxWait ?? 3000;
     this.idleDelay = opts?.idleDelay ?? 5000;
     this.timer = opts?.timer ?? defaultTimer;
+    this.bus = opts?.bus;
+    this.sessionNameFn = opts?.sessionNameFn;
 
     // Subscribe to alt-screen transitions for immediate capture
     this.bufferChangeDisposable = this.emulator.onBufferChange((isAltScreen) => {
@@ -212,6 +220,8 @@ export class ScreenCapture {
   markInputSent(): void {
     this.crunched = false;
     this.cancelIdleTimer();
+    const name = this.sessionNameFn?.();
+    if (name && this.bus) this.bus.emit('session:exec-state', name, 'busy');
   }
 
   /**
@@ -367,6 +377,8 @@ export class ScreenCapture {
       const firedMatches = [...this.lastSnapshot.matchAll(/\u273B .+ for (?:\d+m )?\d+s/g)];
       this.lastFiredMarker = firedMatches.length > 0 ? firedMatches[firedMatches.length - 1][0] : null;
       this.crunched = false;
+      const name = this.sessionNameFn?.();
+      if (name && this.bus) this.bus.emit('session:exec-state', name, 'idle');
       this.onPromptComplete();
     }, this.idleDelay);
   }

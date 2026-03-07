@@ -123,7 +123,7 @@ async function startPrimary(
   const emulator = new TerminalEmulator(ptyCols, ptyRows);
   const screenCapture = new ScreenCapture(emulator, (event) => {
     outputSink.handleEvent(event);
-  });
+  }, { bus, sessionNameFn: () => router.activeSession });
 
   // 10. Create MessageStore and MessageTracker for message lifecycle management
   const messageStore = new MessageStore(db);
@@ -214,6 +214,12 @@ async function startPrimary(
   // Adding hubRenderer.render() here caused duplicate hub messages.
   bus.on('session:exit', (name: string) => {
     router.remove(name);
+    hubRenderer.render();
+  });
+
+  // 14b. Wire exec-state changes to hub for dynamic busy/idle display
+  bus.on('session:exec-state', (name: string, state: 'busy' | 'idle') => {
+    hubRenderer.setExecState(name, state);
     hubRenderer.render();
   });
 
@@ -557,7 +563,7 @@ async function becomeNewPrimary(
     const emulator = new TerminalEmulator(ptyCols, ptyRows);
     const capture = new ScreenCapture(emulator, (event) => {
       outputSink.handleEvent(event);
-    });
+    }, { bus, sessionNameFn: () => router.activeSession });
 
     bus.off('session:output', stdoutHandler);
     bus.on('session:output', (name: string, data: string) => {
@@ -652,6 +658,12 @@ async function becomeNewPrimary(
 
     bus.on('session:exit', (name: string) => {
       router.remove(name);
+      hubRenderer.render();
+    });
+
+    // Wire exec-state changes to hub for dynamic busy/idle display
+    bus.on('session:exec-state', (name: string, state: 'busy' | 'idle') => {
+      hubRenderer.setExecState(name, state);
       hubRenderer.render();
     });
 

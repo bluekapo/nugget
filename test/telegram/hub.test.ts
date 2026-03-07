@@ -113,6 +113,19 @@ describe('HubRenderer', () => {
       assert.ok(sentText.includes('idle'), 'running session should show idle execution state');
     });
 
+    it('shows "busy" execution state when execStateMap has busy for session', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'project-a', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'project-a');
+      hub.setExecState('project-a', 'busy');
+      await hub.render();
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(sentText.includes('busy'), 'should show busy execution state');
+      assert.ok(!sentText.includes('idle'), 'should not show idle when busy');
+    });
+
     it('shows "idle" for remote sessions (not "remote")', async () => {
       const api = createMockApi();
       const sm = createMockSessionManager([]);

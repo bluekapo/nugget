@@ -12,6 +12,12 @@ import { logError } from '../logging/logger.js';
 export class HubRenderer {
   private hubMessageId: number | null = null;
   private advancedMode = false;
+  private execStateMap: Map<string, 'busy' | 'idle'> = new Map();
+
+  /** Update the execution state for a session (busy = processing, idle = waiting for input). */
+  setExecState(sessionName: string, state: 'busy' | 'idle'): void {
+    this.execStateMap.set(sessionName, state);
+  }
 
   /** Toggle between normal and advanced view. */
   toggleAdvanced(): void {
@@ -80,7 +86,7 @@ export class HubRenderer {
     }
 
     const activeSession = this.getActiveSession();
-    const text = buildText(sessions, activeSession, this.advancedMode);
+    const text = buildText(sessions, activeSession, this.advancedMode, this.execStateMap);
     const keyboard = buildKeyboard(sessions, activeSession, this.advancedMode);
 
     if (this.hubMessageId === null) {
@@ -136,6 +142,7 @@ function buildText(
   sessions: Array<{ name: string; status: string; pid?: number | null; createdAt?: string }>,
   activeSession: string | null,
   advanced = false,
+  execStateMap: Map<string, 'busy' | 'idle'> = new Map(),
 ): string {
   if (sessions.length === 0) {
     return [
@@ -152,7 +159,9 @@ function buildText(
     const isViewing = s.name === activeSession;
     const prefix = isViewing ? '> ' : '   ';
     const viewState = isViewing ? 'viewing' : 'hidden';
-    const execState = (s.status === 'running' || s.status === 'remote') ? 'idle' : s.status;
+    const execState = (s.status === 'running' || s.status === 'remote')
+      ? (execStateMap.get(s.name) ?? 'idle')
+      : s.status;
     let line = `${prefix}<b>${s.name}</b> -- ${viewState} \u00B7 ${execState}`;
     if (advanced) {
       const pid = s.pid != null ? String(s.pid) : '?';

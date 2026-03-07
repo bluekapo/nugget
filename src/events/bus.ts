@@ -4,6 +4,7 @@ export interface BusEvents {
   'session:output': (sessionName: string, data: string) => void;
   'session:exit': (sessionName: string, exitCode: number) => void;
   'session:started': (sessionName: string) => void;
+  'session:exec-state': (sessionName: string, state: 'busy' | 'idle') => void;
 }
 
 export class EventBus {
