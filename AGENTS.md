@@ -6,7 +6,7 @@ A Node.js framework that spawns Claude Code inside Docker sandboxes via node-pty
 
 ## Stack
 
-- **Runtime**: Node.js 22, TypeScript (ESM)
+- **Runtime**: Node.js, TypeScript (ESM)
 - **Bot**: grammY (Telegram Bot API)
 - **Database**: SQLite (better-sqlite3)
 - **Terminal**: @xterm/headless (terminal emulation)

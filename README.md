@@ -28,7 +28,7 @@ Nugget is a Node.js framework that spawns Claude Code inside Docker sandboxes, m
 
 ## Prerequisites
 
-- Node.js >= 22
+- Node.js (LTS recommended)
 - A Telegram bot token (from [@BotFather](https://t.me/BotFather))
 - Your Telegram user ID (from [@userinfobot](https://t.me/userinfobot))
 - Docker (if running Claude Code in sandboxes)
@@ -122,7 +122,7 @@ npm run lint       # Lint with ESLint
 
 ## Stack
 
-- **Runtime:** Node.js 22, TypeScript (ESM)
+- **Runtime:** Node.js, TypeScript (ESM)
 - **Bot framework:** [grammY](https://grammy.dev/) (Telegram Bot API)
 - **Database:** SQLite via [better-sqlite3](https://github.com/WiseLibs/better-sqlite3)
 - **Terminal emulation:** [@xterm/headless](https://www.npmjs.com/package/@xterm/headless)

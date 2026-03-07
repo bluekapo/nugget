@@ -5,11 +5,20 @@ import { InlineKeyboard } from 'grammy';
 
 describe('InlineKeyboard', () => {
   describe('ACTION_BUTTONS', () => {
-    it('has scrollUp, scrollDown, clear, backspace keys', () => {
+    it('has scrollUp, scrollDown, clear, backspace, clearInput keys', () => {
       assert.ok('scrollUp' in ACTION_BUTTONS);
       assert.ok('scrollDown' in ACTION_BUTTONS);
       assert.ok('clear' in ACTION_BUTTONS);
       assert.ok('backspace' in ACTION_BUTTONS);
+      assert.ok('clearInput' in ACTION_BUTTONS);
+    });
+
+    it('clearInput.input is Ctrl+U', () => {
+      assert.equal(ACTION_BUTTONS.clearInput.input, '\x15');
+    });
+
+    it('clearInput.data is action:clear-input', () => {
+      assert.equal(ACTION_BUTTONS.clearInput.data, 'action:clear-input');
     });
 
     it('has arrowUp, arrowDown, enter keys', () => {
@@ -107,6 +116,26 @@ describe('InlineKeyboard', () => {
       const scrollDown = kb.inline_keyboard[0][2];
       assert.ok(!scrollUp.text.includes('\uD83D\uDD12'), 'scroll up should not include lock emoji when unlocked');
       assert.ok(!scrollDown.text.includes('\uD83D\uDD12'), 'scroll down should not include lock emoji when unlocked');
+    });
+
+    it('row 2 has 3 buttons: Clear-input, /clear, Enter', () => {
+      const kb = buildCLIKeyboard();
+      const row2 = kb.inline_keyboard[1];
+      assert.equal(row2.length, 3, 'row 2 should have 3 buttons');
+      assert.equal(row2[0].callback_data, 'action:clear-input', 'first button should be clear-input');
+      assert.equal(row2[1].callback_data, 'action:clear', 'second button should be /clear');
+      assert.equal(row2[2].callback_data, 'action:enter', 'third button should be enter');
+    });
+  });
+
+  describe('buildControlsKeyboard() row 2', () => {
+    it('row 2 has 3 buttons: Clear-input, /clear, Enter', () => {
+      const kb = buildControlsKeyboard();
+      const row2 = kb.inline_keyboard[1];
+      assert.equal(row2.length, 3, 'row 2 should have 3 buttons');
+      assert.equal(row2[0].callback_data, 'action:clear-input', 'first button should be clear-input');
+      assert.equal(row2[1].callback_data, 'action:clear', 'second button should be /clear');
+      assert.equal(row2[2].callback_data, 'action:enter', 'third button should be enter');
     });
   });
 

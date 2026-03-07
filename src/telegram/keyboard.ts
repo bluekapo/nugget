@@ -15,10 +15,11 @@ export const ACTION_BUTTONS = {
   arrowLeft:  { label: '\u2B05 Left',     data: 'action:arrow-left',  input: '\x1b[D' },
   arrowRight: { label: '\u27A1 Right',    data: 'action:arrow-right', input: '\x1b[C' },
   escape:     { label: '\u238B Esc',      data: 'action:escape',      input: '\x1b' },
+  clearInput: { label: '\u2716 Clear',   data: 'action:clear-input', input: '\x15' },
 } as const;
 
 /** Build an InlineKeyboard for CLI output messages (no Delete button).
- *  Row 1: Scroll Up / Lock toggle / Scroll Down, Row 2: /clear + Enter, Row 3: Up/Down/Bksp, Row 4: Left/Right/Esc.
+ *  Row 1: Scroll Up / Lock toggle / Scroll Down, Row 2: Clear-input + /clear + Enter, Row 3: Up/Down/Bksp, Row 4: Left/Right/Esc.
  *  Lock button shows current state: locked (auto-scroll on) or unlocked (manual scroll). */
 export function buildCLIKeyboard(locked = true): InlineKeyboard {
   const lockLabel = locked ? '\uD83D\uDD34\uD83D\uDD12' : '\uD83D\uDFE2\uD83D\uDD13';
@@ -29,6 +30,7 @@ export function buildCLIKeyboard(locked = true): InlineKeyboard {
     .text(lockLabel, 'action:scroll-lock')
     .text(scrollDownLabel, ACTION_BUTTONS.scrollDown.data)
     .row()
+    .text(ACTION_BUTTONS.clearInput.label, ACTION_BUTTONS.clearInput.data)
     .text(ACTION_BUTTONS.clear.label, ACTION_BUTTONS.clear.data)
     .text(ACTION_BUTTONS.enter.label, ACTION_BUTTONS.enter.data)
     .row()
@@ -42,7 +44,7 @@ export function buildCLIKeyboard(locked = true): InlineKeyboard {
 }
 
 /** Build an InlineKeyboard for /controls command (includes Delete button).
- *  Row 1: Scroll Up / Lock toggle / Scroll Down, Row 2: /clear + Enter, Row 3: Up/Down/Bksp, Row 4: Left/Right/Esc, Row 5: Delete.
+ *  Row 1: Scroll Up / Lock toggle / Scroll Down, Row 2: Clear-input + /clear + Enter, Row 3: Up/Down/Bksp, Row 4: Left/Right/Esc, Row 5: Delete.
  *  Lock button shows current state: locked (auto-scroll on) or unlocked (manual scroll). */
 export function buildControlsKeyboard(locked = true): InlineKeyboard {
   const lockLabel = locked ? '\uD83D\uDD34\uD83D\uDD12' : '\uD83D\uDFE2\uD83D\uDD13';
@@ -53,6 +55,7 @@ export function buildControlsKeyboard(locked = true): InlineKeyboard {
     .text(lockLabel, 'action:scroll-lock')
     .text(scrollDownLabel, ACTION_BUTTONS.scrollDown.data)
     .row()
+    .text(ACTION_BUTTONS.clearInput.label, ACTION_BUTTONS.clearInput.data)
     .text(ACTION_BUTTONS.clear.label, ACTION_BUTTONS.clear.data)
     .text(ACTION_BUTTONS.enter.label, ACTION_BUTTONS.enter.data)
     .row()
