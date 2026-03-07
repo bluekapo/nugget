@@ -27,6 +27,9 @@ import { MessageTracker } from './telegram/messages.js';
 import { TerminalEmulator } from './terminal/emulator.js';
 import { ScreenCapture } from './terminal/capture.js';
 import { TERMINAL_COLS, TERMINAL_ROWS } from './terminal/constants.js';
+import { AutomationHubRenderer } from './telegram/automation-hub.js';
+import { AutomationEngine } from './automation/engine.js';
+import type { EngineConfig } from './automation/engine.js';
 import { logInfo, logWarn, logError } from './logging/logger.js';
 import type { Bot } from 'grammy';
 import type Database from 'better-sqlite3';
@@ -143,6 +146,16 @@ async function startPrimary(
   // 11b. Create SettingsStore for user preferences (notifications, etc.)
   const settingsStore = new SettingsStore(db);
 
+  // 11c. Create AutomationHubRenderer with engine factory
+  const automationHub = new AutomationHubRenderer(
+    bot.api,
+    config.ownerId,
+    () => router.getAll(),
+    (engineConfig: EngineConfig, engineBus: EventBus) =>
+      new AutomationEngine(engineConfig, sessionManager, engineBus),
+    bus,
+  );
+
   // 12. Create SessionRouter with MessageTracker (onHubUpdate triggers hub re-render)
   const router = new SessionRouter(
     outputSink, bus, () => hubRenderer.render(), messageTracker,
@@ -234,6 +247,7 @@ async function startPrimary(
     sessionManager,
     () => router.activeSession,
     allowlist,
+    automationHub,
   );
 
   // 15b. Wrap writeToSession to support remote sessions + reset completion detection on input
@@ -251,14 +265,14 @@ async function startPrimary(
   // 16. Register Telegram commands and handlers (must be before bot.start)
   let shutdownFn: ((signal: string) => Promise<void>) | null = null;
   const ephemeralTracker = new EphemeralTracker(bot.api, config.ownerId);
-  registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore);
+  registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore, automationHub);
   bot.command('controls', async (ctx) => {
     const result = await ctx.reply('Session controls:', { reply_markup: buildControlsKeyboard() });
     await ephemeralTracker.track((result as { message_id: number }).message_id);
     try { await ctx.deleteMessage(); } catch { /* ignore */ }
   });
   bot.on('message:text', inputHandler.handler());
-  registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), screenCapture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { shutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); });
+  registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), screenCapture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { shutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, automationHub);
 
   // 17. Start bot long polling in background (do NOT await -- it blocks forever)
   bot.start({ onStart: () => logInfo('Telegram bot listening') });
@@ -350,7 +364,7 @@ async function startPrimary(
   }
 
   // 23. Graceful shutdown on SIGINT/SIGTERM
-  const shutdown = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, outputSink, screenCapture, emulator, cleanupStdin);
+  const shutdown = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, outputSink, screenCapture, emulator, cleanupStdin, automationHub);
   shutdownFn = shutdown;
 
   // 24. Auto-shutdown when the main session PTY exits AND no other sessions remain.
@@ -597,6 +611,16 @@ async function becomeNewPrimary(
 
     const settingsStore = new SettingsStore(db);
 
+    // Create AutomationHubRenderer for promoted primary
+    const promotedAutomationHub = new AutomationHubRenderer(
+      bot.api,
+      config.ownerId,
+      () => router.getAll(),
+      (engineConfig: EngineConfig, engineBus: EventBus) =>
+        new AutomationEngine(engineConfig, sessionManager, engineBus),
+      bus,
+    );
+
     const router = new SessionRouter(
       outputSink, bus, () => hubRenderer.render(), messageTracker,
       () => capture.resetBaseline(),
@@ -637,7 +661,7 @@ async function becomeNewPrimary(
 
     const allowlist = new CommandAllowlist(config.commandAllowlist);
     const inputHandler = new TelegramInputHandler(
-      sessionManager, () => router.activeSession, allowlist,
+      sessionManager, () => router.activeSession, allowlist, promotedAutomationHub,
     );
 
     const originalWrite = sessionManager.writeToSession.bind(sessionManager);
@@ -653,14 +677,14 @@ async function becomeNewPrimary(
 
     let promotedShutdownFn: ((signal: string) => Promise<void>) | null = null;
     const ephemeralTracker = new EphemeralTracker(bot.api, config.ownerId);
-    registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore);
+    registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore, promotedAutomationHub);
     bot.command('controls', async (ctx) => {
       const result = await ctx.reply('Session controls:', { reply_markup: buildControlsKeyboard() });
       await ephemeralTracker.track((result as { message_id: number }).message_id);
       try { await ctx.deleteMessage(); } catch { /* ignore */ }
     });
     bot.on('message:text', inputHandler.handler());
-    registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), capture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { promotedShutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); });
+    registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), capture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { promotedShutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, promotedAutomationHub);
 
     bus.on('session:exit', (name: string) => {
       const wasActive = router.activeSession === name;
@@ -706,7 +730,7 @@ async function becomeNewPrimary(
     bot.start({ onStart: () => logInfo('Promoted to primary -- Telegram bot listening') });
 
     // Set up graceful shutdown for the promoted primary
-    promotedShutdownFn = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, outputSink, capture, emulator);
+    promotedShutdownFn = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, outputSink, capture, emulator, undefined, promotedAutomationHub);
 
     logInfo('Promotion complete -- Telegram control restored.');
   } catch (err) {
@@ -842,6 +866,7 @@ function setupPrimaryShutdown(
   screenCapture: ScreenCapture,
   emulator: TerminalEmulator,
   cleanupStdin?: () => void,
+  automationHub?: { dispose(): void },
 ): (signal: string) => Promise<void> {
   let shuttingDown = false;
 
@@ -852,6 +877,13 @@ function setupPrimaryShutdown(
 
     // Restore stdin state before anything else
     cleanupStdin?.();
+
+    // Dispose automation hub before stopping sessions
+    try {
+      automationHub?.dispose();
+    } catch {
+      // Ignore -- best effort
+    }
 
     try {
       // Flush pending ScreenCapture debounce (synchronous -- fires onOutput callback)

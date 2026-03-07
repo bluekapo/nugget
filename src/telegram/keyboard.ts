@@ -84,6 +84,7 @@ export function registerCallbackHandlers(
   toggleAdvanced?: () => Promise<void>,
   onShutdown?: () => Promise<void>,
   deleteHub?: () => Promise<void>,
+  automationHub?: { handleCallback(data: string): Promise<string>; render(): Promise<void> },
 ): void {
   // Delete button -- removes the bot message it's attached to (no session required)
   bot.callbackQuery('action:delete', async (ctx) => {
@@ -187,6 +188,15 @@ export function registerCallbackHandlers(
     bot.callbackQuery('hub:advanced', async (ctx) => {
       await toggleAdvanced();
       await ctx.answerCallbackQuery();
+    });
+  }
+
+  // Automation hub callbacks
+  if (automationHub) {
+    bot.callbackQuery(/^auto:/, async (ctx) => {
+      const data = ctx.callbackQuery.data;
+      const text = await automationHub.handleCallback(data);
+      await ctx.answerCallbackQuery({ text });
     });
   }
 

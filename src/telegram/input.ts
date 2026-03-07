@@ -10,13 +10,18 @@ import type { CommandAllowlist } from '../security/allowlist.js';
 export class TelegramInputHandler {
   /** Commands registered with the bot that grammY should handle. */
   private static readonly BOT_COMMANDS = new Set([
-    'start', 'help', 'hub', 'controls', 'settings',
+    'start', 'help', 'hub', 'controls', 'settings', 'automate',
   ]);
 
   constructor(
     private sessionManager: SessionManager,
     private getActiveSession: () => string | null,
     private allowlist: CommandAllowlist,
+    private automationHub?: {
+      isAwaitingTaskInput(): boolean;
+      completeCreation(text: string): Promise<void>;
+      render(): Promise<void>;
+    },
   ) {}
 
   /** Returns a grammY middleware function for message:text events. */
@@ -33,6 +38,13 @@ export class TelegramInputHandler {
           return next(); // Let grammY handle this bot command
         }
         // Not a bot command — fall through to forward to PTY
+      }
+
+      // Intercept text input for automation hub task description
+      if (this.automationHub?.isAwaitingTaskInput()) {
+        await this.automationHub.completeCreation(text);
+        try { await ctx.deleteMessage(); } catch { /* ignore */ }
+        return;
       }
 
       const sessionName = this.getActiveSession();
