@@ -15,7 +15,7 @@ export const ACTION_BUTTONS = {
   arrowLeft:  { label: '\u2B05 Left',     data: 'action:arrow-left',  input: '\x1b[D' },
   arrowRight: { label: '\u27A1 Right',    data: 'action:arrow-right', input: '\x1b[C' },
   escape:     { label: '\u238B Esc',      data: 'action:escape',      input: '\x1b' },
-  clearInput: { label: '\u2716 Clear',   data: 'action:clear-input', input: '\x15' },
+  clearInput: { label: '\u2716 Clear',   data: 'action:clear-input', input: '\x05\x15' },
 } as const;
 
 /** Build an InlineKeyboard for CLI output messages (no Delete button).
