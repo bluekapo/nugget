@@ -8,6 +8,7 @@ function createMockOutputSink() {
   return {
     getCurrentState: mock.fn(() => null),
     restoreState: mock.fn((_state: { messageId: number; text: string }) => {}),
+    clearCurrent: mock.fn(() => {}),
   };
 }
 
