@@ -152,7 +152,11 @@ async function startPrimary(
     config.ownerId,
     () => router.getAll(),
     (engineConfig: EngineConfig, engineBus: EventBus) =>
-      new AutomationEngine(engineConfig, sessionManager, engineBus),
+      new AutomationEngine(
+        { ...engineConfig, maxCycles: settingsStore.getNumber('cycle_limit', 100) },
+        sessionManager,
+        engineBus,
+      ),
     bus,
   );
 
@@ -617,7 +621,11 @@ async function becomeNewPrimary(
       config.ownerId,
       () => router.getAll(),
       (engineConfig: EngineConfig, engineBus: EventBus) =>
-        new AutomationEngine(engineConfig, sessionManager, engineBus),
+        new AutomationEngine(
+          { ...engineConfig, maxCycles: settingsStore.getNumber('cycle_limit', 100) },
+          sessionManager,
+          engineBus,
+        ),
       bus,
     );
 
