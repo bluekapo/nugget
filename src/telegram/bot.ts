@@ -179,6 +179,7 @@ export async function createBot(token: string, ownerId: number): Promise<Bot> {
       { command: 'hub', description: 'Show sessions hub with controls' },
       { command: 'controls', description: 'Show session control buttons' },
       { command: 'settings', description: 'Notification settings' },
+      { command: 'automate', description: 'Automation hub' },
       { command: 'help', description: 'Command reference' },
     ]);
   } catch (err: unknown) {

@@ -292,6 +292,9 @@ export class AutomationEngine {
       return;
     }
 
+    // Explicit null guard for TypeScript narrowing (all null paths returned above)
+    if (!directive) return;
+
     // Handle based on directive type
     if (directive.type === 'SELECT') {
       // SELECT uses async arrow-down sequence with delays
