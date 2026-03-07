@@ -18,7 +18,7 @@ export function tokenHash(token: string): string {
 
 /** Get the lock file path for a given token. */
 function lockFilePath(token: string): string {
-  return join(tmpdir(), `ccr-bot-${tokenHash(token)}.lock`);
+  return join(tmpdir(), `nugget-bot-${tokenHash(token)}.lock`);
 }
 
 /** Check if a PID is alive. */
@@ -81,7 +81,7 @@ function acquireBotLock(token: string): void {
         if (timestamp === 0 || lockAge < LOCK_MAX_AGE_MS) {
           // PID alive and lock is fresh — real conflict
           throw new Error(
-            `Another ccr instance (PID ${pid}) is already polling this bot token. Only one instance can poll at a time.`,
+            `Another Nugget instance (PID ${pid}) is already polling this bot token. Only one instance can poll at a time.`,
           );
         }
         logWarn(
@@ -106,7 +106,7 @@ function acquireBotLock(token: string): void {
       if ((retryErr as NodeJS.ErrnoException).code === 'EEXIST') {
         // Another process beat us to it after stale cleanup — they won
         throw new Error(
-          'Another ccr instance acquired the bot lock during promotion race. Only one instance can poll at a time.',
+          'Another Nugget instance acquired the bot lock during promotion race. Only one instance can poll at a time.',
         );
       }
       throw retryErr;
@@ -238,7 +238,7 @@ export interface IpcCallbacks {
 
 /**
  * Start an IPC server on TCP localhost to handle spawn requests and
- * bidirectional session bridging from secondary ccr instances.
+ * bidirectional session bridging from secondary Nugget instances.
  *
  * Protocol (newline-delimited messages):
  *   spawn:<name>                  -- fire-and-forget session spawn (legacy)

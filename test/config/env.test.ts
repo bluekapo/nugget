@@ -63,13 +63,13 @@ describe('loadConfig', () => {
     assert.equal(config.dbPath, '/custom/path.db');
   });
 
-  it('uses default DB_PATH of "./data/ccr.db" when not set', () => {
+  it('uses default DB_PATH of "./data/nugget.db" when not set', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.OWNER_ID = '12345';
 
     const config = loadConfig();
 
-    assert.equal(config.dbPath, './data/ccr.db');
+    assert.equal(config.dbPath, './data/nugget.db');
   });
 
   it('returns commandAllowlist from COMMAND_ALLOWLIST env var', () => {

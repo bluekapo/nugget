@@ -1,4 +1,4 @@
-# Nugget — Claude Code Remote Access Framework
+# Nugget
 
 ## Project Overview
 
@@ -27,7 +27,7 @@ npm start          # node --env-file=.env dist/index.js
 
 ```
 src/
-├── cli/           # CLI entry point (ccr start)
+├── cli/           # CLI entry point (nugget start)
 ├── config/        # Environment config loader
 ├── db/            # SQLite schema, migrations, stores
 ├── events/        # EventBus for inter-module communication

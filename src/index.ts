@@ -880,7 +880,7 @@ function setupPrimaryShutdown(
     // Stop IPC server and clean up socket
     stopIpcServer(botToken);
 
-    // Release bot polling lock so another ccr instance can start
+    // Release bot polling lock so another Nugget instance can start
     releaseBotLock(botToken);
 
     try {

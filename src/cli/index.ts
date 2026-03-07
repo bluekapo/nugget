@@ -6,8 +6,8 @@ import { logInfo, logError } from '../logging/logger.js';
 const program = new Command();
 
 program
-  .name('ccr')
-  .description('Claude Code Remote Access Framework')
+  .name('nugget')
+  .description('Nugget — Run Claude Code sessions from Telegram')
   .version('0.1.0');
 
 program

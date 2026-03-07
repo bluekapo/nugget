@@ -1,10 +1,10 @@
 {
-  "name": "ccr",
+  "name": "nugget",
   "version": "0.1.0",
   "type": "module",
-  "description": "Claude Code Remote Access & Automation Framework",
+  "description": "Nugget — Run Claude Code sessions from Telegram",
   "bin": {
-    "ccr": "./dist/cli/index.js"
+    "nugget": "./dist/cli/index.js"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",

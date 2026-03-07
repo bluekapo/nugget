@@ -54,7 +54,7 @@ export function registerCommands(
   // /start - Welcome message and quick start guide
   bot.command('start', async (ctx) => {
     const welcome = [
-      '<b>Claude Code Remote</b>',
+      '<b>Nugget</b>',
       '',
       'Control your Claude Code sessions from Telegram.',
       '',

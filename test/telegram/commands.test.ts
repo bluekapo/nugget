@@ -95,7 +95,7 @@ describe('registerCommands', () => {
 
       assert.equal(ctx.replies.length, 1);
       const { text, opts } = ctx.replies[0];
-      assert.ok(text.includes('<b>Claude Code Remote</b>'), 'should contain bot name in bold');
+      assert.ok(text.includes('<b>Nugget</b>'), 'should contain bot name in bold');
       assert.ok(text.includes('Control your Claude Code sessions'), 'should contain description');
       assert.ok(text.includes('Quick start'), 'should contain quick start section');
       assert.ok(text.includes('/help'), 'should mention /help');
@@ -128,7 +128,7 @@ describe('registerCommands', () => {
       await startCmd.handler(ctx);
 
       assert.equal(ctx.replies.length, 1);
-      assert.ok(ctx.replies[0].text.includes('Claude Code Remote'));
+      assert.ok(ctx.replies[0].text.includes('Nugget'));
     });
   });
 

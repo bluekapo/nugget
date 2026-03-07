@@ -69,8 +69,8 @@ describe('CLI start command (SESS-01)', () => {
     const program = new Command();
 
     program
-      .name('ccr')
-      .description('Claude Code Remote Access Framework')
+      .name('nugget')
+      .description('Nugget — Run Claude Code sessions from Telegram')
       .version('0.1.0');
 
     program
@@ -149,7 +149,7 @@ describe('Graceful shutdown (SIGINT/SIGTERM)', () => {
     outputSink: { detach: () => void },
     signal: string,
   ): Promise<void> {
-    console.log(`\n[ccr] Received ${signal}, shutting down...`);
+    console.log(`\n[nugget] Received ${signal}, shutting down...`);
 
     try {
       outputSink.detach();
@@ -177,7 +177,7 @@ describe('Graceful shutdown (SIGINT/SIGTERM)', () => {
       // Ignore -- best effort
     }
 
-    console.log('[ccr] Shutdown complete');
+    console.log('[nugget] Shutdown complete');
   }
 
   it('shutdown calls outputSink.detach() to flush pending output', async () => {

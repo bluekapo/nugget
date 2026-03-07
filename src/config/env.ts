@@ -22,7 +22,7 @@ export function loadConfig(): AppConfig {
     throw new Error('OWNER_ID must be a number');
   }
 
-  const dbPath = process.env.DB_PATH ?? './data/ccr.db';
+  const dbPath = process.env.DB_PATH ?? './data/nugget.db';
 
   const commandAllowlist = process.env.COMMAND_ALLOWLIST;
 

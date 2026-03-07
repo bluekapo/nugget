@@ -1,14 +1,14 @@
 /**
- * File-based logger for ccr.
+ * File-based logger for Nugget.
  *
- * All [ccr] diagnostic output goes to a log file instead of stdout/stderr.
+ * All Nugget diagnostic output goes to a log file instead of stdout/stderr.
  * This prevents interleaving with PTY data that corrupts the terminal display.
  */
 
 import { appendFileSync } from 'fs';
 import { join } from 'path';
 
-const LOG_PATH = join(process.cwd(), 'ccr.log');
+const LOG_PATH = join(process.cwd(), 'nugget.log');
 
 function ts(): string {
   return new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm

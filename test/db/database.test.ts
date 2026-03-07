@@ -16,7 +16,7 @@ describe('openDatabase', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = join(tmpdir(), `ccr-test-${randomUUID()}`);
+    tempDir = join(tmpdir(), `nugget-test-${randomUUID()}`);
     dbPath = join(tempDir, 'test.db');
   });
 
@@ -55,7 +55,7 @@ describe('runMigrations', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = join(tmpdir(), `ccr-test-${randomUUID()}`);
+    tempDir = join(tmpdir(), `nugget-test-${randomUUID()}`);
     dbPath = join(tempDir, 'test.db');
   });
 
@@ -98,7 +98,7 @@ describe('SessionStore', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = join(tmpdir(), `ccr-test-${randomUUID()}`);
+    tempDir = join(tmpdir(), `nugget-test-${randomUUID()}`);
     const dbPath = join(tempDir, 'test.db');
     db = openDatabase(dbPath);
     runMigrations(db);
