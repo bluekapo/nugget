@@ -172,6 +172,50 @@ export function registerCommands(
       }
       await ctx.answerCallbackQuery({ text: `Notifications ${!current ? 'ON' : 'OFF'}` });
     });
+
+    // Cycle limit decrease: subtract 10, clamp to minimum 10
+    bot.callbackQuery('settings:cycle-limit-dec', async (ctx) => {
+      const current = settingsStore.getNumber('cycle_limit', 100);
+      const newValue = Math.max(10, current - 10);
+      settingsStore.setNumber('cycle_limit', newValue);
+      const { text, keyboard } = buildSettingsMessage(settingsStore);
+      try {
+        await ctx.editMessageText(text, {
+          parse_mode: 'HTML',
+          reply_markup: keyboard,
+        });
+      } catch (err) {
+        if (!isNotModifiedError(err)) {
+          logError('Settings editMessageText failed:', err);
+        }
+      }
+      await ctx.answerCallbackQuery({ text: `Cycle limit: ${newValue}` });
+    });
+
+    // Cycle limit increase: add 10, clamp to maximum 1000
+    bot.callbackQuery('settings:cycle-limit-inc', async (ctx) => {
+      const current = settingsStore.getNumber('cycle_limit', 100);
+      const newValue = Math.min(1000, current + 10);
+      settingsStore.setNumber('cycle_limit', newValue);
+      const { text, keyboard } = buildSettingsMessage(settingsStore);
+      try {
+        await ctx.editMessageText(text, {
+          parse_mode: 'HTML',
+          reply_markup: keyboard,
+        });
+      } catch (err) {
+        if (!isNotModifiedError(err)) {
+          logError('Settings editMessageText failed:', err);
+        }
+      }
+      await ctx.answerCallbackQuery({ text: `Cycle limit: ${newValue}` });
+    });
+
+    // Cycle limit noop: just show current value
+    bot.callbackQuery('settings:cycle-limit-noop', async (ctx) => {
+      const current = settingsStore.getNumber('cycle_limit', 100);
+      await ctx.answerCallbackQuery({ text: `Cycle limit: ${current}` });
+    });
   }
 
 }
@@ -197,10 +241,13 @@ function buildSettingsMessage(store: SettingsStore): {
     }
   }
 
+  const cycleLimit = store.getNumber('cycle_limit', 100);
+
   const text = [
     '<b>Settings</b>',
     '',
     `Notifications: <b>${enabled ? 'ON' : 'OFF'}</b>`,
+    `Cycle limit: <b>${cycleLimit}</b>`,
     `Last updated: ${lastUpdated}`,
   ].join('\n');
 
@@ -208,6 +255,11 @@ function buildSettingsMessage(store: SettingsStore): {
   const keyboard = {
     inline_keyboard: [
       [{ text: toggleLabel, callback_data: 'settings:toggle-notifications' }],
+      [
+        { text: '-10', callback_data: 'settings:cycle-limit-dec' },
+        { text: String(cycleLimit), callback_data: 'settings:cycle-limit-noop' },
+        { text: '+10', callback_data: 'settings:cycle-limit-inc' },
+      ],
       [{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }],
     ],
   };

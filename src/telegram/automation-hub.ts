@@ -37,6 +37,7 @@ export class AutomationHubRenderer {
   private stateChangeHandler: ((state: string) => void) | null = null;
   private cycleCompleteHandler: ((cycleNumber: number, action: string) => void) | null = null;
   private escalationHandler: ((reason: string) => void) | null = null;
+  private errorHandler: ((error: string) => void) | null = null;
 
   constructor(
     private readonly api: {
@@ -158,6 +159,11 @@ export class AutomationHubRenderer {
     }
 
     if (data === 'auto:stop' && this.activeAutomation) {
+      // Clean up error handler before stopping to prevent ghost notifications
+      if (this.errorHandler) {
+        this.bus.off('automation:error', this.errorHandler);
+        this.errorHandler = null;
+      }
       this.activeAutomation.engine.stop();
       this.activeAutomation = null;
       await this.render();
@@ -209,9 +215,19 @@ export class AutomationHubRenderer {
       this.render();
     };
 
+    this.errorHandler = (error: string) => {
+      // Send standalone notification (separate from hub message) so user gets a notification sound
+      this.api.sendMessage(this.chatId, `Automation stopped: ${error}`, {
+        parse_mode: 'HTML',
+      }).catch(() => {});
+      // Also re-render hub to show stopped state
+      this.render();
+    };
+
     this.bus.on('automation:state-change', this.stateChangeHandler);
     this.bus.on('automation:cycle-complete', this.cycleCompleteHandler);
     this.bus.on('automation:escalation', this.escalationHandler);
+    this.bus.on('automation:error', this.errorHandler);
 
     this.pendingCreation = null;
     engine.start();
@@ -243,6 +259,10 @@ export class AutomationHubRenderer {
     if (this.escalationHandler) {
       this.bus.off('automation:escalation', this.escalationHandler);
       this.escalationHandler = null;
+    }
+    if (this.errorHandler) {
+      this.bus.off('automation:error', this.errorHandler);
+      this.errorHandler = null;
     }
     if (this.activeAutomation) {
       this.activeAutomation.engine.stop();
