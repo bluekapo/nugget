@@ -154,13 +154,13 @@ export function registerCallbackHandlers(
       if (bridge) bridge.sendExit();
       router.removeRemote(name);
     } else {
-      // Local session: stop PTY then remove from router
+      // Local session: stop PTY — the session:exit bus handler in index.ts
+      // will call router.remove(name), so we do NOT call it here to avoid double-remove
       try {
         await sessionManager.stop(name);
       } catch {
         // Session may have already exited
       }
-      router.remove(name);
     }
     await ctx.answerCallbackQuery({ text: `Disconnected ${name}` });
 

@@ -213,7 +213,12 @@ async function startPrimary(
   // The hub is already rendered by router.switchTo() -> onHubUpdate().
   // Adding hubRenderer.render() here caused duplicate hub messages.
   bus.on('session:exit', (name: string) => {
+    const wasActive = router.activeSession === name;
     router.remove(name);
+    // Auto-switch to next available session if the killed one was active
+    if (wasActive && router.activeSession === null && router.getAll().length > 0) {
+      router.switchTo(router.getAll()[0]);
+    }
     hubRenderer.render();
   });
 
@@ -348,9 +353,10 @@ async function startPrimary(
   const shutdown = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, outputSink, screenCapture, emulator, cleanupStdin);
   shutdownFn = shutdown;
 
-  // 24. Auto-shutdown when the main session PTY exits (e.g. CTRL-C in sandbox)
+  // 24. Auto-shutdown when the main session PTY exits AND no other sessions remain.
+  // If other sessions still exist, the primary stays alive to serve them via Telegram.
   bus.on('session:exit', (name: string) => {
-    if (name === sessionName) {
+    if (name === sessionName && router.getAll().length === 0) {
       setTimeout(() => shutdown('session-exit'), 100);
     }
   });
@@ -657,7 +663,12 @@ async function becomeNewPrimary(
     registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), capture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { promotedShutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); });
 
     bus.on('session:exit', (name: string) => {
+      const wasActive = router.activeSession === name;
       router.remove(name);
+      // Auto-switch to next available session if the killed one was active
+      if (wasActive && router.activeSession === null && router.getAll().length > 0) {
+        router.switchTo(router.getAll()[0]);
+      }
       hubRenderer.render();
     });
 
