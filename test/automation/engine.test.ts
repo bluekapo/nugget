@@ -602,6 +602,59 @@ describe('AutomationEngine', () => {
 
     assert.equal(errors.length, 0, 'should not emit errors after stop cleans up listener');
   });
+
+  // ---------- Test 19: /clear without completion marker (requireMarker=false) ----------
+
+  it('full cycle completes when /clear produces no completion marker (requireMarker=false)', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const cycleEvents: Array<{ cycle: number; action: string }> = [];
+    bus.on('automation:cycle-complete', (cycle, action) => {
+      cycleEvents.push({ cycle, action });
+    });
+
+    engine.start();
+
+    // Step 1: Worker goes idle (with normal completion marker)
+    await emitOutput(bus, 'worker', completionOutput('$ npm test\nall tests passed'));
+    timer.advance(50);  // debounce fires capture
+    timer.advance(100); // idle fires onPromptComplete
+
+    assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator');
+
+    // Verify /clear was sent
+    const clearWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('/clear'));
+    assert.ok(clearWrite, 'engine should send /clear to orchestrator');
+
+    // Step 2: /clear produces NO completion marker -- just plain terminal text
+    await emitOutput(bus, 'orchestrator', 'Conversation cleared.\r\n');
+    timer.advance(50);  // debounce fires capture
+    timer.advance(100); // idle fires onPromptComplete (no marker needed due to requireMarker=false)
+
+    // Engine should have moved past clearing-orchestrator
+    assert.notEqual(engine.state, 'clearing-orchestrator',
+      'should transition past clearing-orchestrator even without completion marker');
+
+    // Verify prompt was sent to orchestrator
+    const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('## Task'));
+    assert.ok(promptWrite, 'engine should send prompt to orchestrator after /clear without marker');
+
+    // Step 3: Orchestrator responds with directive (normal completion marker)
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: npm test'));
+    timer.advance(50);
+    timer.advance(100);
+
+    // Verify command was written to worker
+    const cmdWrite = writes.find(w => w.name === 'worker' && w.data.includes('npm test'));
+    assert.ok(cmdWrite, 'engine should write command to worker');
+
+    // Verify cycle completed
+    assert.equal(cycleEvents.length, 1, 'should emit one cycle-complete event');
+    assert.equal(cycleEvents[0].cycle, 1, 'should be cycle 1');
+    assert.ok(cycleEvents[0].action.includes('COMMAND'), 'action should mention COMMAND');
+
+    // Engine should be back in idle, ready for next cycle
+    assert.equal(engine.state, 'idle', 'should return to idle after full cycle');
+  });
 });
 
 // ---------- SettingsStore numeric methods ----------
