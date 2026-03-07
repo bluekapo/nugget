@@ -558,6 +558,108 @@ describe('HubRenderer', () => {
     });
   });
 
+  describe('render serialization', () => {
+    /** Mock API with configurable delay on sendMessage to expose race conditions. */
+    function createSlowMockApi(sendDelayMs = 50) {
+      const calls: { method: string; args: unknown[] }[] = [];
+      let messageIdCounter = 100;
+      return {
+        async sendMessage(chatId: number, text: string, opts?: unknown) {
+          await new Promise(resolve => setTimeout(resolve, sendDelayMs));
+          const id = ++messageIdCounter;
+          calls.push({ method: 'sendMessage', args: [chatId, text, opts] });
+          return { message_id: id };
+        },
+        async editMessageText(chatId: number, messageId: number, text: string, opts?: unknown) {
+          calls.push({ method: 'editMessageText', args: [chatId, messageId, text, opts] });
+          return {};
+        },
+        async deleteMessage(chatId: number, messageId: number) {
+          calls.push({ method: 'deleteMessage', args: [chatId, messageId] });
+          return {};
+        },
+        calls,
+      };
+    }
+
+    it('concurrent render() calls with hubMessageId=null produce exactly 1 sendMessage', async () => {
+      const api = createSlowMockApi(30);
+      const sm = createMockSessionManager([
+        { name: 'test-session', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'test-session');
+
+      // Fire 3 render() calls concurrently -- all see hubMessageId=null initially
+      await Promise.all([hub.render(), hub.render(), hub.render()]);
+
+      const sendCalls = api.calls.filter(c => c.method === 'sendMessage');
+      const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+
+      assert.equal(sendCalls.length, 1, 'should have exactly 1 sendMessage call');
+      assert.equal(editCalls.length, 2, 'should have exactly 2 editMessageText calls');
+    });
+
+    it('sequential render() calls produce 1 send then edits', async () => {
+      const api = createSlowMockApi(10);
+      const sm = createMockSessionManager([
+        { name: 'test-session', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'test-session');
+
+      await hub.render();
+      await hub.render();
+      await hub.render();
+
+      const sendCalls = api.calls.filter(c => c.method === 'sendMessage');
+      const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+
+      assert.equal(sendCalls.length, 1, 'should have exactly 1 sendMessage call');
+      assert.equal(editCalls.length, 2, 'should have exactly 2 editMessageText calls');
+    });
+
+    it('forceNew still works correctly with serialization', async () => {
+      const api = createSlowMockApi(10);
+      const sm = createMockSessionManager([
+        { name: 'test-session', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'test-session');
+
+      await hub.render(); // initial send
+      await hub.render({ forceNew: true }); // delete + re-send
+
+      const sendCalls = api.calls.filter(c => c.method === 'sendMessage');
+      const deleteCalls = api.calls.filter(c => c.method === 'deleteMessage');
+
+      assert.equal(sendCalls.length, 2, 'forceNew should trigger a second sendMessage');
+      assert.equal(deleteCalls.length, 1, 'forceNew should delete old message');
+    });
+
+    it('if sendMessage fails, subsequent render() retries sendMessage', async () => {
+      let sendAttempts = 0;
+      const api = createSlowMockApi(10);
+      const originalSendMessage = api.sendMessage.bind(api);
+      api.sendMessage = async (chatId: number, text: string, opts?: unknown) => {
+        sendAttempts++;
+        if (sendAttempts === 1) {
+          api.calls.push({ method: 'sendMessage', args: [chatId, text, opts] });
+          throw new Error('Network error');
+        }
+        return originalSendMessage(chatId, text, opts);
+      };
+      const sm = createMockSessionManager([
+        { name: 'test-session', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'test-session');
+
+      await hub.render(); // fails
+      await hub.render(); // should retry sendMessage since hubMessageId is still null
+
+      const sendCalls = api.calls.filter(c => c.method === 'sendMessage');
+      assert.equal(sendCalls.length, 2, 'should retry sendMessage after failure (hubMessageId stays null)');
+      assert.equal(sendAttempts, 2, 'should have attempted sendMessage twice');
+    });
+  });
+
   describe('error helpers', () => {
     it('isNotModifiedError detects "not modified" in message', () => {
       assert.equal(isNotModifiedError(new Error('message is not modified')), true);
