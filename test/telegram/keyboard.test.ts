@@ -13,8 +13,8 @@ describe('InlineKeyboard', () => {
       assert.ok('clearInput' in ACTION_BUTTONS);
     });
 
-    it('clearInput.input is Ctrl+E then Ctrl+U (end-of-line + kill-line)', () => {
-      assert.equal(ACTION_BUTTONS.clearInput.input, '\x05\x15');
+    it('clearInput.input is Escape (clears input in Claude Code TUI)', () => {
+      assert.equal(ACTION_BUTTONS.clearInput.input, '\x1b');
     });
 
     it('clearInput.data is action:clear-input', () => {
