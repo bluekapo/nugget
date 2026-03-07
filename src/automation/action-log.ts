@@ -1,23 +1,32 @@
 import type { ActionEntry } from './types.js';
 
 export class ActionLog {
-  constructor(maxEntries?: number) {
-    // stub
+  private entries: ActionEntry[] = [];
+  private readonly maxEntries: number;
+
+  constructor(maxEntries: number = 20) {
+    this.maxEntries = maxEntries;
   }
 
   add(action: string, outcome: string): void {
-    // stub
+    this.entries.push({ action, outcome, timestamp: Date.now() });
+    if (this.entries.length > this.maxEntries) {
+      this.entries = this.entries.slice(-this.maxEntries);
+    }
   }
 
   getRecent(limit?: number): ActionEntry[] {
-    return [];
+    if (limit !== undefined) {
+      return this.entries.slice(-limit);
+    }
+    return this.entries.slice();
   }
 
   get length(): number {
-    return 0;
+    return this.entries.length;
   }
 
   clear(): void {
-    // stub
+    this.entries = [];
   }
 }
