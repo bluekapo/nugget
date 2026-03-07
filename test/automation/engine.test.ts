@@ -662,6 +662,7 @@ describe('AutomationEngine', () => {
   // ---------- Test 21: /clear without completion marker (requireMarker=false) ----------
 
   it('full cycle completes when /clear produces no completion marker (requireMarker=false)', async () => {
+
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const cycleEvents: Array<{ cycle: number; action: string }> = [];
     bus.on('automation:cycle-complete', (cycle, action) => {
@@ -710,6 +711,35 @@ describe('AutomationEngine', () => {
 
     // Engine should be back in idle, ready for next cycle
     assert.equal(engine.state, 'idle', 'should return to idle after full cycle');
+  });
+
+  // ---------- Test 22: (no content) split across PTY chunks ----------
+
+  it('/clear with (no content) split across two PTY chunks transitions past clearing-orchestrator', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+
+    engine.start();
+
+    // Worker goes idle
+    await emitOutput(bus, 'worker', completionOutput('$ npm test\nall tests passed'));
+    timer.advance(50);
+    timer.advance(100);
+
+    assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator');
+
+    // /clear produces "(no content)" split across two PTY chunks
+    await emitOutput(bus, 'orchestrator', '> /clear\r\n\r\n  \u23BF  (no ');
+    await flush();
+    await emitOutput(bus, 'orchestrator', 'content)\r\n');
+    await flush();
+
+    // Fire the deferred setTimeout(0)
+    timer.advance(1);
+
+    assert.notEqual(engine.state, 'clearing-orchestrator',
+      'should transition past clearing-orchestrator when (no content) is split across chunks');
+    assert.equal(engine.state, 'waiting-response',
+      'should have sent prompt and be waiting for response');
   });
 });
 
