@@ -250,7 +250,7 @@ describe('AutomationHubRenderer', () => {
     it('render with paused automation shows resume/stop buttons instead of pause/stop', async () => {
       const api = createMockApi();
       const bus = new EventBus();
-      const mockEng = createMockEngine('paused');
+      const mockEng = createMockEngine('idle');
       const { hub } = createHub(api, {
         sessions: ['w', 'o'],
         engineFactory: () => mockEng as any,
@@ -262,6 +262,8 @@ describe('AutomationHubRenderer', () => {
       await hub.handleCallback('auto:w:w');
       await hub.handleCallback('auto:o:o');
       await hub.completeCreation('fix bugs');
+      // Simulate engine being paused after creation
+      mockEng.state = 'paused';
       api.calls.length = 0;
 
       await hub.render();
