@@ -603,7 +603,63 @@ describe('AutomationEngine', () => {
     assert.equal(errors.length, 0, 'should not emit errors after stop cleans up listener');
   });
 
-  // ---------- Test 19: /clear without completion marker (requireMarker=false) ----------
+  // ---------- Test 19: /clear with (no content) triggers immediate clear completion ----------
+
+  it('/clear with (no content) response completes immediately without idle delay', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+
+    engine.start();
+
+    // Worker goes idle
+    await emitOutput(bus, 'worker', completionOutput('$ npm test\nall tests passed'));
+    timer.advance(50);
+    timer.advance(100);
+
+    assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator');
+
+    // /clear produces "(no content)" -- the actual Claude Code response
+    await emitOutput(bus, 'orchestrator', '> /clear\r\n\r\n  \u23BF  (no content)\r\n');
+
+    // Should complete immediately (after microtask flush) without needing idle delay
+    timer.advance(1); // just fire the deferred setTimeout(0)
+
+    assert.notEqual(engine.state, 'clearing-orchestrator',
+      'should transition past clearing-orchestrator immediately on (no content)');
+    // prompting-orchestrator is transient — onClearComplete() synchronously
+    // progresses to waiting-response after sending the prompt
+    assert.equal(engine.state, 'waiting-response',
+      'should have sent prompt and be waiting for response');
+
+    // Verify prompt was sent
+    const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('## Task'));
+    assert.ok(promptWrite, 'engine should send prompt after immediate clear detection');
+  });
+
+  // ---------- Test 20: /clear with spinner character still completes ----------
+
+  it('/clear response with spinner character completes via idle detection', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+
+    engine.start();
+
+    // Worker goes idle
+    await emitOutput(bus, 'worker', completionOutput('data'));
+    timer.advance(50);
+    timer.advance(100);
+
+    assert.equal(engine.state, 'clearing-orchestrator');
+
+    // /clear response includes ✻ (spinner) but NOT a completion marker
+    // This previously caused the spinner guard to block onPromptComplete
+    await emitOutput(bus, 'orchestrator', 'Conversation cleared.\r\n\u273B\r\n');
+    timer.advance(50);  // debounce
+    timer.advance(100); // idle -> should fire despite spinner (requireMarker=false)
+
+    assert.notEqual(engine.state, 'clearing-orchestrator',
+      'should transition past clearing-orchestrator even with spinner in output');
+  });
+
+  // ---------- Test 21: /clear without completion marker (requireMarker=false) ----------
 
   it('full cycle completes when /clear produces no completion marker (requireMarker=false)', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);

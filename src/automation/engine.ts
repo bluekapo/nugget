@@ -117,6 +117,12 @@ export class AutomationEngine {
         this.workerMonitor.capture.onData(data);
       } else if (sessionName === this.config.orchestratorSession && this.orchestratorMonitor) {
         this.orchestratorMonitor.capture.onData(data);
+
+        // Fast /clear completion: "(no content)" in raw PTY data means /clear succeeded.
+        // Skip idle delay and proceed immediately.
+        if (this._state === 'clearing-orchestrator' && data.includes('(no content)')) {
+          this.timer.setTimeout(() => this.onClearComplete(), 0);
+        }
       }
     };
     this.bus.on('session:output', this.sessionOutputHandler);
@@ -245,7 +251,7 @@ export class AutomationEngine {
   }
 
   private onClearComplete(): void {
-    if (this._state === 'paused' || this._state === 'stopped') return;
+    if (this._state !== 'clearing-orchestrator') return;
 
     this.setState('prompting-orchestrator');
 

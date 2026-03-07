@@ -393,8 +393,10 @@ export class ScreenCapture {
         (line) => line.includes('\u273B') && !/\u273B .+ for (?:\d+m )?\d+s/.test(line),
       );
 
-      if (hasActiveSpinner) {
+      if (hasActiveSpinner && this.requireMarker) {
         // Agents still running — reset and wait for next "Crunched for"
+        // Skip this guard when requireMarker=false (e.g. /clear), where ✻
+        // is just the normal Claude Code prompt indicator, not an active spinner.
         this.crunched = false;
         return;
       }
