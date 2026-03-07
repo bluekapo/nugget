@@ -22,6 +22,14 @@ import { buildPrompt } from './prompt-builder.js';
 import { executeDirective } from './action-executor.js';
 import { ActionLog } from './action-log.js';
 
+const RETRY_PROMPT = 'Your previous response could not be parsed as a valid directive. '
+  + 'Please respond with exactly ONE of the following formats:\n'
+  + '- COMMAND: <shell command>\n'
+  + '- SELECT: <number>\n'
+  + '- ENTER\n'
+  + '- WAIT: <seconds>\n'
+  + '- ESCALATE: <reason>';
+
 export type EngineState =
   | 'stopped'
   | 'idle'
@@ -41,6 +49,7 @@ export interface EngineConfig {
   baseDelay?: number;
   idleDelay?: number;
   arrowKeyDelayMs?: number;
+  maxCycles?: number;
 }
 
 interface SessionMonitor {
@@ -62,6 +71,9 @@ export class AutomationEngine {
   private workerScreenText = '';
   private waitTimer: unknown = null;
   private sessionOutputHandler: ((sessionName: string, data: string) => void) | null = null;
+  private retryAttempted = false;
+  private readonly maxCycles: number;
+  private sessionExitHandler: ((name: string, exitCode: number) => void) | null = null;
 
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
@@ -81,6 +93,7 @@ export class AutomationEngine {
     this.baseDelay = config.baseDelay ?? 150;
     this.idleDelay = config.idleDelay ?? 5000;
     this.arrowKeyDelayMs = config.arrowKeyDelayMs ?? 50;
+    this.maxCycles = config.maxCycles ?? 100;
   }
 
   get state(): EngineState {
@@ -109,12 +122,27 @@ export class AutomationEngine {
     this.bus.on('session:output', this.sessionOutputHandler);
 
     this.setState('idle');
+
+    // SAF-03: Listen for session disconnect
+    this.sessionExitHandler = (name: string, _exitCode: number) => {
+      if (this._state === 'stopped') return;
+      if (name === this.config.workerSession || name === this.config.orchestratorSession) {
+        const role = name === this.config.workerSession ? 'Worker' : 'Orchestrator';
+        this.bus.emit('automation:error', `${role} session "${name}" disconnected`);
+        this.stop();
+      }
+    };
+    this.bus.on('session:exit', this.sessionExitHandler);
   }
 
   stop(): void {
     if (this._state === 'stopped') return;
 
-    // Remove bus listener
+    // Remove bus listeners
+    if (this.sessionExitHandler) {
+      this.bus.off('session:exit', this.sessionExitHandler);
+      this.sessionExitHandler = null;
+    }
     if (this.sessionOutputHandler) {
       this.bus.off('session:output', this.sessionOutputHandler);
       this.sessionOutputHandler = null;
@@ -173,6 +201,16 @@ export class AutomationEngine {
   private onWorkerIdle(): void {
     if (this._state === 'paused' || this._state === 'stopped') return;
 
+    // SAF-01: Cycle limit guard
+    if (this.cycleNumber >= this.maxCycles) {
+      this.bus.emit('automation:error', `Cycle limit reached (${this.maxCycles})`);
+      this.stop();
+      return;
+    }
+
+    // SAF-02: Reset retry flag each cycle
+    this.retryAttempted = false;
+
     this.setState('capturing-worker');
 
     // Capture worker screen text
@@ -229,9 +267,28 @@ export class AutomationEngine {
     const orchestratorScreen = this.orchestratorMonitor?.emulator.getScreenText() ?? '';
     const directive = parseDirective(orchestratorScreen);
 
-    if (!directive) {
-      this.bus.emit('automation:error', 'Failed to parse directive from orchestrator response');
-      this.setState('idle');
+    // SAF-02: Parse retry logic
+    if (!directive && !this.retryAttempted) {
+      this.retryAttempted = true;
+      this.bus.emit('automation:error', 'Failed to parse directive from orchestrator response, retrying');
+
+      // Send clarifying re-prompt directly (no /clear)
+      this.sessionManager.writeToSession(this.config.orchestratorSession, RETRY_PROMPT + '\r');
+
+      // Reset orchestrator monitor and wait for retry response
+      if (this.orchestratorMonitor) {
+        this.orchestratorMonitor.capture.resetBaseline();
+        this.orchestratorMonitor.capture.markInputSent();
+        this.orchestratorMonitor.capture.onPromptComplete = () => this.onResponseReady();
+      }
+      this.setState('waiting-response');
+      return;
+    }
+
+    if (!directive && this.retryAttempted) {
+      this.actionLog.add('PARSE_FAILURE', orchestratorScreen.slice(0, 200));
+      this.bus.emit('automation:escalation', 'Failed to parse orchestrator response after retry');
+      this.setState('paused');
       return;
     }
 
