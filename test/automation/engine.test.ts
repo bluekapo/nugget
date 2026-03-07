@@ -386,4 +386,239 @@ describe('AutomationEngine', () => {
     assert.equal(arrowDowns.length, 2, 'should send 2 arrow-down keys for SELECT: 3');
     assert.ok(enters.length >= 1, 'should send Enter after arrow-downs');
   });
+
+  // ---------- Test 11: SAF-01 Cycle limit stops engine ----------
+
+  it('SAF-01: engine stops when cycleNumber reaches maxCycles', async () => {
+    config.maxCycles = 2;
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const errors: string[] = [];
+    bus.on('automation:error', (err) => errors.push(err));
+
+    engine.start();
+
+    // Complete cycle 1
+    await emitOutput(bus, 'worker', completionOutput('cycle 1'));
+    timer.advance(50); timer.advance(100);
+    await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
+    timer.advance(50); timer.advance(100);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo 1'));
+    timer.advance(50); timer.advance(100);
+
+    assert.equal(engine.state, 'idle', 'should be idle after cycle 1');
+
+    // Complete cycle 2
+    await emitOutput(bus, 'worker', completionOutput('cycle 2'));
+    timer.advance(50); timer.advance(100);
+    await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
+    timer.advance(50); timer.advance(100);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo 2'));
+    timer.advance(50); timer.advance(100);
+
+    assert.equal(engine.state, 'idle', 'should be idle after cycle 2');
+
+    // Cycle 3 attempt: worker goes idle but engine should hit cycle limit
+    await emitOutput(bus, 'worker', completionOutput('cycle 3'));
+    timer.advance(50); timer.advance(100);
+
+    assert.equal(engine.state, 'stopped', 'should be stopped after hitting cycle limit');
+    assert.ok(errors.some(e => e.includes('Cycle limit')), 'should emit automation:error with Cycle limit message');
+  });
+
+  // ---------- Test 12: SAF-01 with maxCycles=3 ----------
+
+  it('SAF-01: engine with maxCycles=3 stops after 3 cycles and emits error', async () => {
+    config.maxCycles = 3;
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const errors: string[] = [];
+    const cycles: number[] = [];
+    bus.on('automation:error', (err) => errors.push(err));
+    bus.on('automation:cycle-complete', (cycle) => cycles.push(cycle));
+
+    engine.start();
+
+    // Run 3 complete cycles
+    for (let i = 1; i <= 3; i++) {
+      await emitOutput(bus, 'worker', completionOutput(`cycle ${i}`));
+      timer.advance(50); timer.advance(100);
+      await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
+      timer.advance(50); timer.advance(100);
+      await emitOutput(bus, 'orchestrator', directiveOutput(`COMMAND: echo ${i}`));
+      timer.advance(50); timer.advance(100);
+    }
+
+    assert.equal(cycles.length, 3, 'should complete exactly 3 cycles');
+
+    // Cycle 4 attempt: hits limit
+    await emitOutput(bus, 'worker', completionOutput('cycle 4'));
+    timer.advance(50); timer.advance(100);
+
+    assert.equal(engine.state, 'stopped', 'should be stopped after hitting cycle limit');
+    assert.ok(errors.some(e => e.includes('Cycle limit')), 'should emit automation:error with Cycle limit');
+  });
+
+  // ---------- Test 13: SAF-02 Parse retry on first failure ----------
+
+  it('SAF-02: engine retries once with clarifying re-prompt when directive parse fails', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const errors: string[] = [];
+    bus.on('automation:error', (err) => errors.push(err));
+
+    engine.start();
+
+    // Worker idle -> clear -> prompt
+    await emitOutput(bus, 'worker', completionOutput('data'));
+    timer.advance(50); timer.advance(100);
+    await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
+    timer.advance(50); timer.advance(100);
+
+    // Orchestrator responds with unparseable text
+    await emitOutput(bus, 'orchestrator', directiveOutput('I think we should run tests'));
+    timer.advance(50); timer.advance(100);
+
+    // Engine should be in waiting-response (retrying), not idle or stopped
+    assert.equal(engine.state, 'waiting-response', 'should be waiting for retry response');
+
+    // Verify a clarifying re-prompt was sent to orchestrator
+    const retryWrites = writes.filter(w => w.name === 'orchestrator' && w.data.includes('could not be parsed'));
+    assert.ok(retryWrites.length >= 1, 'should send clarifying re-prompt to orchestrator');
+  });
+
+  // ---------- Test 14: SAF-02 ESCALATE after retry also fails ----------
+
+  it('SAF-02: engine ESCALATEs when retry also fails to parse', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const escalations: string[] = [];
+    bus.on('automation:escalation', (reason) => escalations.push(reason));
+
+    engine.start();
+
+    // Worker idle -> clear -> prompt
+    await emitOutput(bus, 'worker', completionOutput('data'));
+    timer.advance(50); timer.advance(100);
+    await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
+    timer.advance(50); timer.advance(100);
+
+    // First unparseable response -> triggers retry
+    await emitOutput(bus, 'orchestrator', directiveOutput('I think we should run tests'));
+    timer.advance(50); timer.advance(100);
+
+    assert.equal(engine.state, 'waiting-response', 'should be waiting for retry response');
+
+    // Second unparseable response -> should ESCALATE
+    await emitOutput(bus, 'orchestrator', directiveOutput('Hmm let me think about that'));
+    timer.advance(50); timer.advance(100);
+
+    assert.equal(engine.state, 'paused', 'should be paused after double parse failure');
+    assert.ok(escalations.some(e => e.includes('parse')), 'should emit escalation about parse failure');
+  });
+
+  // ---------- Test 15: SAF-03 Worker session disconnect ----------
+
+  it('SAF-03: engine stops when worker session:exit fires during automation', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const errors: string[] = [];
+    bus.on('automation:error', (err) => errors.push(err));
+
+    engine.start();
+    assert.equal(engine.state, 'idle');
+
+    // Worker session exits
+    bus.emit('session:exit', 'worker', 1);
+
+    assert.equal(engine.state, 'stopped', 'should stop on worker session exit');
+    assert.ok(errors.some(e => e.includes('Worker') && e.includes('disconnected')), 'should emit error about Worker disconnect');
+  });
+
+  // ---------- Test 16: SAF-03 Orchestrator session disconnect ----------
+
+  it('SAF-03: engine stops when orchestrator session:exit fires during automation', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const errors: string[] = [];
+    bus.on('automation:error', (err) => errors.push(err));
+
+    engine.start();
+    assert.equal(engine.state, 'idle');
+
+    // Orchestrator session exits
+    bus.emit('session:exit', 'orchestrator', 0);
+
+    assert.equal(engine.state, 'stopped', 'should stop on orchestrator session exit');
+    assert.ok(errors.some(e => e.includes('Orchestrator') && e.includes('disconnected')), 'should emit error about Orchestrator disconnect');
+  });
+
+  // ---------- Test 17: SAF-03 Ignores unrelated session:exit ----------
+
+  it('SAF-03: engine ignores session:exit for unrelated sessions', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const errors: string[] = [];
+    bus.on('automation:error', (err) => errors.push(err));
+
+    engine.start();
+    assert.equal(engine.state, 'idle');
+
+    // Unrelated session exits
+    bus.emit('session:exit', 'unrelated-session', 0);
+
+    assert.equal(engine.state, 'idle', 'should remain idle when unrelated session exits');
+    assert.equal(errors.length, 0, 'should not emit any errors for unrelated session');
+  });
+
+  // ---------- Test 18: SAF-03 session:exit listener cleaned up on stop ----------
+
+  it('SAF-03: session:exit listener is cleaned up on stop()', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const errors: string[] = [];
+    bus.on('automation:error', (err) => errors.push(err));
+
+    engine.start();
+    engine.stop();
+
+    // Emit session:exit after stop -- should NOT trigger error
+    bus.emit('session:exit', 'worker', 1);
+
+    assert.equal(errors.length, 0, 'should not emit errors after stop cleans up listener');
+  });
+});
+
+// ---------- SettingsStore numeric methods ----------
+
+import Database from 'better-sqlite3';
+import { SettingsStore } from '../../src/db/settings-store.js';
+
+describe('SettingsStore numeric methods', () => {
+  let db: Database.Database;
+  let store: SettingsStore;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+    store = new SettingsStore(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('getNumber returns default when key not found', () => {
+    assert.equal(store.getNumber('nonexistent', 42), 42);
+  });
+
+  it('getNumber returns stored number after setNumber', () => {
+    store.setNumber('maxCycles', 200);
+    assert.equal(store.getNumber('maxCycles', 100), 200);
+  });
+
+  it('getNumber returns default when stored value is not a number', () => {
+    // Store a non-numeric string using the boolean set method
+    store.set('badValue', true);
+    // 'true' is not a valid number, so getNumber should return default
+    assert.equal(store.getNumber('badValue', 50), 50);
+  });
 });
