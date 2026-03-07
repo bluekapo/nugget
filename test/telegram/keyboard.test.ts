@@ -78,6 +78,20 @@ describe('InlineKeyboard', () => {
       assert.equal(lastRow.length, 1, 'last row should have exactly one button');
       assert.equal(lastRow[0].callback_data, 'action:delete', 'last button should be action:delete');
     });
+
+    it('row 3 has Esc, Up, Bksp and row 4 has Left, Down, Right (before Delete)', () => {
+      const kb = buildControlsKeyboard();
+      const row3 = kb.inline_keyboard[2];
+      assert.equal(row3.length, 3);
+      assert.equal(row3[0].callback_data, 'action:escape');
+      assert.equal(row3[1].callback_data, 'action:arrow-up');
+      assert.equal(row3[2].callback_data, 'action:backspace');
+      const row4 = kb.inline_keyboard[3];
+      assert.equal(row4.length, 3);
+      assert.equal(row4[0].callback_data, 'action:arrow-left');
+      assert.equal(row4[1].callback_data, 'action:arrow-down');
+      assert.equal(row4[2].callback_data, 'action:arrow-right');
+    });
   });
 
   describe('buildCLIKeyboard()', () => {
@@ -125,6 +139,20 @@ describe('InlineKeyboard', () => {
       assert.equal(row2[0].callback_data, 'action:clear-input', 'first button should be clear-input');
       assert.equal(row2[1].callback_data, 'action:clear', 'second button should be /clear');
       assert.equal(row2[2].callback_data, 'action:enter', 'third button should be enter');
+    });
+
+    it('row 3 has Esc, Up, Bksp and row 4 has Left, Down, Right', () => {
+      const kb = buildCLIKeyboard();
+      const row3 = kb.inline_keyboard[2];
+      assert.equal(row3.length, 3);
+      assert.equal(row3[0].callback_data, 'action:escape');
+      assert.equal(row3[1].callback_data, 'action:arrow-up');
+      assert.equal(row3[2].callback_data, 'action:backspace');
+      const row4 = kb.inline_keyboard[3];
+      assert.equal(row4.length, 3);
+      assert.equal(row4[0].callback_data, 'action:arrow-left');
+      assert.equal(row4[1].callback_data, 'action:arrow-down');
+      assert.equal(row4[2].callback_data, 'action:arrow-right');
     });
   });
 

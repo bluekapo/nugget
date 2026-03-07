@@ -19,7 +19,7 @@ export const ACTION_BUTTONS = {
 } as const;
 
 /** Build an InlineKeyboard for CLI output messages (no Delete button).
- *  Row 1: Scroll Up / Lock toggle / Scroll Down, Row 2: Clear-input + /clear + Enter, Row 3: Up/Down/Bksp, Row 4: Left/Right/Esc.
+ *  Row 1: Scroll Up / Lock toggle / Scroll Down, Row 2: Clear-input + /clear + Enter, Row 3: Esc/Up/Bksp, Row 4: Left/Down/Right.
  *  Lock button shows current state: locked (auto-scroll on) or unlocked (manual scroll). */
 export function buildCLIKeyboard(locked = true): InlineKeyboard {
   const lockLabel = locked ? '\uD83D\uDD34\uD83D\uDD12' : '\uD83D\uDFE2\uD83D\uDD13';
@@ -34,17 +34,17 @@ export function buildCLIKeyboard(locked = true): InlineKeyboard {
     .text(ACTION_BUTTONS.clear.label, ACTION_BUTTONS.clear.data)
     .text(ACTION_BUTTONS.enter.label, ACTION_BUTTONS.enter.data)
     .row()
+    .text(ACTION_BUTTONS.escape.label, ACTION_BUTTONS.escape.data)
     .text(ACTION_BUTTONS.arrowUp.label, ACTION_BUTTONS.arrowUp.data)
-    .text(ACTION_BUTTONS.arrowDown.label, ACTION_BUTTONS.arrowDown.data)
     .text(ACTION_BUTTONS.backspace.label, ACTION_BUTTONS.backspace.data)
     .row()
     .text(ACTION_BUTTONS.arrowLeft.label, ACTION_BUTTONS.arrowLeft.data)
-    .text(ACTION_BUTTONS.arrowRight.label, ACTION_BUTTONS.arrowRight.data)
-    .text(ACTION_BUTTONS.escape.label, ACTION_BUTTONS.escape.data);
+    .text(ACTION_BUTTONS.arrowDown.label, ACTION_BUTTONS.arrowDown.data)
+    .text(ACTION_BUTTONS.arrowRight.label, ACTION_BUTTONS.arrowRight.data);
 }
 
 /** Build an InlineKeyboard for /controls command (includes Delete button).
- *  Row 1: Scroll Up / Lock toggle / Scroll Down, Row 2: Clear-input + /clear + Enter, Row 3: Up/Down/Bksp, Row 4: Left/Right/Esc, Row 5: Delete.
+ *  Row 1: Scroll Up / Lock toggle / Scroll Down, Row 2: Clear-input + /clear + Enter, Row 3: Esc/Up/Bksp, Row 4: Left/Down/Right, Row 5: Delete.
  *  Lock button shows current state: locked (auto-scroll on) or unlocked (manual scroll). */
 export function buildControlsKeyboard(locked = true): InlineKeyboard {
   const lockLabel = locked ? '\uD83D\uDD34\uD83D\uDD12' : '\uD83D\uDFE2\uD83D\uDD13';
@@ -59,13 +59,13 @@ export function buildControlsKeyboard(locked = true): InlineKeyboard {
     .text(ACTION_BUTTONS.clear.label, ACTION_BUTTONS.clear.data)
     .text(ACTION_BUTTONS.enter.label, ACTION_BUTTONS.enter.data)
     .row()
+    .text(ACTION_BUTTONS.escape.label, ACTION_BUTTONS.escape.data)
     .text(ACTION_BUTTONS.arrowUp.label, ACTION_BUTTONS.arrowUp.data)
-    .text(ACTION_BUTTONS.arrowDown.label, ACTION_BUTTONS.arrowDown.data)
     .text(ACTION_BUTTONS.backspace.label, ACTION_BUTTONS.backspace.data)
     .row()
     .text(ACTION_BUTTONS.arrowLeft.label, ACTION_BUTTONS.arrowLeft.data)
+    .text(ACTION_BUTTONS.arrowDown.label, ACTION_BUTTONS.arrowDown.data)
     .text(ACTION_BUTTONS.arrowRight.label, ACTION_BUTTONS.arrowRight.data)
-    .text(ACTION_BUTTONS.escape.label, ACTION_BUTTONS.escape.data)
     .row()
     .text('🗑 Delete', 'action:delete');
 }
