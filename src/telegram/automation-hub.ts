@@ -333,17 +333,17 @@ export class AutomationHubRenderer {
       const engineState = this.activeAutomation.engine.state;
       if (engineState === 'paused') {
         keyboard.push([
-          { text: 'Resume', callback_data: 'auto:resume' },
-          { text: 'Stop', callback_data: 'auto:stop' },
+          { text: '\u25B6\uFE0F Resume', callback_data: 'auto:resume' },
+          { text: '\uD83D\uDED1 Stop', callback_data: 'auto:stop' },
         ]);
       } else {
         keyboard.push([
-          { text: 'Pause', callback_data: 'auto:pause' },
-          { text: 'Stop', callback_data: 'auto:stop' },
+          { text: '\u23F8 Pause', callback_data: 'auto:pause' },
+          { text: '\uD83D\uDED1 Stop', callback_data: 'auto:stop' },
         ]);
       }
       keyboard.push([
-        { text: 'Refresh', callback_data: 'auto:refresh' },
+        { text: '\uD83D\uDD04 Refresh', callback_data: 'auto:refresh' },
       ]);
       return { inline_keyboard: keyboard };
     }
@@ -354,22 +354,22 @@ export class AutomationHubRenderer {
       switch (this.pendingCreation.step) {
         case 'select-worker':
           for (const name of sessions) {
-            keyboard.push([{ text: name, callback_data: `auto:w:${name}` }]);
+            keyboard.push([{ text: `\uD83D\uDD27 ${name}`, callback_data: `auto:w:${name}` }]);
           }
-          keyboard.push([{ text: 'Cancel', callback_data: 'auto:cancel' }]);
+          keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
           break;
 
         case 'select-orchestrator':
           for (const name of sessions) {
             if (name !== this.pendingCreation.workerSession) {
-              keyboard.push([{ text: name, callback_data: `auto:o:${name}` }]);
+              keyboard.push([{ text: `\uD83C\uDFAF ${name}`, callback_data: `auto:o:${name}` }]);
             }
           }
-          keyboard.push([{ text: 'Cancel', callback_data: 'auto:cancel' }]);
+          keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
           break;
 
         case 'enter-task':
-          keyboard.push([{ text: 'Cancel', callback_data: 'auto:cancel' }]);
+          keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
           break;
       }
 
@@ -377,7 +377,7 @@ export class AutomationHubRenderer {
     }
 
     // Idle state
-    keyboard.push([{ text: 'New Automation', callback_data: 'auto:new' }]);
+    keyboard.push([{ text: '\uD83E\uDD16 New Automation', callback_data: 'auto:new' }]);
     return { inline_keyboard: keyboard };
   }
 }
