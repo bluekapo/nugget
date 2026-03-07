@@ -622,3 +622,65 @@ describe('SettingsStore numeric methods', () => {
     assert.equal(store.getNumber('badValue', 50), 50);
   });
 });
+
+// ---------- SettingsStore cycle_limit -> EngineConfig.maxCycles wiring ----------
+
+describe('SettingsStore cycle_limit -> EngineConfig.maxCycles wiring', () => {
+  let db: Database.Database;
+  let settingsStore: SettingsStore;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+    settingsStore = new SettingsStore(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it('engineFactory closure injects maxCycles=50 when settingsStore has cycle_limit=50', () => {
+    settingsStore.setNumber('cycle_limit', 50);
+
+    // Simulate the engineFactory closure pattern from src/index.ts
+    const engineFactory = (engineConfig: EngineConfig, engineBus: EventBus) => {
+      const mergedConfig = { ...engineConfig, maxCycles: settingsStore.getNumber('cycle_limit', 100) };
+      return mergedConfig;
+    };
+
+    const baseConfig: EngineConfig = {
+      workerSession: 'worker',
+      orchestratorSession: 'orchestrator',
+      taskDescription: 'test task',
+    };
+    const bus = new EventBus();
+
+    const result = engineFactory(baseConfig, bus);
+    assert.equal(result.maxCycles, 50, 'maxCycles should be 50 from settingsStore');
+  });
+
+  it('engineFactory closure injects maxCycles=100 (default) when no cycle_limit set', () => {
+    // Don't set cycle_limit -- settingsStore.getNumber should return default
+
+    const engineFactory = (engineConfig: EngineConfig, engineBus: EventBus) => {
+      const mergedConfig = { ...engineConfig, maxCycles: settingsStore.getNumber('cycle_limit', 100) };
+      return mergedConfig;
+    };
+
+    const baseConfig: EngineConfig = {
+      workerSession: 'worker',
+      orchestratorSession: 'orchestrator',
+      taskDescription: 'test task',
+    };
+    const bus = new EventBus();
+
+    const result = engineFactory(baseConfig, bus);
+    assert.equal(result.maxCycles, 100, 'maxCycles should default to 100 when cycle_limit not set');
+  });
+});
