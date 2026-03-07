@@ -54,6 +54,19 @@ class ManualTimer implements TimerProvider {
   }
 }
 
+/**
+ * Flush the microtask queue. ScreenCapture.onData() is async because
+ * TerminalEmulator.write() returns a Promise. After emitting bus events
+ * that trigger capture.onData(), we must flush to let the emulator process
+ * the data before advancing the ManualTimer.
+ */
+async function flush(): Promise<void> {
+  // Multiple rounds to drain nested microtasks
+  for (let i = 0; i < 5; i++) {
+    await new Promise<void>(r => globalThis.setTimeout(r, 0));
+  }
+}
+
 /** Simulate Claude Code completion marker in PTY output */
 function completionOutput(text: string = 'some output'): string {
   return `${text}\r\n\u273B Crunched for 1m 22s\r\n`;
@@ -62,6 +75,16 @@ function completionOutput(text: string = 'some output'): string {
 /** Simulate orchestrator responding with a directive */
 function directiveOutput(directive: string): string {
   return `${directive}\r\n\u273B Crunched for 5s\r\n`;
+}
+
+/**
+ * Emit session output and flush the microtask queue so the async
+ * ScreenCapture.onData() -> TerminalEmulator.write() chain completes
+ * before we advance the ManualTimer.
+ */
+async function emitOutput(bus: EventBus, session: string, data: string): Promise<void> {
+  bus.emit('session:output', session, data);
+  await flush();
 }
 
 describe('AutomationEngine', () => {
@@ -79,8 +102,6 @@ describe('AutomationEngine', () => {
     mockSessionManager = {
       writeToSession: (name: string, data: string) => {
         writes.push({ name, data });
-        // Simulate the PTY echoing back the data via bus
-        // (In real usage, the PTY process would emit session:output)
       },
     };
     config = {
@@ -116,14 +137,17 @@ describe('AutomationEngine', () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     engine.start();
 
-    // Emit worker session:output with completion marker
-    bus.emit('session:output', 'worker', completionOutput('test results'));
+    // Emit worker session:output with completion marker, then flush microtasks
+    await emitOutput(bus, 'worker', completionOutput('test results'));
 
     // Advance past baseDelay (debounce) + idleDelay (completion detection)
     timer.advance(50);  // debounce fires, capture runs, crunched=true
     timer.advance(100); // idle fires -> onPromptComplete -> state changes
 
-    assert.equal(engine.state, 'capturing-worker', 'should transition to capturing-worker on worker idle');
+    // After onWorkerIdle, state transitions through capturing-worker -> clearing-orchestrator
+    // We check that it moved past idle (capturing-worker was transient)
+    assert.notEqual(engine.state, 'idle', 'should have left idle state on worker idle');
+    assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator after capturing worker');
   });
 
   // ---------- Test 3: full COMMAND cycle ----------
@@ -138,7 +162,7 @@ describe('AutomationEngine', () => {
     engine.start();
 
     // Step 1: Worker goes idle (completion detected)
-    bus.emit('session:output', 'worker', completionOutput('$ npm test\nall tests passed'));
+    await emitOutput(bus, 'worker', completionOutput('$ npm test\nall tests passed'));
     timer.advance(50);  // debounce
     timer.advance(100); // idle -> onPromptComplete fires
 
@@ -147,7 +171,7 @@ describe('AutomationEngine', () => {
     assert.ok(clearWrite, 'engine should send /clear to orchestrator');
 
     // Step 2: Orchestrator processes /clear (completion marker)
-    bus.emit('session:output', 'orchestrator', completionOutput('/clear processed'));
+    await emitOutput(bus, 'orchestrator', completionOutput('/clear processed'));
     timer.advance(50);  // debounce
     timer.advance(100); // idle -> onPromptComplete for clear
 
@@ -156,7 +180,7 @@ describe('AutomationEngine', () => {
     assert.ok(promptWrite, 'engine should send prompt to orchestrator');
 
     // Step 3: Orchestrator responds with directive
-    bus.emit('session:output', 'orchestrator', directiveOutput('COMMAND: npm test'));
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: npm test'));
     timer.advance(50);  // debounce
     timer.advance(100); // idle -> onPromptComplete for response
 
@@ -182,17 +206,17 @@ describe('AutomationEngine', () => {
     engine.start();
 
     // Worker goes idle
-    bus.emit('session:output', 'worker', completionOutput('task output'));
+    await emitOutput(bus, 'worker', completionOutput('task output'));
     timer.advance(50);
     timer.advance(100);
 
     // Orchestrator clears
-    bus.emit('session:output', 'orchestrator', completionOutput('cleared'));
+    await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
     timer.advance(50);
     timer.advance(100);
 
     // Engine sends prompt, orchestrator responds with ESCALATE
-    bus.emit('session:output', 'orchestrator', directiveOutput('ESCALATE: task is complete'));
+    await emitOutput(bus, 'orchestrator', directiveOutput('ESCALATE: task is complete'));
     timer.advance(50);
     timer.advance(100);
 
@@ -208,17 +232,17 @@ describe('AutomationEngine', () => {
     engine.start();
 
     // Worker idle
-    bus.emit('session:output', 'worker', completionOutput('running'));
+    await emitOutput(bus, 'worker', completionOutput('running'));
     timer.advance(50);
     timer.advance(100);
 
     // Clear
-    bus.emit('session:output', 'orchestrator', completionOutput('cleared'));
+    await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
     timer.advance(50);
     timer.advance(100);
 
     // Orchestrator responds with WAIT: 5
-    bus.emit('session:output', 'orchestrator', directiveOutput('WAIT: 5'));
+    await emitOutput(bus, 'orchestrator', directiveOutput('WAIT: 5'));
     timer.advance(50);
     timer.advance(100);
 
@@ -247,10 +271,10 @@ describe('AutomationEngine', () => {
     assert.equal(engine.state, 'idle', 'resume() should transition back to idle');
 
     // Worker idle should still trigger after resume
-    bus.emit('session:output', 'worker', completionOutput('after resume'));
+    await emitOutput(bus, 'worker', completionOutput('after resume'));
     timer.advance(50);
     timer.advance(100);
-    assert.equal(engine.state, 'capturing-worker', 'worker idle should trigger after resume');
+    assert.equal(engine.state, 'clearing-orchestrator', 'worker idle should trigger after resume');
   });
 
   // ---------- Test 7: pause during wait ignores callback ----------
@@ -260,7 +284,7 @@ describe('AutomationEngine', () => {
     engine.start();
 
     // Worker idle -> engine starts capture flow
-    bus.emit('session:output', 'worker', completionOutput('data'));
+    await emitOutput(bus, 'worker', completionOutput('data'));
     timer.advance(50);
     timer.advance(100);
 
@@ -270,7 +294,7 @@ describe('AutomationEngine', () => {
     assert.equal(engine.state, 'paused');
 
     // Orchestrator completes -- but engine is paused, should ignore
-    bus.emit('session:output', 'orchestrator', completionOutput('cleared'));
+    await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
     timer.advance(50);
     timer.advance(100);
 
@@ -289,7 +313,7 @@ describe('AutomationEngine', () => {
     engine.start();
 
     // Start some activity
-    bus.emit('session:output', 'worker', completionOutput('data'));
+    await emitOutput(bus, 'worker', completionOutput('data'));
     timer.advance(50);
 
     // Stop while pending
@@ -336,24 +360,24 @@ describe('AutomationEngine', () => {
     engine.start();
 
     // Worker idle
-    bus.emit('session:output', 'worker', completionOutput('menu displayed'));
+    await emitOutput(bus, 'worker', completionOutput('menu displayed'));
     timer.advance(50);
     timer.advance(100);
 
     // Clear
-    bus.emit('session:output', 'orchestrator', completionOutput('cleared'));
+    await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
     timer.advance(50);
     timer.advance(100);
 
     // Orchestrator responds with SELECT: 3 (needs 2 arrow-downs then Enter)
-    bus.emit('session:output', 'orchestrator', directiveOutput('SELECT: 3'));
+    await emitOutput(bus, 'orchestrator', directiveOutput('SELECT: 3'));
     timer.advance(50);
     timer.advance(100);
 
     // Engine handles SELECT with delays, advance enough for arrow key delays
     // Default arrowKeyDelayMs=50, 2 arrow-downs + Enter
-    timer.advance(50); // first arrow-down
-    timer.advance(50); // second arrow-down + Enter
+    timer.advance(50); // second arrow-down scheduled
+    timer.advance(50); // Enter
 
     // Verify arrow-down and Enter sequences were written to worker
     const workerWrites = writes.filter(w => w.name === 'worker');
