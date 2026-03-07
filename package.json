@@ -1,0 +1,39 @@
+{
+  "name": "ccr",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Claude Code Remote Access & Automation Framework",
+  "bin": {
+    "ccr": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node --env-file=.env dist/index.js",
+    "lint": "eslint src --ext .ts",
+    "test": "node --import tsx --test test/**/*.test.ts"
+  },
+  "dependencies": {
+    "@grammyjs/auto-retry": "^2.0.2",
+    "@xterm/headless": "^6.0.0",
+    "better-sqlite3": "^12.6.2",
+    "commander": "^14.0.0",
+    "dotenv": "^17.3.1",
+    "fastify": "^5.7.0",
+    "grammy": "^1.41.0",
+    "node-pty": "^1.1.0"
+  },
+  "devDependencies": {
+    "@commander-js/extra-typings": "^14.0.0",
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "optionalDependencies": {
+    "@esbuild/linux-x64": "^0.27.3"
+  }
+}
