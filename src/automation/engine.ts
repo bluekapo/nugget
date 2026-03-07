@@ -74,6 +74,7 @@ export class AutomationEngine {
   private retryAttempted = false;
   private readonly maxCycles: number;
   private sessionExitHandler: ((name: string, exitCode: number) => void) | null = null;
+  private clearingBuffer = '';
 
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
@@ -118,10 +119,16 @@ export class AutomationEngine {
       } else if (sessionName === this.config.orchestratorSession && this.orchestratorMonitor) {
         this.orchestratorMonitor.capture.onData(data);
 
-        // Fast /clear completion: "(no content)" in raw PTY data means /clear succeeded.
-        // Skip idle delay and proceed immediately.
-        if (this._state === 'clearing-orchestrator' && data.includes('(no content)')) {
-          this.timer.setTimeout(() => this.onClearComplete(), 0);
+        // Accumulate raw PTY data and check the buffer for "(no content)".
+        // PTY data arrives in arbitrary chunks, so the string may be split across chunks.
+        // Strip ANSI escape codes before checking to avoid false negatives from embedded sequences.
+        if (this._state === 'clearing-orchestrator') {
+          this.clearingBuffer += data;
+          const stripped = this.clearingBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+          if (stripped.includes('(no content)')) {
+            this.clearingBuffer = '';
+            this.timer.setTimeout(() => this.onClearComplete(), 0);
+          }
         }
       }
     };
@@ -178,6 +185,7 @@ export class AutomationEngine {
     // Clear any pending wait timer
     this.clearWaitTimer();
 
+    this.clearingBuffer = '';
     this.setState('stopped');
   }
 
@@ -233,7 +241,8 @@ export class AutomationEngine {
       this.workerScreenText = this.workerMonitor.emulator.getScreenText();
     }
 
-    // Send /clear to orchestrator
+    // Reset clearing buffer and send /clear to orchestrator
+    this.clearingBuffer = '';
     this.sessionManager.writeToSession(this.config.orchestratorSession, '/clear\r');
 
     // Reset orchestrator monitor baseline and mark input sent.
@@ -253,6 +262,7 @@ export class AutomationEngine {
   private onClearComplete(): void {
     if (this._state !== 'clearing-orchestrator') return;
 
+    this.clearingBuffer = '';
     this.setState('prompting-orchestrator');
 
     // Build prompt with context
