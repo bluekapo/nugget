@@ -77,6 +77,12 @@ export class ScreenCapture {
   /** The last completion marker text that fired a notification — prevents re-firing for the same marker. */
   private lastFiredMarker: string | null = null;
 
+  // Exec-state idle detection: emits 'idle' when PTY data stops flowing for execIdleDelay ms,
+  // independent of completion marker detection. This drives the hub's busy/idle display.
+  private execIdleTimer: unknown = null;
+  private readonly execIdleDelay: number;
+  private _execBusy = false;
+
   private readonly bus?: EventBus;
   private readonly sessionNameFn?: () => string | null;
 
@@ -90,6 +96,7 @@ export class ScreenCapture {
       burstDelay?: number;
       maxWait?: number;
       idleDelay?: number;
+      execIdleDelay?: number;
       timer?: TimerProvider;
       bus?: EventBus;
       sessionNameFn?: () => string | null;
@@ -101,6 +108,7 @@ export class ScreenCapture {
     this.burstDelay = opts?.burstDelay ?? 800;
     this.maxWait = opts?.maxWait ?? 3000;
     this.idleDelay = opts?.idleDelay ?? 5000;
+    this.execIdleDelay = opts?.execIdleDelay ?? 3000;
     this.timer = opts?.timer ?? defaultTimer;
     this.bus = opts?.bus;
     this.sessionNameFn = opts?.sessionNameFn;
@@ -140,6 +148,15 @@ export class ScreenCapture {
     this.scheduleCapture();
     // Reset idle timer on every new data arrival
     this.cancelIdleTimer();
+    // Emit busy exec-state once when data starts flowing (not on every chunk)
+    if (!this._execBusy) {
+      this._execBusy = true;
+      const name = this.sessionNameFn?.();
+      if (name && this.bus) this.bus.emit('session:exec-state', name, 'busy');
+    }
+    // Reset exec idle timer — data is flowing, we're busy
+    this.cancelExecIdleTimer();
+    this.startExecIdleTimer();
   }
 
   /**
@@ -203,6 +220,7 @@ export class ScreenCapture {
   resetBaseline(): void {
     this.cancelTimer();
     this.cancelIdleTimer();
+    this.cancelExecIdleTimer();
     this.pendingCapture = false;
     this.emulator.reset();
     this.lastSnapshot = '';
@@ -210,6 +228,7 @@ export class ScreenCapture {
     this._scrollLocked = true;
     this.crunched = false;
     this.lastFiredMarker = null;
+    this._execBusy = false;
   }
 
   /**
@@ -220,6 +239,8 @@ export class ScreenCapture {
   markInputSent(): void {
     this.crunched = false;
     this.cancelIdleTimer();
+    this.cancelExecIdleTimer();
+    this._execBusy = true;
     const name = this.sessionNameFn?.();
     if (name && this.bus) this.bus.emit('session:exec-state', name, 'busy');
   }
@@ -231,6 +252,7 @@ export class ScreenCapture {
   dispose(): void {
     this.cancelTimer();
     this.cancelIdleTimer();
+    this.cancelExecIdleTimer();
     this.pendingCapture = false;
     this.bufferChangeDisposable.dispose();
   }
@@ -377,9 +399,24 @@ export class ScreenCapture {
       const firedMatches = [...this.lastSnapshot.matchAll(/\u273B .+ for (?:\d+m )?\d+s/g)];
       this.lastFiredMarker = firedMatches.length > 0 ? firedMatches[firedMatches.length - 1][0] : null;
       this.crunched = false;
-      const name = this.sessionNameFn?.();
-      if (name && this.bus) this.bus.emit('session:exec-state', name, 'idle');
       this.onPromptComplete();
     }, this.idleDelay);
+  }
+
+  private cancelExecIdleTimer(): void {
+    if (this.execIdleTimer !== null) {
+      this.timer.clearTimeout(this.execIdleTimer);
+      this.execIdleTimer = null;
+    }
+  }
+
+  private startExecIdleTimer(): void {
+    this.cancelExecIdleTimer();
+    this.execIdleTimer = this.timer.setTimeout(() => {
+      this.execIdleTimer = null;
+      this._execBusy = false;
+      const name = this.sessionNameFn?.();
+      if (name && this.bus) this.bus.emit('session:exec-state', name, 'idle');
+    }, this.execIdleDelay);
   }
 }
