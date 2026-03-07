@@ -229,7 +229,7 @@ function buildKeyboard(
 
   // Bottom row: Details/Simple toggle + Refresh
   keyboard.push([
-    { text: advanced ? 'Simple' : 'Details', callback_data: 'hub:advanced' },
+    { text: advanced ? '\uD83D\uDCCB Simple' : '\uD83D\uDCCA Details', callback_data: 'hub:advanced' },
     { text: '\uD83D\uDD04 Refresh', callback_data: 'hub:refresh' },
   ]);
 
