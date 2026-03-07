@@ -255,4 +255,56 @@ describe('registerCommands', () => {
     });
 
   });
+
+  describe('/automate', () => {
+    it('triggers automationHub.render({ forceNew: true }) when automationHub is provided', async () => {
+      const bot = createMockBot();
+      const manager = createMockSessionManager();
+      const hub = createMockHubRenderer();
+      const automationHub = createMockHubRenderer();
+      registerCommands(bot as any, manager as any, () => null, hub, undefined, undefined, automationHub);
+
+      const automateCmd = bot.registered.find((r) => r.command === 'automate')!;
+      assert.ok(automateCmd, '/automate should be registered');
+
+      const ctx = createMockCtx();
+      await automateCmd.handler(ctx);
+
+      assert.equal(automationHub.renderCount, 1, 'automationHub.render() should be called once');
+      assert.deepEqual(automationHub.lastRenderOpts, { forceNew: true }, 'should pass forceNew: true');
+      assert.equal(ctx.replies.length, 0, 'should not reply with text when automation hub renders');
+    });
+
+    it('replies "Automation hub not available." when automationHub is not provided', async () => {
+      const bot = createMockBot();
+      const manager = createMockSessionManager();
+      registerCommands(bot as any, manager as any, () => null);
+
+      const automateCmd = bot.registered.find((r) => r.command === 'automate')!;
+      assert.ok(automateCmd, '/automate should be registered');
+
+      const ctx = createMockCtx();
+      await automateCmd.handler(ctx);
+
+      assert.equal(ctx.replies.length, 1);
+      assert.ok(ctx.replies[0].text.includes('Automation hub not available'));
+    });
+
+    it('replies with error when automationHub.render() throws', async () => {
+      const bot = createMockBot();
+      const manager = createMockSessionManager();
+      const automationHub = {
+        async render() { throw new Error('Telegram API error'); },
+      };
+      registerCommands(bot as any, manager as any, () => null, undefined, undefined, undefined, automationHub);
+
+      const automateCmd = bot.registered.find((r) => r.command === 'automate')!;
+      const ctx = createMockCtx();
+
+      await automateCmd.handler(ctx);
+
+      assert.equal(ctx.replies.length, 1);
+      assert.ok(ctx.replies[0].text.includes('Failed to render automation hub'));
+    });
+  });
 });

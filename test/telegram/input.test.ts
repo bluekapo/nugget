@@ -221,6 +221,60 @@ describe('TelegramInputHandler', () => {
     assert.equal(ctx.deleteMessageCalled, true, 'should delete user message');
   });
 
+  it('skips /automate and calls next() (bot command)', async () => {
+    const sm = makeMockSessionManager();
+    const al = makeMockAllowlist(true);
+    const handler = new TelegramInputHandler(sm as any, () => 'my-session', al as any);
+
+    const ctx = makeMockCtx('/automate');
+    let nextCalled = false;
+    await handler.handler()(ctx as any, async () => { nextCalled = true; });
+
+    assert.equal(sm.calls.length, 0, 'should not forward to session');
+    assert.equal(nextCalled, true, 'should call next() for bot command');
+  });
+
+  it('intercepts text when automationHub.isAwaitingTaskInput() returns true', async () => {
+    const sm = makeMockSessionManager();
+    const al = makeMockAllowlist(true);
+    let completedWith = '';
+    const mockAutomationHub = {
+      isAwaitingTaskInput() { return true; },
+      async completeCreation(text: string) { completedWith = text; },
+      async render() {},
+    };
+    const handler = new TelegramInputHandler(sm as any, () => 'my-session', al as any, mockAutomationHub);
+
+    const ctx = makeMockCtx('run all tests');
+    let nextCalled = false;
+    await handler.handler()(ctx as any, async () => { nextCalled = true; });
+
+    assert.equal(completedWith, 'run all tests', 'should call completeCreation with the text');
+    assert.equal(sm.calls.length, 0, 'should NOT forward to PTY');
+    assert.equal(ctx.deleteMessageCalled, true, 'should delete user message after interception');
+    assert.equal(nextCalled, false, 'should not call next()');
+    assert.equal(ctx.replies.length, 0, 'should not reply');
+  });
+
+  it('does not intercept text when automationHub.isAwaitingTaskInput() returns false', async () => {
+    const sm = makeMockSessionManager();
+    const al = makeMockAllowlist(true);
+    let completeCalled = false;
+    const mockAutomationHub = {
+      isAwaitingTaskInput() { return false; },
+      async completeCreation(_text: string) { completeCalled = true; },
+      async render() {},
+    };
+    const handler = new TelegramInputHandler(sm as any, () => 'my-session', al as any, mockAutomationHub);
+
+    const ctx = makeMockCtx('hello world');
+    await handler.handler()(ctx as any, async () => {});
+
+    assert.equal(completeCalled, false, 'should NOT call completeCreation');
+    assert.equal(sm.calls.length, 1, 'should forward to PTY normally');
+    assert.equal(sm.calls[0].data, 'hello world');
+  });
+
   it('does not throw when deleteMessage fails (silently catches error)', async () => {
     const sm = makeMockSessionManager();
     const al = makeMockAllowlist(true);

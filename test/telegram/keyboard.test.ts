@@ -963,6 +963,107 @@ describe('InlineKeyboard', () => {
       assert.ok(shutdownCalled, 'onShutdown should be called when no sessions remain');
     });
 
+    it('auto:* callback delegates to automationHub.handleCallback and answers with returned text', async () => {
+      const regexHandlers: Array<{ pattern: RegExp; handler: (ctx: any) => Promise<void> }> = [];
+      const mockBot = {
+        callbackQuery(data: string | RegExp, handler: (ctx: any) => Promise<void>) {
+          if (data instanceof RegExp) {
+            regexHandlers.push({ pattern: data, handler });
+          }
+        },
+        on(_filter: string, _handler: unknown) {},
+      };
+
+      const mockSm = {
+        writeToSession(_name: string, _data: string) {},
+        async stop(_name: string) {},
+      };
+
+      const mockRouter = {
+        switchTo(_name: string) {},
+        remove(_name: string) {},
+        isRemote(_name: string) { return false; },
+        removeRemote(_name: string) {},
+        getAll() { return []; },
+        getRemoteBridge(_name: string) { return undefined; },
+      };
+
+      let handleCallbackCalledWith = '';
+      const mockAutomationHub = {
+        async handleCallback(data: string) {
+          handleCallbackCalledWith = data;
+          return 'Paused';
+        },
+        async render() {},
+      };
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'test-session',
+        mockRouter as any,
+        undefined, // refreshHub
+        undefined, // scrollHandler
+        undefined, // toggleAdvanced
+        undefined, // onShutdown
+        undefined, // deleteHub
+        mockAutomationHub, // automationHub
+      );
+
+      const autoHandler = regexHandlers.find(h => h.pattern.test('auto:pause'));
+      assert.ok(autoHandler, 'auto:* regex handler should be registered');
+
+      let answerText = '';
+      const mockCtx = {
+        callbackQuery: { data: 'auto:pause' },
+        async answerCallbackQuery(opts?: { text?: string }) {
+          answerText = opts?.text ?? '';
+        },
+      };
+
+      await autoHandler.handler(mockCtx);
+
+      assert.equal(handleCallbackCalledWith, 'auto:pause', 'should delegate to automationHub.handleCallback with callback data');
+      assert.equal(answerText, 'Paused', 'should answer callback query with returned text');
+    });
+
+    it('does not register auto:* handler when automationHub is not provided', () => {
+      const registeredQueries: Array<string | RegExp> = [];
+      const mockBot = {
+        callbackQuery(data: string | RegExp, _handler: unknown) {
+          registeredQueries.push(data);
+        },
+        on(_filter: string, _handler: unknown) {},
+      };
+
+      const mockSm = {
+        writeToSession(_name: string, _data: string) {},
+        async stop(_name: string) {},
+      };
+
+      const mockRouter = {
+        switchTo(_name: string) {},
+        remove(_name: string) {},
+        isRemote(_name: string) { return false; },
+        removeRemote(_name: string) {},
+        getAll() { return []; },
+        getRemoteBridge(_name: string) { return undefined; },
+      };
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'test-session',
+        mockRouter as any,
+      );
+
+      const regexQueries = registeredQueries.filter(q => q instanceof RegExp);
+      assert.ok(
+        !regexQueries.some(r => r.test('auto:pause')),
+        'should NOT register auto:* handler without automationHub',
+      );
+    });
+
     it('hub:disconnect does NOT trigger onShutdown when sessions remain', async () => {
       const regexHandlers: Array<{ pattern: RegExp; handler: (ctx: any) => Promise<void> }> = [];
       const mockBot = {
