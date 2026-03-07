@@ -19,7 +19,7 @@
     "better-sqlite3": "^12.6.2",
     "commander": "^14.0.0",
     "dotenv": "^17.3.1",
-    "fastify": "^5.7.0",
+    "fastify": "^5.8.2",
     "grammy": "^1.41.0",
     "node-pty": "^1.1.0"
   },
