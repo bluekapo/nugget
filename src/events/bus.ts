@@ -5,6 +5,10 @@ export interface BusEvents {
   'session:exit': (sessionName: string, exitCode: number) => void;
   'session:started': (sessionName: string) => void;
   'session:exec-state': (sessionName: string, state: 'busy' | 'idle') => void;
+  'automation:state-change': (state: string, detail?: string) => void;
+  'automation:cycle-complete': (cycleNumber: number, action: string) => void;
+  'automation:escalation': (reason: string) => void;
+  'automation:error': (error: string) => void;
 }
 
 export class EventBus {

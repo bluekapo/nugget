@@ -1,4 +1,5 @@
 import type { Directive } from './types.js';
+import { DEFAULT_WAIT_SECONDS } from './types.js';
 
 export interface ExecutionResult {
   executed: boolean;
@@ -8,8 +9,35 @@ export interface ExecutionResult {
 }
 
 export function executeDirective(
-  _directive: Directive,
-  _writeFn: (data: string) => void,
+  directive: Directive,
+  writeFn: (data: string) => void,
 ): ExecutionResult {
-  throw new Error('not implemented');
+  switch (directive.type) {
+    case 'COMMAND':
+      writeFn(directive.command + '\r');
+      return { executed: true, description: `COMMAND: ${directive.command}` };
+
+    case 'SELECT':
+      for (let i = 0; i < directive.option - 1; i++) {
+        writeFn('\x1b[B');
+      }
+      writeFn('\r');
+      return { executed: true, description: `SELECT: ${directive.option}` };
+
+    case 'ENTER':
+      writeFn('\r');
+      return { executed: true, description: 'ENTER' };
+
+    case 'WAIT': {
+      const seconds = directive.delaySeconds ?? DEFAULT_WAIT_SECONDS;
+      return { executed: true, description: `WAIT: ${seconds}s`, waitSeconds: seconds };
+    }
+
+    case 'ESCALATE':
+      return {
+        executed: false,
+        description: `ESCALATE: ${directive.reason}`,
+        escalateReason: directive.reason,
+      };
+  }
 }
