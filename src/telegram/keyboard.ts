@@ -15,7 +15,7 @@ export const ACTION_BUTTONS = {
   arrowLeft:  { label: '\u2B05 Left',     data: 'action:arrow-left',  input: '\x1b[D' },
   arrowRight: { label: '\u27A1 Right',    data: 'action:arrow-right', input: '\x1b[C' },
   escape:     { label: '\u238B Esc',      data: 'action:escape',      input: '\x1b' },
-  clearInput: { label: '\u2716 Clear',   data: 'action:clear-input', input: '\x1b' },
+  clearInput: { label: '\u2716 Clear',   data: 'action:clear-input', input: '\x7f' },
 } as const;
 
 /** Build an InlineKeyboard for CLI output messages (no Delete button).
@@ -130,6 +130,13 @@ export function registerCallbackHandlers(
             await ctx.editMessageReplyMarkup({ reply_markup: buildCLIKeyboard(scrollHandler.scrollLocked) });
           } catch { /* message may not be editable */ }
         }
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      // Clear input: send End key + many backspaces to erase typed text
+      if (action.data === 'action:clear-input') {
+        sessionManager.writeToSession(sessionName, '\x1b[F' + '\x7f'.repeat(300));
         await ctx.answerCallbackQuery();
         return;
       }
