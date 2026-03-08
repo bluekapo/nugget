@@ -204,6 +204,8 @@ async function startPrimary(
   screenCapture.onPromptComplete = () => {
     if (settingsStore.get('notifications')) {
       const session = router.activeSession;
+      // Skip notification for automated worker sessions -- engine handles the cycle
+      if (session && automationHub.isAutomatedSession(session)) return;
       const label = session ? `Session "${session}" prompt completed.` : 'Prompt completed.';
       bot.api.sendMessage(config.ownerId, label, {
         disable_notification: false,
@@ -676,6 +678,8 @@ async function becomeNewPrimary(
     capture.onPromptComplete = () => {
       if (settingsStore.get('notifications')) {
         const session = router.activeSession;
+        // Skip notification for automated worker sessions -- engine handles the cycle
+        if (session && promotedAutomationHub.isAutomatedSession(session)) return;
         const label = session ? `Session "${session}" prompt completed.` : 'Prompt completed.';
         bot.api.sendMessage(config.ownerId, label, {
           disable_notification: false,
