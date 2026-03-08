@@ -167,6 +167,38 @@ describe('InlineKeyboard', () => {
     });
   });
 
+  describe('buildCLIKeyboard() enterConfirmation shield emoji', () => {
+    it('shows shield emoji on Enter button when enterConfirmation=true', () => {
+      const kb = buildCLIKeyboard(true, true);
+      const enterBtn = kb.inline_keyboard[1][2];
+      assert.ok(enterBtn.text.includes('\uD83D\uDEE1'), 'Enter button should include shield emoji');
+      assert.equal(enterBtn.callback_data, 'action:enter', 'callback_data should remain action:enter');
+    });
+
+    it('shows normal Enter button label when enterConfirmation=false', () => {
+      const kb = buildCLIKeyboard(true, false);
+      const enterBtn = kb.inline_keyboard[1][2];
+      assert.ok(!enterBtn.text.includes('\uD83D\uDEE1'), 'Enter button should NOT include shield emoji');
+      assert.equal(enterBtn.text, ACTION_BUTTONS.enter.label, 'should use default label');
+    });
+  });
+
+  describe('buildControlsKeyboard() enterConfirmation shield emoji', () => {
+    it('shows shield emoji on Enter button when enterConfirmation=true', () => {
+      const kb = buildControlsKeyboard(true, true);
+      const enterBtn = kb.inline_keyboard[1][2];
+      assert.ok(enterBtn.text.includes('\uD83D\uDEE1'), 'Enter button should include shield emoji');
+      assert.equal(enterBtn.callback_data, 'action:enter', 'callback_data should remain action:enter');
+    });
+
+    it('shows normal Enter button label when enterConfirmation=false', () => {
+      const kb = buildControlsKeyboard(true, false);
+      const enterBtn = kb.inline_keyboard[1][2];
+      assert.ok(!enterBtn.text.includes('\uD83D\uDEE1'), 'Enter button should NOT include shield emoji');
+      assert.equal(enterBtn.text, ACTION_BUTTONS.enter.label, 'should use default label');
+    });
+  });
+
   describe('buildControlsKeyboard() scroll row', () => {
     it('scroll row has 3 buttons: Up, Lock, Down', () => {
       const kb = buildControlsKeyboard();

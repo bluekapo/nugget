@@ -307,4 +307,108 @@ describe('registerCommands', () => {
       assert.ok(ctx.replies[0].text.includes('Failed to render automation hub'));
     });
   });
+
+  describe('/settings Confirm Enter toggle', () => {
+    /** Minimal mock for SettingsStore */
+    function createMockSettingsStore(overrides: Record<string, boolean | number> = {}) {
+      const store: Record<string, string> = {};
+      for (const [k, v] of Object.entries(overrides)) {
+        store[k] = String(v);
+      }
+      return {
+        get(key: string): boolean { return store[key] === 'true'; },
+        set(key: string, value: boolean) { store[key] = value ? 'true' : 'false'; },
+        getNumber(key: string, defaultValue: number): number {
+          const v = store[key];
+          if (v === undefined) return defaultValue;
+          const n = parseInt(v, 10);
+          return Number.isNaN(n) ? defaultValue : n;
+        },
+        setNumber(key: string, value: number) { store[key] = String(value); },
+        getUpdatedAt(_key: string): string | null { return null; },
+      };
+    }
+
+    function createMockBotWithCallbacks() {
+      const commands: { command: string; handler: (ctx: any) => Promise<void> }[] = [];
+      const callbacks: { trigger: string; handler: (ctx: any) => Promise<void> }[] = [];
+      return {
+        command(name: string, handler: (ctx: any) => Promise<void>) {
+          commands.push({ command: name, handler });
+        },
+        callbackQuery(trigger: string, handler: (ctx: any) => Promise<void>) {
+          callbacks.push({ trigger, handler });
+        },
+        on(_filter: string, _handler: unknown) {},
+        commands,
+        callbacks,
+      };
+    }
+
+    it('buildSettingsMessage includes "Confirm Enter" line showing ON/OFF state', async () => {
+      const bot = createMockBotWithCallbacks();
+      const manager = createMockSessionManager();
+      const settingsStore = createMockSettingsStore({ enter_confirmation: true });
+      registerCommands(bot as any, manager as any, () => null, undefined, undefined, settingsStore as any);
+
+      const settingsCmd = bot.commands.find(c => c.command === 'settings')!;
+      assert.ok(settingsCmd, '/settings should be registered');
+
+      const replies: any[] = [];
+      const ctx = {
+        async reply(text: string, opts?: unknown) { replies.push({ text, opts }); return { message_id: 1 }; },
+        async deleteMessage() {},
+      };
+      await settingsCmd.handler(ctx);
+
+      const text = replies[0].text as string;
+      assert.ok(text.includes('Confirm Enter'), 'settings message should include "Confirm Enter"');
+      assert.ok(text.includes('ON'), 'should show ON when enter_confirmation is true');
+    });
+
+    it('buildSettingsMessage keyboard includes toggle button for enter_confirmation', async () => {
+      const bot = createMockBotWithCallbacks();
+      const manager = createMockSessionManager();
+      const settingsStore = createMockSettingsStore({ enter_confirmation: false });
+      registerCommands(bot as any, manager as any, () => null, undefined, undefined, settingsStore as any);
+
+      const settingsCmd = bot.commands.find(c => c.command === 'settings')!;
+      const replies: any[] = [];
+      const ctx = {
+        async reply(text: string, opts?: unknown) { replies.push({ text, opts }); return { message_id: 1 }; },
+        async deleteMessage() {},
+      };
+      await settingsCmd.handler(ctx);
+
+      const keyboard = (replies[0].opts as any).reply_markup.inline_keyboard;
+      const allButtons = keyboard.flat();
+      const toggleBtn = allButtons.find((b: any) => b.callback_data === 'settings:toggle-enter-confirmation');
+      assert.ok(toggleBtn, 'should have a toggle button for enter_confirmation');
+    });
+
+    it('settings:toggle-enter-confirmation callback toggles the setting and re-renders', async () => {
+      const bot = createMockBotWithCallbacks();
+      const manager = createMockSessionManager();
+      const settingsStore = createMockSettingsStore({ enter_confirmation: false });
+      registerCommands(bot as any, manager as any, () => null, undefined, undefined, settingsStore as any);
+
+      const toggleHandler = bot.callbacks.find(c => c.trigger === 'settings:toggle-enter-confirmation');
+      assert.ok(toggleHandler, 'toggle-enter-confirmation callback should be registered');
+
+      let editedText = '';
+      let answerText = '';
+      const ctx = {
+        async editMessageText(text: string, _opts?: unknown) { editedText = text; },
+        async editMessageReplyMarkup(_markup: unknown) {},
+        async answerCallbackQuery(opts?: { text?: string }) { answerText = opts?.text ?? ''; },
+        async deleteMessage() {},
+      };
+
+      await toggleHandler.handler(ctx);
+
+      assert.ok(settingsStore.get('enter_confirmation'), 'enter_confirmation should be toggled to true');
+      assert.ok(editedText.includes('Confirm Enter'), 're-rendered message should include Confirm Enter');
+      assert.ok(answerText.includes('ON'), 'answer should indicate new state ON');
+    });
+  });
 });
