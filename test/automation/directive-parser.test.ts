@@ -280,4 +280,48 @@ describe('parseDirective', () => {
       assert.strictEqual(result, null);
     });
   });
+
+  describe('YES directive', () => {
+    it('returns YES type from ● YES', () => {
+      const result = parseDirective('● YES');
+      assert.deepStrictEqual(result, { type: 'YES' });
+    });
+
+    it('parses YES in multi-line context', () => {
+      const result = parseDirective('some output\n● YES\n\n');
+      assert.deepStrictEqual(result, { type: 'YES' });
+    });
+
+    it('handles leading whitespace before ● YES', () => {
+      const result = parseDirective('  ● YES');
+      assert.deepStrictEqual(result, { type: 'YES' });
+    });
+
+    it('returns null for bare YES without ● prefix', () => {
+      const result = parseDirective('YES');
+      assert.strictEqual(result, null);
+    });
+  });
+
+  describe('NO directive', () => {
+    it('returns NO type from ● NO', () => {
+      const result = parseDirective('● NO');
+      assert.deepStrictEqual(result, { type: 'NO' });
+    });
+
+    it('parses NO in multi-line context', () => {
+      const result = parseDirective('some output\n● NO\n\n');
+      assert.deepStrictEqual(result, { type: 'NO' });
+    });
+
+    it('handles leading whitespace before ● NO', () => {
+      const result = parseDirective('  ● NO');
+      assert.deepStrictEqual(result, { type: 'NO' });
+    });
+
+    it('returns null for bare NO without ● prefix', () => {
+      const result = parseDirective('NO');
+      assert.strictEqual(result, null);
+    });
+  });
 });
