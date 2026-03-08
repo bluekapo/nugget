@@ -1092,6 +1092,55 @@ describe('InlineKeyboard', () => {
       );
     });
 
+    it('clear-input handler sends 300 backspaces + Ctrl+K to sessionManager', async () => {
+      const writeCalls: Array<{ name: string; data: string }> = [];
+      const handlers: Map<string, (ctx: any) => Promise<void>> = new Map();
+      const mockBot = {
+        callbackQuery(data: string | RegExp, handler: (ctx: any) => Promise<void>) {
+          if (typeof data === 'string') {
+            handlers.set(data, handler);
+          }
+        },
+        on(_filter: string, _handler: unknown) {},
+      };
+
+      const mockSm = {
+        writeToSession(name: string, data: string) {
+          writeCalls.push({ name, data });
+        },
+        async stop(_name: string) {},
+      };
+
+      const mockRouter = {
+        switchTo(_name: string) {},
+        remove(_name: string) {},
+        isRemote(_name: string) { return false; },
+        removeRemote(_name: string) {},
+        getAll() { return []; },
+        getRemoteBridge(_name: string) { return undefined; },
+      };
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'clear-test-session',
+        mockRouter as any,
+      );
+
+      const mockCtx = {
+        async answerCallbackQuery(_opts?: unknown) {},
+      };
+
+      const clearHandler = handlers.get('action:clear-input');
+      assert.ok(clearHandler, 'clear-input handler should be registered');
+      await clearHandler(mockCtx);
+
+      assert.equal(writeCalls.length, 1, 'should write exactly once');
+      assert.equal(writeCalls[0].name, 'clear-test-session', 'should write to the active session');
+      const expected = '\x7f'.repeat(300) + '\x0b';
+      assert.equal(writeCalls[0].data, expected, 'should send 300 backspaces + Ctrl+K (kill to end of line)');
+    });
+
     it('hub:disconnect does NOT trigger onShutdown when sessions remain', async () => {
       const regexHandlers: Array<{ pattern: RegExp; handler: (ctx: any) => Promise<void> }> = [];
       const mockBot = {
