@@ -675,61 +675,17 @@ describe('ScreenCapture', () => {
 
   // ---------- Prompt-based completion detection (❯) ----------
 
-  it('prompt detection: ❯ on its own line triggers onPromptComplete (no marker needed)', async () => {
+  it('prompt detection: idle ❯ on its own line does NOT trigger onPromptComplete', async () => {
     createCapture({ baseDelay: 50, idleDelay: 200 });
     let completionFired = false;
     capture.onPromptComplete = () => { completionFired = true; };
 
     // Write idle prompt: ❯ followed by space on its own line
     await capture.onData('\u276F \r\n');
-    timer.advance(50);  // debounce fires, capture runs, crunched=true via ❯ detection
-    timer.advance(200); // idle fires -> onPromptComplete
+    timer.advance(50);  // debounce fires, capture runs
+    timer.advance(200); // idle delay elapses
 
-    assert.equal(completionFired, true, 'onPromptComplete should fire when ❯ prompt appears on its own line');
-  });
-
-  it('prompt detection: echoed input ❯ npm test does NOT trigger completion', async () => {
-    createCapture({ baseDelay: 50, idleDelay: 200 });
-    let completionFired = false;
-    capture.onPromptComplete = () => { completionFired = true; };
-
-    // Write echoed input line — ❯ followed by command text
-    await capture.onData('\u276F npm test\r\n');
-    timer.advance(50);  // debounce fires
-    timer.advance(200); // idle delay
-
-    assert.equal(completionFired, false, 'onPromptComplete should NOT fire for echoed input line');
-  });
-
-  it('prompt detection: spinner guard blocks when ❯ prompt AND active spinner present', async () => {
-    createCapture({ baseDelay: 50, idleDelay: 200 });
-    let completionFired = false;
-    capture.onPromptComplete = () => { completionFired = true; };
-
-    // Write ❯ prompt AND active spinner on another line
-    await capture.onData('\u276F \r\n\u273B Working...\r\n');
-    timer.advance(50);  // debounce fires
-    timer.advance(200); // idle fires — spinner guard should block
-
-    assert.equal(completionFired, false, 'onPromptComplete should NOT fire when active spinner is present');
-  });
-
-  it('prompt detection: markInputSent() resets prompt-based detection', async () => {
-    createCapture({ baseDelay: 50, idleDelay: 200 });
-    let completionFired = false;
-    capture.onPromptComplete = () => { completionFired = true; };
-
-    // Write idle prompt
-    await capture.onData('\u276F \r\n');
-    timer.advance(50); // debounce fires, crunched=true via ❯ detection
-
-    // User sends input — resets crunched state
-    capture.markInputSent();
-
-    // Advance past idle delay
-    timer.advance(200);
-
-    assert.equal(completionFired, false, 'onPromptComplete should NOT fire after markInputSent resets ❯ detection');
+    assert.equal(completionFired, false, 'onPromptComplete should NOT fire for idle ❯ prompt alone — only completion markers trigger');
   });
 
   // ---------- Idle timer starvation (invisible PTY data) ----------
@@ -755,14 +711,14 @@ describe('ScreenCapture', () => {
       'onPromptComplete should fire despite periodic invisible PTY data');
   });
 
-  it('completion detection: fires despite invisible PTY data after idle prompt', async () => {
+  it('completion detection: idle ❯ prompt with invisible PTY data does NOT trigger onPromptComplete', async () => {
     createCapture({ baseDelay: 50, idleDelay: 500 });
     let completionFired = false;
     capture.onPromptComplete = () => { completionFired = true; };
 
     // Write idle prompt (no completion marker)
     await capture.onData('response text\r\n\u276F \r\n');
-    timer.advance(50); // debounce fires, crunched=true via ❯ detection
+    timer.advance(50); // debounce fires
 
     // Simulate cursor blinks
     for (let i = 0; i < 12; i++) {
@@ -770,8 +726,8 @@ describe('ScreenCapture', () => {
       timer.advance(100);
     }
 
-    assert.equal(completionFired, true,
-      'onPromptComplete should fire for ❯ prompt despite invisible PTY data');
+    assert.equal(completionFired, false,
+      'onPromptComplete should NOT fire for ❯ prompt — only completion markers trigger');
   });
 
   it('completion detection: real screen change after marker restarts idle timer', async () => {
