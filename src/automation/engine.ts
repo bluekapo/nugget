@@ -50,7 +50,6 @@ export interface EngineConfig {
   idleDelay?: number;
   arrowKeyDelayMs?: number;
   maxCycles?: number;
-  responseTimeoutMs?: number;
 }
 
 interface SessionMonitor {
@@ -74,10 +73,9 @@ export class AutomationEngine {
   private sessionOutputHandler: ((sessionName: string, data: string) => void) | null = null;
   private retryAttempted = false;
   private readonly maxCycles: number;
-  private readonly responseTimeoutMs: number;
-  private responseTimer: unknown = null;
   private sessionExitHandler: ((name: string, exitCode: number) => void) | null = null;
   private clearPollTimer: unknown = null;
+  private responsePollTimer: unknown = null;
 
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
@@ -98,7 +96,6 @@ export class AutomationEngine {
     this.idleDelay = config.idleDelay ?? 5000;
     this.arrowKeyDelayMs = config.arrowKeyDelayMs ?? 50;
     this.maxCycles = config.maxCycles ?? 100;
-    this.responseTimeoutMs = config.responseTimeoutMs ?? 30000;
   }
 
   get state(): EngineState {
@@ -177,7 +174,7 @@ export class AutomationEngine {
     // Clear any pending timers
     this.clearWaitTimer();
     this.cancelClearPolling();
-    this.cancelResponseTimer();
+    this.cancelResponsePolling();
 
     this.setState('stopped');
   }
@@ -186,7 +183,7 @@ export class AutomationEngine {
     if (this._state === 'stopped') return;
     this.clearWaitTimer();
     this.cancelClearPolling();
-    this.cancelResponseTimer();
+    this.cancelResponsePolling();
     this.setState('paused');
   }
 
@@ -270,29 +267,21 @@ export class AutomationEngine {
 
       this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
 
-      // Reset orchestrator monitor and wait for response
+      // Reset orchestrator monitor for clean screen reads
       if (this.orchestratorMonitor) {
         this.orchestratorMonitor.capture.resetBaseline();
         this.orchestratorMonitor.capture.markInputSent();
-        this.orchestratorMonitor.capture.onPromptComplete = () => this.onResponseReady();
       }
 
       this.setState('waiting-response');
 
-      // Safety net: force response detection after responseTimeoutMs if neither
-      // completion marker detection nor idle detection fires. In production,
-      // Claude Code's Ink TUI may overwrite the "✻ Crunched for Xs" marker
-      // before capture runs, leaving crunched=false permanently.
-      this.responseTimer = this.timer.setTimeout(() => {
-        if (this._state === 'waiting-response') {
-          this.onResponseReady();
-        }
-      }, this.responseTimeoutMs);
+      // Poll orchestrator screen for a parseable directive
+      this.startResponsePolling();
     }, this.baseDelay);
   }
 
   private onResponseReady(): void {
-    this.cancelResponseTimer();
+    this.cancelResponsePolling();
     if (this._state === 'paused' || this._state === 'stopped') return;
 
     this.setState('executing');
@@ -315,20 +304,15 @@ export class AutomationEngine {
 
         this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
 
-        // Reset orchestrator monitor and wait for retry response
+        // Reset orchestrator monitor for clean screen reads
         if (this.orchestratorMonitor) {
           this.orchestratorMonitor.capture.resetBaseline();
           this.orchestratorMonitor.capture.markInputSent();
-          this.orchestratorMonitor.capture.onPromptComplete = () => this.onResponseReady();
         }
         this.setState('waiting-response');
 
-        // Re-arm response timeout for retry
-        this.responseTimer = this.timer.setTimeout(() => {
-          if (this._state === 'waiting-response') {
-            this.onResponseReady();
-          }
-        }, this.responseTimeoutMs);
+        // Poll orchestrator screen for a parseable directive
+        this.startResponsePolling();
       }, this.baseDelay);
       return;
     }
@@ -478,10 +462,28 @@ export class AutomationEngine {
     }
   }
 
-  private cancelResponseTimer(): void {
-    if (this.responseTimer !== null) {
-      this.timer.clearTimeout(this.responseTimer);
-      this.responseTimer = null;
+  private startResponsePolling(): void {
+    this.cancelResponsePolling();
+    this.responsePollTimer = this.timer.setTimeout(() => {
+      if (this._state !== 'waiting-response') return;
+
+      const screenText = this.orchestratorMonitor?.emulator.getScreenText() ?? '';
+      const directive = parseDirective(screenText);
+
+      if (directive) {
+        this.responsePollTimer = null;
+        this.onResponseReady();
+      } else {
+        // Poll again in 1 second
+        this.startResponsePolling();
+      }
+    }, 1000);
+  }
+
+  private cancelResponsePolling(): void {
+    if (this.responsePollTimer !== null) {
+      this.timer.clearTimeout(this.responsePollTimer);
+      this.responsePollTimer = null;
     }
   }
 }
