@@ -47,5 +47,9 @@ export function executeDirective(
         description: `DONE: ${directive.summary}`,
         doneSummary: directive.summary,
       };
+
+    case 'YES':
+    case 'NO':
+      throw new Error(`${directive.type} is a consultation response, not a worker action`);
   }
 }
