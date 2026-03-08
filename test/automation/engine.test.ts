@@ -936,6 +936,105 @@ describe('AutomationEngine', () => {
     assert.ok(promptWrite, 'engine should send prompt after poll detects (no content)');
   });
 
+  // ---------- Test 23: clear poll detects "(no content)" from raw buffer even when emulator returns empty ----------
+
+  it('clear poll detects "(no content)" from raw data buffer, not emulator screen text', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Step 1: Trigger first cycle (deferred timer fires)
+    timer.advance(1);
+    assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator');
+
+    // Step 2: Emit orchestrator output WITHOUT flushing microtasks.
+    // This means the emulator's async write() hasn't completed, so
+    // getScreenText() would return empty. But the raw buffer should
+    // accumulate the data synchronously.
+    bus.emit('session:output', 'orchestrator', clearOutput());
+    // DO NOT flush -- emulator hasn't processed the data yet
+
+    // Step 3: Poll fires at 1000ms -- should detect "(no content)" from buffer
+    // (NOT from emulator, which hasn't processed the write yet)
+    timer.advance(1000);
+
+    // Step 4: 500ms settling delay -> onClearComplete
+    timer.advance(500);
+
+    assert.equal(engine.state, 'prompting-orchestrator',
+      'should transition to prompting-orchestrator using buffer-based clear detection');
+
+    // Step 5: Delayed Enter fires after baseDelay
+    timer.advance(50);
+    assert.equal(engine.state, 'waiting-response',
+      'should transition to waiting-response after delayed Enter');
+  });
+
+  // ---------- Test 24: clearingBuffer is reset on /clear send and on clear completion ----------
+
+  it('clearingBuffer is reset when /clear is sent and when clear completes', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // First cycle
+    timer.advance(1);
+    assert.equal(engine.state, 'clearing-orchestrator');
+
+    // Emit clear response
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll detects it
+    timer.advance(500);  // settling delay -> onClearComplete
+
+    assert.equal(engine.state, 'prompting-orchestrator');
+
+    // Complete the full cycle to get back to clearing-orchestrator
+    timer.advance(50); // delayed Enter -> waiting-response
+
+    // Send directive response
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo hello'));
+    timer.advance(1000); // response poll fires
+
+    // Now engine is idle, trigger another cycle via worker output
+    await emitOutput(bus, 'worker', completionOutput('echo hello output'));
+    timer.advance(50);  // debounce
+    timer.advance(100); // idle detection
+
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'should be clearing orchestrator for second cycle');
+
+    // Emit a DIFFERENT clear response -- the buffer should only have this new data
+    // (buffer was reset before sending /clear)
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll detects it
+    timer.advance(500);  // settling delay
+
+    assert.equal(engine.state, 'prompting-orchestrator',
+      'second cycle should also detect clear from fresh buffer');
+  });
+
+  // ---------- Test 25: ANSI escape codes in raw PTY data don't prevent "(no content)" detection ----------
+
+  it('ANSI escape codes in raw PTY data do not prevent "(no content)" detection', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Trigger first cycle
+    timer.advance(1);
+    assert.equal(engine.state, 'clearing-orchestrator');
+
+    // Emit clear response wrapped in ANSI escape codes (common in real PTY output)
+    // Don't flush -- rely on buffer, not emulator
+    const ansiWrappedClear = '\x1b[2m> /clear\x1b[0m\r\n\r\n  \x1b[36m\u23BF\x1b[0m  (no content)\r\n';
+    bus.emit('session:output', 'orchestrator', ansiWrappedClear);
+
+    // Poll fires at 1000ms -- should detect "(no content)" after stripping ANSI codes from buffer
+    timer.advance(1000);
+    // 500ms settling delay -> onClearComplete
+    timer.advance(500);
+
+    assert.equal(engine.state, 'prompting-orchestrator',
+      'should detect (no content) even with ANSI escape codes in raw PTY data');
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------
