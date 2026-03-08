@@ -525,7 +525,6 @@ export class AutomationEngine {
       // Check raw PTY buffer instead of emulator screen text.
       const stripped = this.clearingBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
       debugLog(`[clear-poll] rawBufferLen=${this.clearingBuffer.length} strippedLen=${stripped.length} stripped=${JSON.stringify(stripped.slice(-300))}`);
-      this.bus.emit('automation:error', `[clear-poll] buffer (${stripped.length} chars): ${JSON.stringify(stripped.slice(-200))}`);
       if (stripped.includes('(no content)')) {
         debugLog(`[clear-poll] FOUND "(no content)" — scheduling onClearComplete in 500ms`);
         this.clearPollTimer = null;
