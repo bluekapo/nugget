@@ -383,17 +383,6 @@ export class ScreenCapture {
       this.crunched = true;
     }
 
-    // Fallback: detect Claude Code's idle input prompt (❯ on its own line)
-    // as an alternative completion signal for responses without a marker.
-    if (!this.crunched) {
-      const hasIdlePrompt = currentText.split('\n').some(
-        line => /^\u276F\s*$/.test(line)
-      );
-      if (hasIdlePrompt) {
-        this.crunched = true;
-      }
-    }
-
     // Only start idle timer when crunched — prevents false notifications on
     // arbitrary idle periods (plugin loads, output pauses, etc.).
     // When requireMarker=false, skip the crunched check and fire on data-idle alone.
