@@ -1377,9 +1377,15 @@ describe('InlineKeyboard', () => {
       try {
         await clearHandler(mockCtx);
 
-        // Flush all scheduled timeouts
+        // Flush all scheduled timeouts, draining microtasks between batches
+        // so that chained .then() callbacks (second phase) can schedule their timeouts
         let flushed = 0;
-        while (flushed < timeoutCalls.length) {
+        for (let guard = 0; guard < 200; guard++) {
+          if (flushed >= timeoutCalls.length) {
+            // Drain microtasks to let .then() chains schedule new timeouts
+            await new Promise<void>(r => r());
+            if (flushed >= timeoutCalls.length) break;
+          }
           timeoutCalls[flushed].callback();
           flushed++;
         }

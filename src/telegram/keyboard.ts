@@ -74,6 +74,34 @@ export function buildControlsKeyboard(locked = true, enterConfirmation = false):
 }
 
 /**
+ * Send keystrokes to a session in small timed batches.
+ * Each batch writes `batchSize` copies of `key`, then waits `delayMs` before the next batch.
+ * Returns a Promise that resolves when all batches have been sent.
+ */
+function sendChunkedKeys(
+  sessionManager: Pick<SessionManager, 'writeToSession'>,
+  sessionName: string,
+  key: string,
+  count: number,
+  batchSize: number,
+  delayMs: number,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let sent = 0;
+    const sendBatch = (): void => {
+      if (sent >= count) { resolve(); return; }
+      const remaining = count - sent;
+      const thisBatch = Math.min(batchSize, remaining);
+      sessionManager.writeToSession(sessionName, key.repeat(thisBatch));
+      sent += thisBatch;
+      if (sent >= count) { resolve(); return; }
+      setTimeout(sendBatch, delayMs);
+    };
+    sendBatch();
+  });
+}
+
+/**
  * Register callback query handlers for action buttons and hub buttons.
  * Also registers a catch-all handler to prevent stuck loading spinners.
  */
@@ -142,8 +170,11 @@ export function registerCallbackHandlers(
       }
 
       // Clear input: send right-arrows (move cursor to end) + backspaces (delete all)
+      // Sent in small timed batches so the Ink TUI can process each batch before the next arrives.
       if (action.data === 'action:clear-input') {
-        sessionManager.writeToSession(sessionName, '\x1b[C'.repeat(300) + '\x7f'.repeat(300));
+        sendChunkedKeys(sessionManager, sessionName, '\x1b[C', 200, 10, 15).then(() =>
+          sendChunkedKeys(sessionManager, sessionName, '\x7f', 200, 10, 15)
+        );
         await ctx.answerCallbackQuery();
         return;
       }
