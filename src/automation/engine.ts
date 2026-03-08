@@ -471,6 +471,12 @@ export class AutomationEngine {
       const directive = parseDirective(screenText);
 
       if (directive) {
+        // Valid directive found -- fire response handler
+        this.responsePollTimer = null;
+        this.onResponseReady();
+      } else if (/\u273B\s+Crunched for/.test(screenText)) {
+        // Completion marker present but no parseable directive --
+        // fire response handler to trigger SAF-02 retry logic
         this.responsePollTimer = null;
         this.onResponseReady();
       } else {
