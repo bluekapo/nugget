@@ -211,7 +211,11 @@ export class AutomationHubRenderer {
       this.updateCycleInfo(cycleNumber, action);
       this.render();
     };
-    this.escalationHandler = (_reason: string) => {
+    this.escalationHandler = (reason: string) => {
+      // Send standalone notification so user gets a notification sound
+      this.api.sendMessage(this.chatId, `Automation escalated: ${reason}`, {
+        parse_mode: 'HTML',
+      }).catch(() => {});
       this.render();
     };
 

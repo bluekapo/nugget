@@ -196,7 +196,8 @@ describe('AutomationEngine', () => {
     // Step 2: Orchestrator processes /clear (completion marker)
     await emitOutput(bus, 'orchestrator', completionOutput('/clear processed'));
     timer.advance(50);  // debounce
-    timer.advance(100); // idle -> onPromptComplete for clear
+    timer.advance(100); // idle -> onPromptComplete for clear -> onClearComplete (prompt text sent)
+    timer.advance(50);  // delayed Enter fires -> waiting-response
 
     // Engine should have sent prompt to orchestrator
     const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('## Task'));
@@ -237,6 +238,7 @@ describe('AutomationEngine', () => {
     await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
     timer.advance(50);
     timer.advance(100);
+    timer.advance(50);  // delayed Enter after prompt
 
     // Engine sends prompt, orchestrator responds with ESCALATE
     await emitOutput(bus, 'orchestrator', directiveOutput('ESCALATE: task is complete'));
@@ -263,6 +265,7 @@ describe('AutomationEngine', () => {
     await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
     timer.advance(50);
     timer.advance(100);
+    timer.advance(50);  // delayed Enter after prompt
 
     // Orchestrator responds with WAIT: 5
     await emitOutput(bus, 'orchestrator', directiveOutput('WAIT: 5'));
@@ -391,6 +394,7 @@ describe('AutomationEngine', () => {
     await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
     timer.advance(50);
     timer.advance(100);
+    timer.advance(50);  // delayed Enter after prompt
 
     // Orchestrator responds with SELECT: 3 (needs 2 arrow-downs then Enter)
     await emitOutput(bus, 'orchestrator', directiveOutput('SELECT: 3'));
@@ -424,7 +428,7 @@ describe('AutomationEngine', () => {
     await emitOutput(bus, 'worker', completionOutput('cycle 1'));
     timer.advance(50); timer.advance(100);
     await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
-    timer.advance(50); timer.advance(100);
+    timer.advance(50); timer.advance(100); timer.advance(50); // delayed Enter
     await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo 1'));
     timer.advance(50); timer.advance(100);
 
@@ -434,7 +438,7 @@ describe('AutomationEngine', () => {
     await emitOutput(bus, 'worker', completionOutput('cycle 2'));
     timer.advance(50); timer.advance(100);
     await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
-    timer.advance(50); timer.advance(100);
+    timer.advance(50); timer.advance(100); timer.advance(50); // delayed Enter
     await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo 2'));
     timer.advance(50); timer.advance(100);
 
@@ -465,7 +469,7 @@ describe('AutomationEngine', () => {
       await emitOutput(bus, 'worker', completionOutput(`cycle ${i}`));
       timer.advance(50); timer.advance(100);
       await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
-      timer.advance(50); timer.advance(100);
+      timer.advance(50); timer.advance(100); timer.advance(50); // delayed Enter
       await emitOutput(bus, 'orchestrator', directiveOutput(`COMMAND: echo ${i}`));
       timer.advance(50); timer.advance(100);
     }
@@ -493,11 +497,14 @@ describe('AutomationEngine', () => {
     await emitOutput(bus, 'worker', completionOutput('data'));
     timer.advance(50); timer.advance(100);
     await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
-    timer.advance(50); timer.advance(100);
+    timer.advance(50); timer.advance(100); timer.advance(50); // delayed Enter
 
     // Orchestrator responds with unparseable text
     await emitOutput(bus, 'orchestrator', directiveOutput('I think we should run tests'));
     timer.advance(50); timer.advance(100);
+
+    // onResponseReady sends retry prompt text, then delayed Enter
+    timer.advance(50); // delayed Enter for retry prompt
 
     // Engine should be in waiting-response (retrying), not idle or stopped
     assert.equal(engine.state, 'waiting-response', 'should be waiting for retry response');
@@ -520,12 +527,14 @@ describe('AutomationEngine', () => {
     await emitOutput(bus, 'worker', completionOutput('data'));
     timer.advance(50); timer.advance(100);
     await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
-    timer.advance(50); timer.advance(100);
+    timer.advance(50); timer.advance(100); timer.advance(50); // delayed Enter
 
     // First unparseable response -> triggers retry
     await emitOutput(bus, 'orchestrator', directiveOutput('I think we should run tests'));
     timer.advance(50); timer.advance(100);
 
+    // Retry prompt has delayed Enter
+    timer.advance(50);
     assert.equal(engine.state, 'waiting-response', 'should be waiting for retry response');
 
     // Second unparseable response -> should ESCALATE
@@ -621,14 +630,17 @@ describe('AutomationEngine', () => {
     await emitOutput(bus, 'orchestrator', '> /clear\r\n\r\n  \u23BF  (no content)\r\n');
 
     // Should complete immediately (after microtask flush) without needing idle delay
-    timer.advance(1); // just fire the deferred setTimeout(0)
+    timer.advance(1); // just fire the deferred setTimeout(0) -> onClearComplete
 
     assert.notEqual(engine.state, 'clearing-orchestrator',
       'should transition past clearing-orchestrator immediately on (no content)');
-    // prompting-orchestrator is transient — onClearComplete() synchronously
-    // progresses to waiting-response after sending the prompt
+    assert.equal(engine.state, 'prompting-orchestrator',
+      'should be in prompting-orchestrator (prompt text sent, Enter pending)');
+
+    // Delayed Enter fires after baseDelay
+    timer.advance(50);
     assert.equal(engine.state, 'waiting-response',
-      'should have sent prompt and be waiting for response');
+      'should transition to waiting-response after delayed Enter');
 
     // Verify prompt was sent
     const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('## Task'));
@@ -686,6 +698,7 @@ describe('AutomationEngine', () => {
     await emitOutput(bus, 'orchestrator', 'Conversation cleared.\r\n');
     timer.advance(50);  // debounce fires capture
     timer.advance(100); // idle fires onPromptComplete (no marker needed due to requireMarker=false)
+    timer.advance(50);  // delayed Enter fires -> waiting-response
 
     // Engine should have moved past clearing-orchestrator
     assert.notEqual(engine.state, 'clearing-orchestrator',
@@ -733,14 +746,53 @@ describe('AutomationEngine', () => {
     await emitOutput(bus, 'orchestrator', 'content)\r\n');
     await flush();
 
-    // Fire the deferred setTimeout(0)
+    // Fire the deferred setTimeout(0) -> onClearComplete
     timer.advance(1);
 
     assert.notEqual(engine.state, 'clearing-orchestrator',
       'should transition past clearing-orchestrator when (no content) is split across chunks');
+    assert.equal(engine.state, 'prompting-orchestrator',
+      'should be in prompting-orchestrator (prompt text sent, Enter pending)');
+
+    // Delayed Enter fires after baseDelay
+    timer.advance(50);
     assert.equal(engine.state, 'waiting-response',
-      'should have sent prompt and be waiting for response');
+      'should transition to waiting-response after delayed Enter');
   });
+
+  // ---------- Test 23: clearing-orchestrator timeout safety net ----------
+
+  it('clearing-orchestrator timeout: engine transitions after clearingTimeoutMs when no detection fires', async () => {
+    config = { ...config, clearingTimeoutMs: 500 };
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+
+    engine.start();
+
+    // Worker goes idle (first cycle triggers immediately via deferred timer)
+    timer.advance(1);
+
+    assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator');
+
+    // Do NOT emit any orchestrator output -- simulate undetectable /clear response
+    // Neither fast-path (no content) nor slow-path (idle detection) fires
+
+    // Advance timer by clearingTimeoutMs
+    timer.advance(500);
+
+    // Timeout should have forced onClearComplete -> prompting-orchestrator
+    assert.equal(engine.state, 'prompting-orchestrator',
+      'timeout should force onClearComplete, now in prompting-orchestrator');
+
+    // Delayed Enter fires after baseDelay
+    timer.advance(50);
+    assert.equal(engine.state, 'waiting-response',
+      'should transition to waiting-response after delayed Enter');
+
+    // Verify prompt was sent to orchestrator
+    const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('## Task'));
+    assert.ok(promptWrite, 'engine should send prompt after clearing timeout');
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------

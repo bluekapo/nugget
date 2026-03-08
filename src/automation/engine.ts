@@ -50,6 +50,7 @@ export interface EngineConfig {
   idleDelay?: number;
   arrowKeyDelayMs?: number;
   maxCycles?: number;
+  clearingTimeoutMs?: number;
 }
 
 interface SessionMonitor {
@@ -70,9 +71,11 @@ export class AutomationEngine {
   private cycleNumber = 0;
   private workerScreenText = '';
   private waitTimer: unknown = null;
+  private clearingTimer: unknown = null;
   private sessionOutputHandler: ((sessionName: string, data: string) => void) | null = null;
   private retryAttempted = false;
   private readonly maxCycles: number;
+  private readonly clearingTimeoutMs: number;
   private sessionExitHandler: ((name: string, exitCode: number) => void) | null = null;
   private clearingBuffer = '';
 
@@ -95,6 +98,7 @@ export class AutomationEngine {
     this.idleDelay = config.idleDelay ?? 5000;
     this.arrowKeyDelayMs = config.arrowKeyDelayMs ?? 50;
     this.maxCycles = config.maxCycles ?? 100;
+    this.clearingTimeoutMs = config.clearingTimeoutMs ?? 10000;
   }
 
   get state(): EngineState {
@@ -182,8 +186,9 @@ export class AutomationEngine {
       this.orchestratorMonitor = null;
     }
 
-    // Clear any pending wait timer
+    // Clear any pending timers
     this.clearWaitTimer();
+    this.cancelClearingTimer();
 
     this.clearingBuffer = '';
     this.setState('stopped');
@@ -192,6 +197,7 @@ export class AutomationEngine {
   pause(): void {
     if (this._state === 'stopped') return;
     this.clearWaitTimer();
+    this.cancelClearingTimer();
     this.setState('paused');
   }
 
@@ -257,9 +263,18 @@ export class AutomationEngine {
     }
 
     this.setState('clearing-orchestrator');
+
+    // Safety net: force transition after clearingTimeoutMs if neither
+    // fast-path ((no content) detection) nor slow-path (idle detection) fires.
+    this.clearingTimer = this.timer.setTimeout(() => {
+      if (this._state === 'clearing-orchestrator') {
+        this.onClearComplete();
+      }
+    }, this.clearingTimeoutMs);
   }
 
   private onClearComplete(): void {
+    this.cancelClearingTimer();
     if (this._state !== 'clearing-orchestrator') return;
 
     this.clearingBuffer = '';
@@ -274,17 +289,25 @@ export class AutomationEngine {
       cycleNumber: this.cycleNumber,
     });
 
-    // Send prompt to orchestrator
-    this.sessionManager.writeToSession(this.config.orchestratorSession, prompt + '\r');
+    // Send prompt text to orchestrator (without Enter).
+    // The Enter keystroke is sent after a short delay so the TUI (Ink raw mode)
+    // has time to process the multiline text before the submission signal arrives.
+    this.sessionManager.writeToSession(this.config.orchestratorSession, prompt);
 
-    // Reset orchestrator monitor and wait for response
-    if (this.orchestratorMonitor) {
-      this.orchestratorMonitor.capture.resetBaseline();
-      this.orchestratorMonitor.capture.markInputSent();
-      this.orchestratorMonitor.capture.onPromptComplete = () => this.onResponseReady();
-    }
+    this.timer.setTimeout(() => {
+      if (this._state !== 'prompting-orchestrator') return;
 
-    this.setState('waiting-response');
+      this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+
+      // Reset orchestrator monitor and wait for response
+      if (this.orchestratorMonitor) {
+        this.orchestratorMonitor.capture.resetBaseline();
+        this.orchestratorMonitor.capture.markInputSent();
+        this.orchestratorMonitor.capture.onPromptComplete = () => this.onResponseReady();
+      }
+
+      this.setState('waiting-response');
+    }, this.baseDelay);
   }
 
   private onResponseReady(): void {
@@ -301,16 +324,23 @@ export class AutomationEngine {
       this.retryAttempted = true;
       this.bus.emit('automation:error', 'Failed to parse directive from orchestrator response, retrying');
 
-      // Send clarifying re-prompt directly (no /clear)
-      this.sessionManager.writeToSession(this.config.orchestratorSession, RETRY_PROMPT + '\r');
+      // Send clarifying re-prompt text (without Enter), then submit after delay
+      this.sessionManager.writeToSession(this.config.orchestratorSession, RETRY_PROMPT);
+      this.setState('prompting-orchestrator');
 
-      // Reset orchestrator monitor and wait for retry response
-      if (this.orchestratorMonitor) {
-        this.orchestratorMonitor.capture.resetBaseline();
-        this.orchestratorMonitor.capture.markInputSent();
-        this.orchestratorMonitor.capture.onPromptComplete = () => this.onResponseReady();
-      }
-      this.setState('waiting-response');
+      this.timer.setTimeout(() => {
+        if (this._state !== 'prompting-orchestrator') return;
+
+        this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+
+        // Reset orchestrator monitor and wait for retry response
+        if (this.orchestratorMonitor) {
+          this.orchestratorMonitor.capture.resetBaseline();
+          this.orchestratorMonitor.capture.markInputSent();
+          this.orchestratorMonitor.capture.onPromptComplete = () => this.onResponseReady();
+        }
+        this.setState('waiting-response');
+      }, this.baseDelay);
       return;
     }
 
@@ -432,6 +462,13 @@ export class AutomationEngine {
     if (this.waitTimer !== null) {
       this.timer.clearTimeout(this.waitTimer);
       this.waitTimer = null;
+    }
+  }
+
+  private cancelClearingTimer(): void {
+    if (this.clearingTimer !== null) {
+      this.timer.clearTimeout(this.clearingTimer);
+      this.clearingTimer = null;
     }
   }
 }

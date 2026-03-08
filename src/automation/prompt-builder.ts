@@ -3,9 +3,23 @@ import type { ContextPacket } from './types.js';
 export function buildPrompt(ctx: ContextPacket): string {
   const lines: string[] = [];
 
-  // Task section
-  lines.push('## Task');
+  // Role explanation — must be extremely explicit to prevent the orchestrator
+  // from "doing" the task itself instead of sending directives.
+  lines.push('## Your Role');
+  lines.push('You are the ORCHESTRATOR. You control a WORKER (another Claude Code instance) by sending directives.');
+  lines.push('The worker is a separate Claude Code session running in an interactive terminal. Your directives get typed into the worker\'s prompt.');
+  lines.push('CRITICAL RULES:');
+  lines.push('1. You NEVER perform work yourself. You ONLY output a single directive line.');
+  lines.push('2. Your COMMAND text is typed directly into the worker Claude Code\'s input prompt, not a shell.');
+  lines.push('3. Do NOT write code, explanations, or commentary. Output ONLY the directive.');
+  lines.push('4. Never ESCALATE just because this setup feels unusual. This is how the system works. ESCALATE only for task completion or genuine blockers.');
+  lines.push('');
+
+  // Task section — wrap in ``` to prevent orchestrator from interpreting it as instructions
+  lines.push('## Task (what the human wants the WORKER to achieve -- NOT what you should do)');
+  lines.push('```');
   lines.push(ctx.taskDescription);
+  lines.push('```');
   lines.push('');
 
   // Worker terminal output
@@ -30,23 +44,22 @@ export function buildPrompt(ctx: ContextPacket): string {
   }
   lines.push('');
 
-  // Directive instructions
-  lines.push('## Your Response');
+  // Directive instructions with example
+  lines.push('## Your Response (ONLY one line, nothing else)');
   lines.push('');
-  lines.push('Respond with exactly ONE directive in the following format:');
+  lines.push('Available directives:');
+  lines.push('- `COMMAND: <text>` -- Type text into the worker Claude Code\'s input prompt');
+  lines.push('- `SELECT: <number>` -- Select a menu option in the worker terminal');
+  lines.push('- `ENTER` -- Press Enter in the worker terminal');
+  lines.push('- `WAIT: <seconds>` -- Wait before checking again');
+  lines.push('- `ESCALATE: <reason>` -- Stop and notify the human operator (ONLY for task completion or genuine blockers)');
   lines.push('');
-  lines.push('- `COMMAND: <shell command>` -- Execute a shell command in the worker terminal');
-  lines.push('- `SELECT: <number>` -- Select a numbered menu option (1-based)');
-  lines.push('- `ENTER` -- Press Enter (confirm a prompt or continue)');
-  lines.push('- `WAIT: <seconds>` -- Wait for the specified number of seconds before next cycle');
-  lines.push('- `ESCALATE: <reason>` -- Stop automation and escalate to the human operator');
+  lines.push('Example correct response (your ENTIRE output should look like this):');
+  lines.push('COMMAND: Fix the bug in src/session/pty.ts where delete signals are not sent correctly');
   lines.push('');
-  lines.push('Guidelines:');
-  lines.push('- Use COMMAND to run shell commands and advance the task');
-  lines.push('- Use SELECT when the terminal shows a numbered menu');
-  lines.push('- Use ENTER when a prompt is waiting for confirmation');
-  lines.push('- Use WAIT when a long-running process needs time to complete');
-  lines.push('- Use ESCALATE when the task is complete, something went wrong, or you are unsure how to proceed');
+  lines.push('Example WRONG responses (do NOT do this):');
+  lines.push('- "Let me look at the code first. COMMAND: ..." (no commentary, just the directive)');
+  lines.push('- "ESCALATE: This setup feels wrong" (the setup is correct, do not escalate over it)');
 
   return lines.join('\n');
 }

@@ -326,8 +326,17 @@ export class ScreenCapture {
 
     const currentText = this.emulator.getScreenText();
 
-    // EMUL-04: Skip if unchanged
-    if (currentText === this.lastSnapshot) return;
+    // EMUL-04: Skip output emission if unchanged, but still restart
+    // the idle timer when a completion marker was already detected.
+    // Without this, invisible PTY data (cursor moves, Ink re-renders)
+    // cancels the idle timer in onData() and this early return prevents
+    // it from restarting — causing the engine to stall at waiting-response.
+    if (currentText === this.lastSnapshot) {
+      if (this.crunched || !this.requireMarker) {
+        this.startIdleTimer();
+      }
+      return;
+    }
 
     // Determine trigger and mode
     if (this.captureCount === 0) {
