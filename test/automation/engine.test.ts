@@ -1352,6 +1352,148 @@ describe('AutomationEngine', () => {
       'should start new cycle when worker completes after WAIT expired');
   });
 
+  // ---------- Stagnation detection tests ----------
+
+  it('stagnation detection: engine enters consultation after worker output stagnation', async () => {
+    // Use short stagnation delay for testing
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle to get engine back to idle
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter -> waiting-response
+
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000); // response poll fires, finds COMMAND directive
+
+    assert.equal(engine.state, 'idle', 'should be idle after first cycle');
+
+    // Do NOT emit any worker output -- let stagnation timer fire
+    timer.advance(200); // stagnation timer fires
+
+    // Engine should have entered consultation flow and be clearing orchestrator
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'should enter clearing-orchestrator after stagnation timer fires');
+
+    // Verify /clear was written (proves consultation flow started)
+    const clearWrites = writes.filter(w => w.name === 'orchestrator' && w.data.includes('/clear'));
+    assert.ok(clearWrites.length >= 2, 'should send /clear for consultation (second /clear)');
+  });
+
+  it('completion marker fast path: completion marker triggers immediate cycle, not consultation', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle to get engine back to idle
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000);
+
+    assert.equal(engine.state, 'idle', 'should be idle after first cycle');
+
+    // Worker emits output WITH completion marker (fast path)
+    await emitOutput(bus, 'worker', completionOutput('task done'));
+    timer.advance(50);  // debounce fires
+    timer.advance(100); // idle fires -> onPromptComplete -> onWorkerIdle
+
+    // Engine should enter clearing-orchestrator via normal cycle (not consultation)
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'completion marker should trigger normal cycle, not consultation');
+
+    // Complete clear and verify a directive prompt (not consultation prompt) was sent
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500);
+
+    // Check that the prompt sent is a directive prompt (contains "## Your Response")
+    // not a consultation prompt (which would contain "## Question")
+    const promptWrites = writes.filter(w => w.name === 'orchestrator' && w.data.includes('## Your Response'));
+    assert.ok(promptWrites.length > 0, 'should send directive prompt (not consultation prompt) on fast path');
+  });
+
+  it('stagnation timer resets on worker output', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle to get engine back to idle
+    timer.advance(1); // deferred start
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000);
+
+    assert.equal(engine.state, 'idle', 'should be idle after first cycle');
+
+    // Advance partway through stagnation delay (150 of 200ms)
+    timer.advance(150);
+    assert.equal(engine.state, 'idle', 'should still be idle before stagnation fires');
+
+    // Emit non-completion worker output (resets stagnation timer)
+    await emitOutput(bus, 'worker', 'Processing...\r\n');
+
+    // Advance same partial amount again (150ms from reset)
+    timer.advance(150);
+    assert.equal(engine.state, 'idle',
+      'should still be idle because stagnation timer was reset by worker output');
+
+    // Advance remaining time to fire the reset stagnation timer (50ms more = 200ms total from reset)
+    timer.advance(50);
+
+    // Now stagnation should fire
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'stagnation timer should fire after full delay from last worker output');
+  });
+
+  it('consultation prompt sent to orchestrator after stagnation', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle to get engine back to idle
+    timer.advance(1);
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000);
+
+    assert.equal(engine.state, 'idle', 'should be idle after first cycle');
+
+    // Let stagnation fire
+    timer.advance(200);
+    assert.equal(engine.state, 'clearing-orchestrator', 'consultation clearing started');
+
+    // Complete clear
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onConsultationClearComplete
+
+    // Consultation prompt should be sent (contains "YES" and "NO", not "COMMAND")
+    const consultationWrites = writes.filter(
+      w => w.name === 'orchestrator' && w.data.includes('YES') && w.data.includes('NO')
+    );
+    assert.ok(consultationWrites.length > 0,
+      'should send consultation prompt containing YES and NO to orchestrator');
+
+    // Verify it does NOT contain directive instructions
+    const directiveWrites = writes.filter(
+      w => w.name === 'orchestrator' && w.data.includes('## Your Response')
+    );
+    // The directive prompt from cycle 1 will exist, but after the consultation clear,
+    // we should see a consultation prompt instead. Check the last prompt write.
+    const lastPromptWrite = writes
+      .filter(w => w.name === 'orchestrator' && (w.data.includes('## Question') || w.data.includes('## Your Response')))
+      .pop();
+    assert.ok(lastPromptWrite?.data.includes('## Question'),
+      'last prompt should be consultation (## Question), not directive (## Your Response)');
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------

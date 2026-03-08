@@ -19,7 +19,7 @@ import { ScreenCapture } from '../terminal/capture.js';
 import type { TimerProvider } from '../terminal/capture.js';
 import type { EventBus } from '../events/bus.js';
 import { parseDirective } from './directive-parser.js';
-import { buildPrompt } from './prompt-builder.js';
+import { buildPrompt, buildConsultationPrompt } from './prompt-builder.js';
 import { executeDirective } from './action-executor.js';
 import { ActionLog } from './action-log.js';
 
@@ -67,6 +67,8 @@ export type EngineState =
   | 'clearing-orchestrator'
   | 'prompting-orchestrator'
   | 'waiting-response'
+  | 'consulting-orchestrator'
+  | 'waiting-consultation'
   | 'executing'
   | 'waiting'
   | 'paused';
@@ -80,6 +82,9 @@ export interface EngineConfig {
   idleDelay?: number;
   arrowKeyDelayMs?: number;
   maxCycles?: number;
+  /** Stagnation delay in ms -- how long worker must be silent before consultation.
+   *  Default: 10000 (10s). */
+  stagnationDelay?: number;
   /** Optional callback to trigger a PTY redraw on the orchestrator session.
    *  Used to flush stuck IPC output when the remote TUI goes idle after rendering. */
   requestOrchestratorRedraw?: () => void;
@@ -112,11 +117,14 @@ export class AutomationEngine {
   private clearingBuffer = '';
   private responseBuffer = '';
   private lastResponseBufLen = 0;
+  private stagnationTimer: unknown = null;
+  private consultationMode = false;
 
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
   private readonly idleDelay: number;
   private readonly arrowKeyDelayMs: number;
+  private readonly stagnationDelay: number;
 
   constructor(
     private readonly config: EngineConfig,
@@ -132,6 +140,7 @@ export class AutomationEngine {
     this.idleDelay = config.idleDelay ?? 5000;
     this.arrowKeyDelayMs = config.arrowKeyDelayMs ?? 50;
     this.maxCycles = config.maxCycles ?? 100;
+    this.stagnationDelay = config.stagnationDelay ?? 10000;
   }
 
   get state(): EngineState {
@@ -165,11 +174,16 @@ export class AutomationEngine {
         debugLog(`[buffer-append] bufferLen=${this.clearingBuffer.length} chunkPreview=${JSON.stringify(data.slice(0, 100))}`);
       }
 
-      // Accumulate raw PTY data during waiting-response state.
+      // Accumulate raw PTY data during waiting-response or waiting-consultation state.
       // The emulator viewport is only 40 rows — long prompts push the
       // response off-screen. Parsing the raw buffer avoids this limitation.
-      if (this._state === 'waiting-response' && sessionName === this.config.orchestratorSession) {
+      if ((this._state === 'waiting-response' || this._state === 'waiting-consultation') && sessionName === this.config.orchestratorSession) {
         this.responseBuffer += data;
+      }
+
+      // Reset stagnation timer on worker output while idle
+      if (sessionName === this.config.workerSession && this._state === 'idle') {
+        this.resetStagnationTimer();
       }
 
       if (sessionName === this.config.workerSession && this.workerMonitor) {
@@ -233,6 +247,7 @@ export class AutomationEngine {
     this.clearWaitTimer();
     this.cancelClearPolling();
     this.cancelResponsePolling();
+    this.cancelStagnationTimer();
 
     // Reset buffers
     this.clearingBuffer = '';
@@ -246,6 +261,7 @@ export class AutomationEngine {
     this.clearWaitTimer();
     this.cancelClearPolling();
     this.cancelResponsePolling();
+    this.cancelStagnationTimer();
     this.setState('paused');
   }
 
@@ -271,8 +287,20 @@ export class AutomationEngine {
   }
 
   private setState(newState: EngineState): void {
-    debugLog(`[setState] ${this._state} -> ${newState}`);
+    const oldState = this._state;
+    debugLog(`[setState] ${oldState} -> ${newState}`);
     this._state = newState;
+
+    // Cancel stagnation timer when leaving idle
+    if (oldState === 'idle' && newState !== 'idle') {
+      this.cancelStagnationTimer();
+    }
+
+    // Start stagnation timer when entering idle
+    if (newState === 'idle' && oldState !== 'idle') {
+      this.startStagnationTimer();
+    }
+
     this.bus.emit('automation:state-change', newState);
   }
 
@@ -289,6 +317,9 @@ export class AutomationEngine {
 
     // SAF-02: Reset retry flag each cycle
     this.retryAttempted = false;
+
+    // Normal directive cycle (not consultation)
+    this.consultationMode = false;
 
     this.setState('capturing-worker');
 
@@ -552,10 +583,16 @@ export class AutomationEngine {
       const stripped = this.clearingBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
       debugLog(`[clear-poll] rawBufferLen=${this.clearingBuffer.length} strippedLen=${stripped.length} stripped=${JSON.stringify(stripped.slice(-300))}`);
       if (stripped.includes('(no content)')) {
-        debugLog(`[clear-poll] FOUND "(no content)" — scheduling onClearComplete in 500ms`);
+        debugLog(`[clear-poll] FOUND "(no content)" — scheduling ${this.consultationMode ? 'onConsultationClearComplete' : 'onClearComplete'} in 500ms`);
         this.clearPollTimer = null;
         // 500ms settling delay so TUI finishes rendering before prompt text is typed
-        this.timer.setTimeout(() => this.onClearComplete(), 500);
+        this.timer.setTimeout(() => {
+          if (this.consultationMode) {
+            this.onConsultationClearComplete();
+          } else {
+            this.onClearComplete();
+          }
+        }, 500);
       } else {
         debugLog(`[clear-poll] "(no content)" NOT found — re-polling`);
         // Poll again in 1 second
@@ -573,10 +610,11 @@ export class AutomationEngine {
 
   private startResponsePolling(): void {
     this.cancelResponsePolling();
-    debugLog(`[startResponsePolling] scheduling poll in 1000ms`);
+    debugLog(`[startResponsePolling] scheduling poll in 1000ms (consultationMode=${this.consultationMode})`);
     this.responsePollTimer = this.timer.setTimeout(() => {
-      if (this._state !== 'waiting-response') {
-        debugLog(`[response-poll] SKIPPED — state changed to ${this._state}`);
+      const expectedState = this.consultationMode ? 'waiting-consultation' : 'waiting-response';
+      if (this._state !== expectedState) {
+        debugLog(`[response-poll] SKIPPED — state changed to ${this._state} (expected ${expectedState})`);
         return;
       }
 
@@ -590,11 +628,19 @@ export class AutomationEngine {
       if (directive) {
         debugLog(`[response-poll] directive found: ${directive.type} => ${JSON.stringify(directive)}`);
         this.responsePollTimer = null;
-        this.onResponseReady();
+        if (this.consultationMode) {
+          this.onConsultationResponse();
+        } else {
+          this.onResponseReady();
+        }
       } else if (hasOrchestratorResponse(stripped) && hasCompletionMarker(stripped)) {
         debugLog(`[response-poll] completion marker found with ● response but no directive — triggering retry`);
         this.responsePollTimer = null;
-        this.onResponseReady();
+        if (this.consultationMode) {
+          this.onConsultationResponse();
+        } else {
+          this.onResponseReady();
+        }
       } else {
         // If buffer hasn't grown since last poll, request a redraw to flush
         // any output stuck in TCP/Nagle buffering or Ink's idle state.
@@ -613,6 +659,122 @@ export class AutomationEngine {
     if (this.responsePollTimer !== null) {
       this.timer.clearTimeout(this.responsePollTimer);
       this.responsePollTimer = null;
+    }
+  }
+
+  // --- Stagnation detection and consultation flow ---
+
+  private startStagnationTimer(): void {
+    this.cancelStagnationTimer();
+    debugLog(`[startStagnationTimer] scheduling in ${this.stagnationDelay}ms`);
+    this.stagnationTimer = this.timer.setTimeout(() => {
+      this.stagnationTimer = null;
+      this.onWorkerStagnation();
+    }, this.stagnationDelay);
+  }
+
+  private cancelStagnationTimer(): void {
+    if (this.stagnationTimer !== null) {
+      this.timer.clearTimeout(this.stagnationTimer);
+      this.stagnationTimer = null;
+    }
+  }
+
+  private resetStagnationTimer(): void {
+    if (this._state !== 'idle') return;
+    debugLog(`[resetStagnationTimer] worker output received, resetting`);
+    this.startStagnationTimer();
+  }
+
+  private onWorkerStagnation(): void {
+    debugLog(`[onWorkerStagnation] state=${this._state}`);
+    if (this._state !== 'idle') return;
+
+    // Enter consultation mode
+    this.consultationMode = true;
+
+    this.setState('consulting-orchestrator');
+
+    // Capture worker screen text for the consultation prompt
+    if (this.workerMonitor) {
+      this.workerScreenText = this.workerMonitor.emulator.getScreenText();
+    }
+
+    // Reset clearing buffer before sending /clear
+    this.clearingBuffer = '';
+
+    debugLog(`[onWorkerStagnation] writing /clear to orchestrator="${this.config.orchestratorSession}"`);
+    this.sessionManager.writeToSession(this.config.orchestratorSession, '/clear\r');
+
+    this.setState('clearing-orchestrator');
+
+    // Poll orchestrator for "(no content)" pattern
+    this.startClearPolling();
+  }
+
+  private onConsultationClearComplete(): void {
+    debugLog(`[onConsultationClearComplete] state=${this._state}`);
+    this.cancelClearPolling();
+    this.clearingBuffer = '';
+    if (this._state !== 'clearing-orchestrator') return;
+
+    this.setState('consulting-orchestrator');
+
+    // Build consultation prompt (YES/NO question, not directive prompt)
+    const prompt = buildConsultationPrompt({
+      taskDescription: this.config.taskDescription,
+      workerScreen: this.workerScreenText,
+      actionLog: this.actionLog.getRecent(),
+      cycleNumber: this.cycleNumber,
+    });
+
+    // Send prompt text to orchestrator (without Enter)
+    this.sessionManager.writeToSession(this.config.orchestratorSession, prompt);
+
+    this.timer.setTimeout(() => {
+      if (this._state !== 'consulting-orchestrator') return;
+
+      this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+
+      // Reset orchestrator monitor for clean screen reads
+      if (this.orchestratorMonitor) {
+        this.orchestratorMonitor.capture.resetBaseline();
+        this.orchestratorMonitor.capture.markInputSent();
+      }
+
+      this.responseBuffer = '';
+      this.lastResponseBufLen = 0;
+      this.setState('waiting-consultation');
+
+      // Poll orchestrator for YES/NO response
+      this.startResponsePolling();
+    }, this.baseDelay);
+  }
+
+  private onConsultationResponse(): void {
+    debugLog(`[onConsultationResponse] state=${this._state}`);
+    this.cancelResponsePolling();
+    if (this._state === 'paused' || this._state === 'stopped') return;
+
+    // Parse directive from raw PTY buffer
+    const stripped = stripAnsi(this.responseBuffer);
+    const directive = parseDirective(stripped);
+
+    if (directive && directive.type === 'YES') {
+      debugLog(`[onConsultationResponse] YES — triggering normal cycle via onWorkerIdle`);
+      // Orchestrator confirms worker is done — start a normal directive cycle
+      this.consultationMode = false;
+      this.setState('idle');
+      this.onWorkerIdle();
+    } else {
+      // NO or unparseable — stub: emit error and pause (Plan 02 will flesh out NO/re-check)
+      debugLog(`[onConsultationResponse] NO or unparseable — pausing`);
+      this.consultationMode = false;
+      const reason = directive?.type === 'NO'
+        ? 'Orchestrator says worker is NOT finished (NO response to consultation)'
+        : 'Failed to parse YES/NO from consultation response';
+      this.bus.emit('automation:error', reason);
+      this.setState('paused');
     }
   }
 }
