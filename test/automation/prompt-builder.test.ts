@@ -71,21 +71,44 @@ describe('buildPrompt', () => {
     );
   });
 
-  it('output contains all 5 directive types (COMMAND, SELECT, ENTER, WAIT, ESCALATE)', () => {
+  it('output contains all 6 directive types (COMMAND, SELECT, ENTER, WAIT, ESCALATE, DONE)', () => {
     const prompt = buildPrompt(basePacket);
     assert.ok(prompt.includes('COMMAND'), 'Expected COMMAND directive type');
     assert.ok(prompt.includes('SELECT'), 'Expected SELECT directive type');
     assert.ok(prompt.includes('ENTER'), 'Expected ENTER directive type');
     assert.ok(prompt.includes('WAIT'), 'Expected WAIT directive type');
     assert.ok(prompt.includes('ESCALATE'), 'Expected ESCALATE directive type');
+    assert.ok(prompt.includes('DONE'), 'Expected DONE directive type');
   });
 
-  it('output contains escalation guideline (use ESCALATE when task complete or unsure)', () => {
+  it('output contains DONE directive in available directives list', () => {
     const prompt = buildPrompt(basePacket);
-    const lower = prompt.toLowerCase();
     assert.ok(
-      lower.includes('escalate') && (lower.includes('complete') || lower.includes('unsure') || lower.includes('went wrong')),
-      `Expected escalation guideline in prompt:\n${prompt}`
+      prompt.includes('DONE: <summary>'),
+      `Expected DONE directive format in prompt:\n${prompt}`
+    );
+  });
+
+  it('ESCALATE description says blockers only, not task completion', () => {
+    const prompt = buildPrompt(basePacket);
+    // ESCALATE line should say "genuine blockers" and NOT "task completion"
+    const escalateLine = prompt.split('\n').find(l => l.includes('ESCALATE:') && l.includes('--'));
+    assert.ok(escalateLine, 'Expected ESCALATE directive line in prompt');
+    assert.ok(
+      escalateLine!.includes('genuine blockers'),
+      `Expected "genuine blockers" in ESCALATE description: ${escalateLine}`
+    );
+    assert.ok(
+      !escalateLine!.includes('task completion'),
+      `ESCALATE description should NOT mention "task completion": ${escalateLine}`
+    );
+  });
+
+  it('output contains ESCALATE wrong example for task completion', () => {
+    const prompt = buildPrompt(basePacket);
+    assert.ok(
+      prompt.includes('ESCALATE: Task is complete'),
+      `Expected wrong example for ESCALATE task completion:\n${prompt}`
     );
   });
 });

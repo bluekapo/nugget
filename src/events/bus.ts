@@ -8,6 +8,7 @@ export interface BusEvents {
   'automation:state-change': (state: string, detail?: string) => void;
   'automation:cycle-complete': (cycleNumber: number, action: string) => void;
   'automation:escalation': (reason: string) => void;
+  'automation:done': (summary: string) => void;
   'automation:error': (error: string) => void;
 }
 

@@ -1169,6 +1169,67 @@ describe('AutomationEngine', () => {
     assert.equal(cycleEvents.length, 1, 'should complete one cycle');
   });
 
+  // ---------- Test: DONE directive stops engine ----------
+
+  it('DONE directive stops engine and emits automation:done', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const doneSummaries: string[] = [];
+    bus.on('automation:done', (summary) => {
+      doneSummaries.push(summary);
+    });
+
+    engine.start();
+
+    // Worker goes idle
+    await emitOutput(bus, 'worker', completionOutput('task output'));
+    timer.advance(50);
+    timer.advance(100);
+
+    // Orchestrator clears -- poll detects (no content)
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter after prompt
+
+    // Engine sends prompt, orchestrator responds with DONE
+    await emitOutput(bus, 'orchestrator', directiveOutput('DONE: Task completed successfully'));
+    timer.advance(1000); // response poll fires, finds DONE directive
+
+    assert.equal(engine.state, 'stopped', 'DONE should stop the engine (not pause)');
+    assert.equal(doneSummaries.length, 1, 'should emit one automation:done event');
+    assert.ok(doneSummaries[0].includes('Task completed successfully'), 'done event should contain the summary');
+  });
+
+  // ---------- Test: ESCALATE still pauses (not stops) ----------
+
+  it('ESCALATE still pauses engine after DONE is added (unchanged behavior)', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const escalations: string[] = [];
+    bus.on('automation:escalation', (reason) => {
+      escalations.push(reason);
+    });
+
+    engine.start();
+
+    // Worker goes idle
+    await emitOutput(bus, 'worker', completionOutput('task output'));
+    timer.advance(50);
+    timer.advance(100);
+
+    // Orchestrator clears
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000);
+    timer.advance(500);
+    timer.advance(50);
+
+    // Orchestrator responds with ESCALATE
+    await emitOutput(bus, 'orchestrator', directiveOutput('ESCALATE: I am blocked'));
+    timer.advance(1000);
+
+    assert.equal(engine.state, 'paused', 'ESCALATE should still pause (not stop)');
+    assert.equal(escalations.length, 1, 'should emit escalation event');
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------

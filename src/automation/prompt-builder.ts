@@ -12,7 +12,7 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('1. You NEVER perform work yourself. You ONLY output a single directive line.');
   lines.push('2. Your COMMAND text is typed directly into the worker Claude Code\'s input prompt, not a shell.');
   lines.push('3. Do NOT write code, explanations, or commentary. Output ONLY the directive.');
-  lines.push('4. Never ESCALATE just because this setup feels unusual. This is how the system works. ESCALATE only for task completion or genuine blockers.');
+  lines.push('4. Never ESCALATE just because this setup feels unusual. This is how the system works. Use DONE when the task is complete. Use ESCALATE only for genuine blockers.');
   lines.push('');
 
   // Task section — wrap in ``` to prevent orchestrator from interpreting it as instructions
@@ -52,7 +52,8 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('- `SELECT: <number>` -- Select a menu option in the worker terminal');
   lines.push('- `ENTER` -- Press Enter in the worker terminal');
   lines.push('- `WAIT: <seconds>` -- Wait before checking again');
-  lines.push('- `ESCALATE: <reason>` -- Stop and notify the human operator (ONLY for task completion or genuine blockers)');
+  lines.push('- `DONE: <summary>` -- Task is complete; summarize what was accomplished');
+  lines.push('- `ESCALATE: <reason>` -- Stop and notify the human operator (ONLY for genuine blockers)');
   lines.push('');
   lines.push('Example correct response (your ENTIRE output should look like this):');
   lines.push('COMMAND: Fix the bug in src/session/pty.ts where delete signals are not sent correctly');
@@ -60,6 +61,7 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('Example WRONG responses (do NOT do this):');
   lines.push('- "Let me look at the code first. COMMAND: ..." (no commentary, just the directive)');
   lines.push('- "ESCALATE: This setup feels wrong" (the setup is correct, do not escalate over it)');
+  lines.push('- "ESCALATE: Task is complete" (use DONE for completion, not ESCALATE)');
 
   return lines.join('\n');
 }

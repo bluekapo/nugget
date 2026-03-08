@@ -57,7 +57,8 @@ const RETRY_PROMPT = 'Your previous response could not be parsed as a valid dire
   + '- SELECT: <number>\n'
   + '- ENTER\n'
   + '- WAIT: <seconds>\n'
-  + '- ESCALATE: <reason>';
+  + '- ESCALATE: <reason>\n'
+  + '- DONE: <summary>';
 
 export type EngineState =
   | 'stopped'
@@ -414,6 +415,13 @@ export class AutomationEngine {
       this.sessionManager.writeToSession(this.config.workerSession, data);
     };
     const result = executeDirective(directive, writeFn);
+
+    if (directive.type === 'DONE') {
+      this.actionLog.add(result.description, result.doneSummary ?? 'done');
+      this.bus.emit('automation:done', result.doneSummary ?? directive.summary);
+      this.stop();
+      return;
+    }
 
     if (directive.type === 'ESCALATE') {
       this.actionLog.add(result.description, result.escalateReason ?? 'escalated');

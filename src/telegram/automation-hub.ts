@@ -37,6 +37,7 @@ export class AutomationHubRenderer {
   private stateChangeHandler: ((state: string) => void) | null = null;
   private cycleCompleteHandler: ((cycleNumber: number, action: string) => void) | null = null;
   private escalationHandler: ((reason: string) => void) | null = null;
+  private doneHandler: ((summary: string) => void) | null = null;
   private errorHandler: ((error: string) => void) | null = null;
 
   constructor(
@@ -222,6 +223,17 @@ export class AutomationHubRenderer {
       this.render();
     };
 
+    this.doneHandler = (summary: string) => {
+      this.api.sendMessage(this.chatId, `\u2705 Automation complete: ${summary}`, {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
+        },
+      }).catch(() => {});
+      this.activeAutomation = null;
+      this.render();
+    };
+
     this.errorHandler = (error: string) => {
       // Send standalone notification (separate from hub message) so user gets a notification sound
       this.api.sendMessage(this.chatId, `Automation stopped: ${error}`, {
@@ -237,6 +249,7 @@ export class AutomationHubRenderer {
     this.bus.on('automation:state-change', this.stateChangeHandler);
     this.bus.on('automation:cycle-complete', this.cycleCompleteHandler);
     this.bus.on('automation:escalation', this.escalationHandler);
+    this.bus.on('automation:done', this.doneHandler);
     this.bus.on('automation:error', this.errorHandler);
 
     this.pendingCreation = null;
@@ -274,6 +287,10 @@ export class AutomationHubRenderer {
     if (this.escalationHandler) {
       this.bus.off('automation:escalation', this.escalationHandler);
       this.escalationHandler = null;
+    }
+    if (this.doneHandler) {
+      this.bus.off('automation:done', this.doneHandler);
+      this.doneHandler = null;
     }
     if (this.errorHandler) {
       this.bus.off('automation:error', this.errorHandler);
