@@ -79,7 +79,7 @@ function clearOutput(): string {
 
 /** Simulate orchestrator responding with a directive */
 function directiveOutput(directive: string): string {
-  return `${directive}\r\n\u273B Crunched for 5s\r\n`;
+  return `● ${directive}\r\n\u273B Crunched for 5s\r\n`;
 }
 
 /**
@@ -803,7 +803,7 @@ describe('AutomationEngine', () => {
     // Orchestrator responds with COMMAND directive + completion marker + bare ✻ idle prompt.
     // In production, Claude Code's TUI shows ✻ as the idle prompt indicator after completing.
     // This bare ✻ must NOT trigger the subagent spinner guard.
-    await emitOutput(bus, 'orchestrator', 'COMMAND: npm test\r\n\u273B Crunched for 5s\r\n\u273B\r\n');
+    await emitOutput(bus, 'orchestrator', '● COMMAND: npm test\r\n\u273B Crunched for 5s\r\n\u273B\r\n');
     timer.advance(1000); // response poll fires, finds COMMAND directive
 
     // Engine should have parsed the COMMAND and sent it to the worker
@@ -839,7 +839,7 @@ describe('AutomationEngine', () => {
     // Orchestrator responds with COMMAND but NO completion marker.
     // With poll-based detection, the poll reads screen text and finds
     // the COMMAND directive directly -- no marker needed.
-    await emitOutput(bus, 'orchestrator', 'COMMAND: npm test\r\n');
+    await emitOutput(bus, 'orchestrator', '● COMMAND: npm test\r\n');
 
     // Advance 1000ms to fire the response poll
     timer.advance(1000); // poll fires, finds COMMAND directive
@@ -883,7 +883,7 @@ describe('AutomationEngine', () => {
       'should still be waiting-response after 5s of polling without a directive');
 
     // Now orchestrator responds with a directive
-    await emitOutput(bus, 'orchestrator', 'COMMAND: echo hello\r\n');
+    await emitOutput(bus, 'orchestrator', '● COMMAND: echo hello\r\n');
 
     // Next poll fires after 1000ms, finds the directive
     timer.advance(1000);

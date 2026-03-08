@@ -39,6 +39,11 @@ function stripAnsi(raw: string): string {
     .replace(/\r(?!\n)/g, '');                      // Bare CR (without LF) — cursor to start of line
 }
 
+/** Check if the buffer contains a ● line (proof the orchestrator responded). */
+function hasOrchestratorResponse(text: string): boolean {
+  return text.split('\n').some(line => /^\s*●/.test(line));
+}
+
 const RETRY_PROMPT = 'Your previous response could not be parsed as a valid directive. '
   + 'Please respond with exactly ONE of the following formats:\n'
   + '- COMMAND: <shell command>\n'
@@ -554,8 +559,8 @@ export class AutomationEngine {
         debugLog(`[response-poll] directive found: ${directive.type} => ${JSON.stringify(directive)}`);
         this.responsePollTimer = null;
         this.onResponseReady();
-      } else if (/\u273B\s+(Crunched|Saut\u00e9ed|Mustered) for/.test(stripped)) {
-        debugLog(`[response-poll] completion marker found but no directive — triggering retry`);
+      } else if (hasOrchestratorResponse(stripped) && /\u273B\s+(Crunched|Saut\u00e9ed|Mustered) for/.test(stripped)) {
+        debugLog(`[response-poll] completion marker found with ● response but no directive — triggering retry`);
         this.responsePollTimer = null;
         this.onResponseReady();
       } else {
