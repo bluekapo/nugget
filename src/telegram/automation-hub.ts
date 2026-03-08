@@ -251,6 +251,11 @@ export class AutomationHubRenderer {
     this.activeAutomation.lastAction = action;
   }
 
+  /** Returns true if the given session is the worker in an active automation. */
+  isAutomatedSession(sessionName: string): boolean {
+    return this.activeAutomation !== null && this.activeAutomation.workerSession === sessionName;
+  }
+
   /** Returns true iff currently in the enter-task creation step. */
   isAwaitingTaskInput(): boolean {
     return this.pendingCreation?.step === 'enter-task';

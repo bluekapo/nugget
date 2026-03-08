@@ -483,6 +483,72 @@ describe('AutomationHubRenderer', () => {
     });
   });
 
+  describe('isAutomatedSession', () => {
+    it('returns false when no automation is active', () => {
+      const api = createMockApi();
+      const { hub } = createHub(api);
+
+      assert.equal(hub.isAutomatedSession('anything'), false);
+    });
+
+    it('returns true for the worker session when automation is active', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const mockEng = createMockEngine('idle');
+      const { hub } = createHub(api, {
+        sessions: ['worker', 'orchestrator'],
+        engineFactory: () => mockEng as any,
+        bus,
+      });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:worker');
+      await hub.handleCallback('auto:o:orchestrator');
+      await hub.completeCreation('do stuff');
+
+      assert.equal(hub.isAutomatedSession('worker'), true);
+    });
+
+    it('returns false for a different session name when automation is active', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const mockEng = createMockEngine('idle');
+      const { hub } = createHub(api, {
+        sessions: ['worker', 'orchestrator'],
+        engineFactory: () => mockEng as any,
+        bus,
+      });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:worker');
+      await hub.handleCallback('auto:o:orchestrator');
+      await hub.completeCreation('do stuff');
+
+      assert.equal(hub.isAutomatedSession('other'), false);
+    });
+
+    it('returns false for the orchestrator session name when automation is active', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const mockEng = createMockEngine('idle');
+      const { hub } = createHub(api, {
+        sessions: ['worker', 'orchestrator'],
+        engineFactory: () => mockEng as any,
+        bus,
+      });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:worker');
+      await hub.handleCallback('auto:o:orchestrator');
+      await hub.completeCreation('do stuff');
+
+      assert.equal(hub.isAutomatedSession('orchestrator'), false);
+    });
+  });
+
   describe('stale session handling', () => {
     it('handleCallback auto:w:<stale> where session no longer exists resets to idle with error', async () => {
       const api = createMockApi();
