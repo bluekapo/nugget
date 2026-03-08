@@ -71,6 +71,15 @@ export interface ContextPacket {
   cycleNumber: number;
 }
 
+// --- Consultation Types ---
+
+export interface ConsultationPacket {
+  taskDescription: string;
+  workerScreen: string;
+  actionLog: ActionEntry[];
+  cycleNumber: number;
+}
+
 // --- Constants ---
 
 export const DEFAULT_WAIT_SECONDS = 10;
