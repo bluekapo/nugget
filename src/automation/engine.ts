@@ -76,6 +76,7 @@ export class AutomationEngine {
   private sessionExitHandler: ((name: string, exitCode: number) => void) | null = null;
   private clearPollTimer: unknown = null;
   private responsePollTimer: unknown = null;
+  private clearingBuffer = '';
 
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
@@ -115,6 +116,15 @@ export class AutomationEngine {
     // Subscribe to session:output events and route to correct monitor
     this.sessionOutputHandler = (sessionName: string, data: string) => {
       if (this._state === 'stopped') return;
+
+      // Accumulate raw PTY data during clearing-orchestrator state.
+      // This buffer is checked by the clear poll instead of the emulator,
+      // because xterm.js processes writes asynchronously and the emulator
+      // may not have the data ready when the poll fires.
+      if (this._state === 'clearing-orchestrator' && sessionName === this.config.orchestratorSession) {
+        this.clearingBuffer += data;
+      }
+
       if (sessionName === this.config.workerSession && this.workerMonitor) {
         this.workerMonitor.capture.onData(data);
       } else if (sessionName === this.config.orchestratorSession && this.orchestratorMonitor) {
@@ -176,6 +186,9 @@ export class AutomationEngine {
     this.cancelClearPolling();
     this.cancelResponsePolling();
 
+    // Reset clearing buffer
+    this.clearingBuffer = '';
+
     this.setState('stopped');
   }
 
@@ -233,6 +246,9 @@ export class AutomationEngine {
       this.workerScreenText = this.workerMonitor.emulator.getScreenText();
     }
 
+    // Reset clearing buffer before sending /clear
+    this.clearingBuffer = '';
+
     // Send /clear to orchestrator
     this.sessionManager.writeToSession(this.config.orchestratorSession, '/clear\r');
 
@@ -244,6 +260,7 @@ export class AutomationEngine {
 
   private onClearComplete(): void {
     this.cancelClearPolling();
+    this.clearingBuffer = '';
     if (this._state !== 'clearing-orchestrator') return;
 
     this.setState('prompting-orchestrator');
@@ -443,8 +460,12 @@ export class AutomationEngine {
     this.clearPollTimer = this.timer.setTimeout(() => {
       if (this._state !== 'clearing-orchestrator') return;
 
-      const screenText = this.orchestratorMonitor?.emulator.getScreenText() ?? '';
-      if (screenText.includes('(no content)')) {
+      // Check raw PTY buffer instead of emulator screen text.
+      // The emulator processes writes asynchronously (xterm.js batches via setTimeout),
+      // so getScreenText() may return empty even though data has arrived.
+      const stripped = this.clearingBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+      this.bus.emit('automation:error', `[clear-poll] buffer (${stripped.length} chars): ${JSON.stringify(stripped.slice(-200))}`);
+      if (stripped.includes('(no content)')) {
         this.clearPollTimer = null;
         // 500ms settling delay so TUI finishes rendering before prompt text is typed
         this.timer.setTimeout(() => this.onClearComplete(), 500);
