@@ -455,6 +455,7 @@ export class AutomationEngine {
   }
 
   private startClearPolling(): void {
+    this.cancelClearPolling();
     this.clearPollTimer = this.timer.setTimeout(() => {
       if (this._state !== 'clearing-orchestrator') return;
 

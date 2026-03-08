@@ -72,6 +72,11 @@ function completionOutput(text: string = 'some output'): string {
   return `${text}\r\n\u273B Crunched for 1m 22s\r\n`;
 }
 
+/** Simulate Claude Code /clear response with (no content) */
+function clearOutput(): string {
+  return '> /clear\r\n\r\n  \u23BF  (no content)\r\n';
+}
+
 /** Simulate orchestrator responding with a directive */
 function directiveOutput(directive: string): string {
   return `${directive}\r\n\u273B Crunched for 5s\r\n`;
@@ -193,11 +198,11 @@ describe('AutomationEngine', () => {
     const clearWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('/clear'));
     assert.ok(clearWrite, 'engine should send /clear to orchestrator');
 
-    // Step 2: Orchestrator processes /clear (completion marker)
-    await emitOutput(bus, 'orchestrator', completionOutput('/clear processed'));
-    timer.advance(50);  // debounce
-    timer.advance(100); // idle -> onPromptComplete for clear -> onClearComplete (prompt text sent)
-    timer.advance(50);  // delayed Enter fires -> waiting-response
+    // Step 2: Orchestrator processes /clear -- poll detects (no content)
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete (prompt text sent)
+    timer.advance(50);   // delayed Enter fires -> waiting-response
 
     // Engine should have sent prompt to orchestrator
     const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('## Task'));
@@ -234,11 +239,11 @@ describe('AutomationEngine', () => {
     timer.advance(50);
     timer.advance(100);
 
-    // Orchestrator clears
-    await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
-    timer.advance(50);
-    timer.advance(100);
-    timer.advance(50);  // delayed Enter after prompt
+    // Orchestrator clears -- poll detects (no content)
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter after prompt
 
     // Engine sends prompt, orchestrator responds with ESCALATE
     await emitOutput(bus, 'orchestrator', directiveOutput('ESCALATE: task is complete'));
@@ -261,11 +266,11 @@ describe('AutomationEngine', () => {
     timer.advance(50);
     timer.advance(100);
 
-    // Clear
-    await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
-    timer.advance(50);
-    timer.advance(100);
-    timer.advance(50);  // delayed Enter after prompt
+    // Clear -- poll detects (no content)
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter after prompt
 
     // Orchestrator responds with WAIT: 5
     await emitOutput(bus, 'orchestrator', directiveOutput('WAIT: 5'));
@@ -390,11 +395,11 @@ describe('AutomationEngine', () => {
     timer.advance(50);
     timer.advance(100);
 
-    // Clear
-    await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
-    timer.advance(50);
-    timer.advance(100);
-    timer.advance(50);  // delayed Enter after prompt
+    // Clear -- poll detects (no content)
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter after prompt
 
     // Orchestrator responds with SELECT: 3 (needs 2 arrow-downs then Enter)
     await emitOutput(bus, 'orchestrator', directiveOutput('SELECT: 3'));
@@ -427,8 +432,8 @@ describe('AutomationEngine', () => {
     // Complete cycle 1
     await emitOutput(bus, 'worker', completionOutput('cycle 1'));
     timer.advance(50); timer.advance(100);
-    await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
-    timer.advance(50); timer.advance(100); timer.advance(50); // delayed Enter
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50); // poll + settle + Enter
     await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo 1'));
     timer.advance(50); timer.advance(100);
 
@@ -437,8 +442,8 @@ describe('AutomationEngine', () => {
     // Complete cycle 2
     await emitOutput(bus, 'worker', completionOutput('cycle 2'));
     timer.advance(50); timer.advance(100);
-    await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
-    timer.advance(50); timer.advance(100); timer.advance(50); // delayed Enter
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50); // poll + settle + Enter
     await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo 2'));
     timer.advance(50); timer.advance(100);
 
@@ -468,8 +473,8 @@ describe('AutomationEngine', () => {
     for (let i = 1; i <= 3; i++) {
       await emitOutput(bus, 'worker', completionOutput(`cycle ${i}`));
       timer.advance(50); timer.advance(100);
-      await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
-      timer.advance(50); timer.advance(100); timer.advance(50); // delayed Enter
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50); // poll + settle + Enter
       await emitOutput(bus, 'orchestrator', directiveOutput(`COMMAND: echo ${i}`));
       timer.advance(50); timer.advance(100);
     }
@@ -496,8 +501,8 @@ describe('AutomationEngine', () => {
     // Worker idle -> clear -> prompt
     await emitOutput(bus, 'worker', completionOutput('data'));
     timer.advance(50); timer.advance(100);
-    await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
-    timer.advance(50); timer.advance(100); timer.advance(50); // delayed Enter
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50); // poll + settle + Enter
 
     // Orchestrator responds with unparseable text
     await emitOutput(bus, 'orchestrator', directiveOutput('I think we should run tests'));
@@ -526,8 +531,8 @@ describe('AutomationEngine', () => {
     // Worker idle -> clear -> prompt
     await emitOutput(bus, 'worker', completionOutput('data'));
     timer.advance(50); timer.advance(100);
-    await emitOutput(bus, 'orchestrator', completionOutput('cleared'));
-    timer.advance(50); timer.advance(100); timer.advance(50); // delayed Enter
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50); // poll + settle + Enter
 
     // First unparseable response -> triggers retry
     await emitOutput(bus, 'orchestrator', directiveOutput('I think we should run tests'));
@@ -612,10 +617,10 @@ describe('AutomationEngine', () => {
     assert.equal(errors.length, 0, 'should not emit errors after stop cleans up listener');
   });
 
-  // ---------- Test 19: /clear with (no content) triggers immediate clear completion ----------
+  // ---------- Test 19: /clear with (no content) detected via poll ----------
 
-  it('/clear with (no content) response completes without needing full idle delay', async () => {
-    // Use longer idleDelay so the (no content) fast path (500ms settling) fires before idle detection
+  it('/clear with (no content) response detected via poll completes clearing', async () => {
+    // Use longer idleDelay to prove poll-based detection works independently
     const longIdleConfig = { ...config, idleDelay: 2000 };
     engine = new AutomationEngine(longIdleConfig, mockSessionManager, bus);
 
@@ -627,10 +632,12 @@ describe('AutomationEngine', () => {
     assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator');
 
     // /clear produces "(no content)" -- the actual Claude Code response
-    await emitOutput(bus, 'orchestrator', '> /clear\r\n\r\n  \u23BF  (no content)\r\n');
+    await emitOutput(bus, 'orchestrator', clearOutput());
 
-    // Should complete quickly (after 500ms settling delay) without needing full idle delay (2000ms)
-    timer.advance(500); // settling delay -> onClearComplete
+    // Poll fires after 1000ms, reads screen text, finds "(no content)"
+    timer.advance(1000); // poll fires
+    // 500ms settling delay -> onClearComplete
+    timer.advance(500);
 
     assert.notEqual(engine.state, 'clearing-orchestrator',
       'should transition past clearing-orchestrator on (no content)');
@@ -644,36 +651,44 @@ describe('AutomationEngine', () => {
 
     // Verify prompt was sent
     const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('## Task'));
-    assert.ok(promptWrite, 'engine should send prompt after immediate clear detection');
+    assert.ok(promptWrite, 'engine should send prompt after poll-based clear detection');
   });
 
-  // ---------- Test 20: /clear with spinner character still completes ----------
+  // ---------- Test 20: output without (no content) does NOT complete clearing ----------
 
-  it('/clear response with spinner character completes via idle detection', async () => {
+  it('clearing poll does not complete when screen has no (no content) text', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
 
     engine.start();
 
-    // Worker goes idle
-    await emitOutput(bus, 'worker', completionOutput('data'));
-    timer.advance(50);
-    timer.advance(100);
+    // Use first-cycle deferred timer to enter clearing-orchestrator
+    timer.advance(1);
 
     assert.equal(engine.state, 'clearing-orchestrator');
 
-    // /clear response includes ✻ (spinner) but NOT a completion marker
-    // This previously caused the spinner guard to block onPromptComplete
+    // /clear response includes spinner but NOT "(no content)"
     await emitOutput(bus, 'orchestrator', 'Conversation cleared.\r\n\u273B\r\n');
-    timer.advance(50);  // debounce
-    timer.advance(100); // idle -> should fire despite spinner (requireMarker=false)
 
-    assert.notEqual(engine.state, 'clearing-orchestrator',
-      'should transition past clearing-orchestrator even with spinner in output');
+    // Poll fires after 1000ms, doesn't find "(no content)" -- still clearing
+    timer.advance(1000);
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'should still be clearing when screen has no (no content)');
+
+    // Now emit "(no content)" output
+    await emitOutput(bus, 'orchestrator', '  \u23BF  (no content)\r\n');
+
+    // Next poll fires after 1000ms, finds "(no content)"
+    timer.advance(1000);
+    // 500ms settling delay -> onClearComplete
+    timer.advance(500);
+
+    assert.equal(engine.state, 'prompting-orchestrator',
+      'should transition to prompting-orchestrator after (no content) appears');
   });
 
-  // ---------- Test 21: /clear without completion marker (requireMarker=false) ----------
+  // ---------- Test 21: full cycle with delayed (no content) appearance ----------
 
-  it('full cycle completes when /clear produces no completion marker (requireMarker=false)', async () => {
+  it('full cycle completes when (no content) appears after initial /clear output', async () => {
 
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const cycleEvents: Array<{ cycle: number; action: string }> = [];
@@ -694,19 +709,24 @@ describe('AutomationEngine', () => {
     const clearWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('/clear'));
     assert.ok(clearWrite, 'engine should send /clear to orchestrator');
 
-    // Step 2: /clear produces NO completion marker -- just plain terminal text
+    // Step 2: /clear initially produces text without (no content)
     await emitOutput(bus, 'orchestrator', 'Conversation cleared.\r\n');
-    timer.advance(50);  // debounce fires capture
-    timer.advance(100); // idle fires onPromptComplete (no marker needed due to requireMarker=false)
-    timer.advance(50);  // delayed Enter fires -> waiting-response
+    timer.advance(1000); // poll fires, doesn't find "(no content)"
+    assert.equal(engine.state, 'clearing-orchestrator', 'should still be clearing without (no content)');
+
+    // (no content) appears
+    await emitOutput(bus, 'orchestrator', '  \u23BF  (no content)\r\n');
+    timer.advance(1000); // next poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter fires -> waiting-response
 
     // Engine should have moved past clearing-orchestrator
     assert.notEqual(engine.state, 'clearing-orchestrator',
-      'should transition past clearing-orchestrator even without completion marker');
+      'should transition past clearing-orchestrator after (no content) appears');
 
     // Verify prompt was sent to orchestrator
     const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('## Task'));
-    assert.ok(promptWrite, 'engine should send prompt to orchestrator after /clear without marker');
+    assert.ok(promptWrite, 'engine should send prompt to orchestrator after /clear');
 
     // Step 3: Orchestrator responds with directive (normal completion marker)
     await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: npm test'));
@@ -726,12 +746,10 @@ describe('AutomationEngine', () => {
     assert.equal(engine.state, 'idle', 'should return to idle after full cycle');
   });
 
-  // ---------- Test 22: (no content) split across PTY chunks ----------
+  // ---------- Test 22: (no content) split across PTY chunks (emulator reassembles) ----------
 
-  it('/clear with (no content) split across two PTY chunks transitions past clearing-orchestrator', async () => {
-    // Use longer idleDelay so the (no content) fast path (500ms settling) fires before idle detection
-    const longIdleConfig = { ...config, idleDelay: 2000 };
-    engine = new AutomationEngine(longIdleConfig, mockSessionManager, bus);
+  it('/clear with (no content) split across two PTY chunks detected by poll on emulator screen', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
 
     engine.start();
 
@@ -741,16 +759,19 @@ describe('AutomationEngine', () => {
     assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator');
 
     // /clear produces "(no content)" split across two PTY chunks
+    // The emulator processes both chunks and assembles the screen text
     await emitOutput(bus, 'orchestrator', '> /clear\r\n\r\n  \u23BF  (no ');
     await flush();
     await emitOutput(bus, 'orchestrator', 'content)\r\n');
     await flush();
 
-    // Fire the settling delay (500ms) -> onClearComplete
+    // Poll fires after 1000ms, reads assembled screen text from emulator
+    timer.advance(1000);
+    // 500ms settling delay -> onClearComplete
     timer.advance(500);
 
     assert.notEqual(engine.state, 'clearing-orchestrator',
-      'should transition past clearing-orchestrator when (no content) is split across chunks');
+      'should transition past clearing-orchestrator when emulator has assembled (no content)');
     assert.equal(engine.state, 'prompting-orchestrator',
       'should be in prompting-orchestrator (prompt text sent, Enter pending)');
 
@@ -776,11 +797,11 @@ describe('AutomationEngine', () => {
     timer.advance(50);  // debounce
     timer.advance(100); // idle -> onWorkerIdle -> clearing-orchestrator
 
-    // Orchestrator clears — idle detection fires before fast-path settling delay
-    await emitOutput(bus, 'orchestrator', '> /clear\r\n\r\n  \u23BF  (no content)\r\n');
-    timer.advance(50);  // debounce
-    timer.advance(100); // idle (requireMarker=false) -> onClearComplete
-    timer.advance(50);  // delayed Enter -> waiting-response
+    // Orchestrator clears -- poll detects (no content)
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter -> waiting-response
 
     assert.equal(engine.state, 'waiting-response', 'should be waiting for orchestrator response');
 
@@ -814,11 +835,11 @@ describe('AutomationEngine', () => {
     timer.advance(1);
     assert.equal(engine.state, 'clearing-orchestrator');
 
-    // Orchestrator clears — idle detection fires before fast-path settling delay
-    await emitOutput(bus, 'orchestrator', '> /clear\r\n\r\n  \u23BF  (no content)\r\n');
-    timer.advance(50);  // debounce
-    timer.advance(100); // idle (requireMarker=false) -> onClearComplete
-    timer.advance(50);  // delayed Enter -> waiting-response
+    // Orchestrator clears -- poll detects (no content)
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter -> waiting-response
 
     assert.equal(engine.state, 'waiting-response', 'should be waiting for response');
 
@@ -842,10 +863,9 @@ describe('AutomationEngine', () => {
     assert.equal(cycleEvents.length, 1, 'should complete one cycle');
   });
 
-  // ---------- Test 23: clearing-orchestrator timeout safety net ----------
+  // ---------- Test 23: clearing poll runs indefinitely until (no content) appears ----------
 
-  it('clearing-orchestrator timeout: engine transitions after clearingTimeoutMs when no detection fires', async () => {
-    config = { ...config, clearingTimeoutMs: 500 };
+  it('clearing poll runs indefinitely when (no content) never appears, then completes when it does', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
 
     engine.start();
@@ -855,15 +875,24 @@ describe('AutomationEngine', () => {
 
     assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator');
 
-    // Do NOT emit any orchestrator output -- simulate undetectable /clear response
-    // Neither fast-path (no content) nor slow-path (idle detection) fires
+    // Do NOT emit any orchestrator output -- simulate delayed /clear response
+    // Poll runs every 1s but never finds "(no content)"
 
-    // Advance timer by clearingTimeoutMs
+    // Advance 5 seconds (5 polls fire, none find the pattern)
+    timer.advance(5000);
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'should still be clearing after 5s of polling without (no content)');
+
+    // Now emit "(no content)" output
+    await emitOutput(bus, 'orchestrator', clearOutput());
+
+    // Next poll fires after 1000ms, finds "(no content)"
+    timer.advance(1000);
+    // 500ms settling delay -> onClearComplete
     timer.advance(500);
 
-    // Timeout should have forced onClearComplete -> prompting-orchestrator
     assert.equal(engine.state, 'prompting-orchestrator',
-      'timeout should force onClearComplete, now in prompting-orchestrator');
+      'should transition to prompting-orchestrator after (no content) finally appears');
 
     // Delayed Enter fires after baseDelay
     timer.advance(50);
@@ -872,7 +901,7 @@ describe('AutomationEngine', () => {
 
     // Verify prompt was sent to orchestrator
     const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('## Task'));
-    assert.ok(promptWrite, 'engine should send prompt after clearing timeout');
+    assert.ok(promptWrite, 'engine should send prompt after poll detects (no content)');
   });
 
 });
