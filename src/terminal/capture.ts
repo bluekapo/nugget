@@ -148,8 +148,15 @@ export class ScreenCapture {
     this.pendingCapture = true;
     this.recordWrite();
     this.scheduleCapture();
-    // Reset idle timer on every new data arrival
-    this.cancelIdleTimer();
+    // Only reset idle timer when no completion evidence exists.
+    // When crunched is true (or requireMarker is false), invisible PTY data
+    // (cursor blinks, Ink re-renders) would otherwise prevent the idle timer
+    // from ever completing its idleDelay window.
+    // Safety: the spinner guard in startIdleTimer() callback reads fresh
+    // screen text and blocks false positives from real data arriving.
+    if (!this.crunched && this.requireMarker) {
+      this.cancelIdleTimer();
+    }
     // Emit busy exec-state once when data starts flowing (not on every chunk)
     if (!this._execBusy) {
       this._execBusy = true;
@@ -332,7 +339,11 @@ export class ScreenCapture {
     // cancels the idle timer in onData() and this early return prevents
     // it from restarting — causing the engine to stall at waiting-response.
     if (currentText === this.lastSnapshot) {
-      if (this.crunched || !this.requireMarker) {
+      // EMUL-04: Only start idle timer if one isn't already running.
+      // Restarting on every identical capture would extend the delay
+      // indefinitely when invisible PTY data (cursor blinks) keeps
+      // triggering capture() without changing visible content.
+      if ((this.crunched || !this.requireMarker) && this.idleTimer === null) {
         this.startIdleTimer();
       }
       return;
@@ -410,7 +421,11 @@ export class ScreenCapture {
       // itself ("\u273B Brewed for 1m 22s"), so we must exclude those.
       // Also exclude bare \u273B (with no text or only whitespace after it) —
       // that's Claude Code's idle prompt indicator, not an active spinner.
-      const lines = this.lastSnapshot.split('\n');
+      // Read fresh screen text to minimize race condition where data arrived
+      // between the last capture() and this timer firing. Using stale
+      // lastSnapshot could miss newly-appeared spinners.
+      const freshText = this.emulator.getScreenText();
+      const lines = freshText.split('\n');
       const hasActiveSpinner = lines.some(
         (line) => line.includes('\u273B')
           && !/\u273B .+ for (?:\d+m )?\d+s/.test(line)
@@ -427,7 +442,7 @@ export class ScreenCapture {
 
       // Record the latest marker text that triggered this notification to prevent re-firing.
       // Use matchAll and take the last match — old markers may precede the new one in the buffer.
-      const firedMatches = [...this.lastSnapshot.matchAll(/\u273B .+ for (?:\d+m )?\d+s/g)];
+      const firedMatches = [...freshText.matchAll(/\u273B .+ for (?:\d+m )?\d+s/g)];
       this.lastFiredMarker = firedMatches.length > 0 ? firedMatches[firedMatches.length - 1][0] : null;
       this.crunched = false;
       this.onPromptComplete();
