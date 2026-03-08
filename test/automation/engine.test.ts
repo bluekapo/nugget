@@ -1035,6 +1035,95 @@ describe('AutomationEngine', () => {
       'should detect (no content) even with ANSI escape codes in raw PTY data');
   });
 
+  // ---------- Test 27: echoed worker screen with ● and ✻ does NOT trigger false completion ----------
+
+  it('echoed worker screen with indented ● and ✻ does not trigger false completion', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const errors: string[] = [];
+    bus.on('automation:error', (err) => errors.push(err));
+
+    engine.start();
+
+    // Worker goes idle (first cycle via deferred timer)
+    timer.advance(1);
+    assert.equal(engine.state, 'clearing-orchestrator');
+
+    // Orchestrator clears
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter -> waiting-response
+
+    assert.equal(engine.state, 'waiting-response', 'should be waiting for response');
+
+    // Emit orchestrator output simulating the prompt echo.
+    // The echo contains worker screen text with INDENTED ● lines and ✻ completion marker.
+    // These must NOT be detected as actual orchestrator responses.
+    const echoedPrompt = [
+      '  ## Worker Screen\r\n',
+      '    ● I analyzed the code and found the issue\r\n',
+      '    ● Here is my recommendation:\r\n',
+      '    \u273B Crunched for 1m 22s\r\n',
+    ].join('');
+    await emitOutput(bus, 'orchestrator', echoedPrompt);
+
+    // Poll fires — must NOT trigger false completion/retry
+    timer.advance(1000);
+    assert.equal(engine.state, 'waiting-response',
+      'indented ● and ✻ from echoed worker screen must not trigger false completion');
+
+    // Two more polls — still waiting
+    timer.advance(2000);
+    assert.equal(engine.state, 'waiting-response',
+      'should still be waiting after multiple polls with only echoed content');
+  });
+
+  // ---------- Test 28: real column-0 response detected after echoed indented content ----------
+
+  it('real column-0 response detected after echoed indented content', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const cycleEvents: Array<{ cycle: number; action: string }> = [];
+    bus.on('automation:cycle-complete', (cycle, action) => {
+      cycleEvents.push({ cycle, action });
+    });
+
+    engine.start();
+
+    // Worker goes idle (first cycle via deferred timer)
+    timer.advance(1);
+    assert.equal(engine.state, 'clearing-orchestrator');
+
+    // Orchestrator clears
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter -> waiting-response
+
+    assert.equal(engine.state, 'waiting-response');
+
+    // Emit echoed prompt with indented ● and ✻ (should be ignored)
+    const echoedPrompt = [
+      '  ## Worker Screen\r\n',
+      '    ● Some worker response text\r\n',
+      '    \u273B Crunched for 4m 50s\r\n',
+    ].join('');
+    await emitOutput(bus, 'orchestrator', echoedPrompt);
+
+    // Poll fires — echoed content ignored
+    timer.advance(1000);
+    assert.equal(engine.state, 'waiting-response', 'echoed content should be ignored');
+
+    // Now emit REAL orchestrator response at column 0
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo hello'));
+    timer.advance(1000); // poll finds the real directive
+
+    // Engine should have executed the command
+    const cmdWrite = writes.find(w => w.name === 'worker' && w.data.includes('echo hello'));
+    assert.ok(cmdWrite, 'real column-0 directive should be detected after echoed content');
+    assert.equal(engine.state, 'idle', 'should return to idle after real response');
+    assert.equal(cycleEvents.length, 1, 'should complete one cycle');
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------

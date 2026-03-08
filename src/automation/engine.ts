@@ -39,9 +39,16 @@ function stripAnsi(raw: string): string {
     .replace(/\r(?!\n)/g, '');                      // Bare CR (without LF) — cursor to start of line
 }
 
-/** Check if the buffer contains a ● line (proof the orchestrator responded). */
+/** Check if the buffer contains a ● line at column 0 (proof the orchestrator responded).
+ *  Requires ● at start of line — echoed worker screen content is indented, so
+ *  indented ● lines (from prompt echo) won't match. */
 function hasOrchestratorResponse(text: string): boolean {
-  return text.split('\n').some(line => /^\s*●/.test(line));
+  return text.split('\n').some(line => /^●/.test(line));
+}
+
+/** Check if the buffer contains a ✻ completion marker at column 0 (not indented/echoed). */
+function hasCompletionMarker(text: string): boolean {
+  return text.split('\n').some(line => /^\u273B\s+(Crunched|Saut\u00e9ed|Mustered) for/.test(line));
 }
 
 const RETRY_PROMPT = 'Your previous response could not be parsed as a valid directive. '
@@ -559,7 +566,7 @@ export class AutomationEngine {
         debugLog(`[response-poll] directive found: ${directive.type} => ${JSON.stringify(directive)}`);
         this.responsePollTimer = null;
         this.onResponseReady();
-      } else if (hasOrchestratorResponse(stripped) && /\u273B\s+(Crunched|Saut\u00e9ed|Mustered) for/.test(stripped)) {
+      } else if (hasOrchestratorResponse(stripped) && hasCompletionMarker(stripped)) {
         debugLog(`[response-poll] completion marker found with ● response but no directive — triggering retry`);
         this.responsePollTimer = null;
         this.onResponseReady();
