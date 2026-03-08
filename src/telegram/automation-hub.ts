@@ -215,6 +215,9 @@ export class AutomationHubRenderer {
       // Send standalone notification so user gets a notification sound
       this.api.sendMessage(this.chatId, `Automation escalated: ${reason}`, {
         parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
+        },
       }).catch(() => {});
       this.render();
     };
@@ -223,6 +226,9 @@ export class AutomationHubRenderer {
       // Send standalone notification (separate from hub message) so user gets a notification sound
       this.api.sendMessage(this.chatId, `Automation stopped: ${error}`, {
         parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
+        },
       }).catch(() => {});
       // Also re-render hub to show stopped state
       this.render();
@@ -382,6 +388,7 @@ export class AutomationHubRenderer {
 
     // Idle state
     keyboard.push([{ text: '\uD83E\uDD16 New Automation', callback_data: 'auto:new' }]);
+    keyboard.push([{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]);
     return { inline_keyboard: keyboard };
   }
 }
