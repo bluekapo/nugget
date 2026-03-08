@@ -732,6 +732,74 @@ describe('ScreenCapture', () => {
     assert.equal(completionFired, false, 'onPromptComplete should NOT fire after markInputSent resets ❯ detection');
   });
 
+  // ---------- Idle timer starvation (invisible PTY data) ----------
+
+  it('completion detection: fires despite periodic invisible PTY data after marker', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 500 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Write data with completion marker
+    await capture.onData('\u273B Crunched for 1m 22s\r\n');
+    timer.advance(50); // debounce fires, crunched=true, idle timer starts
+
+    // Simulate periodic invisible PTY data (cursor repositioning)
+    // These should NOT prevent the idle timer from firing
+    for (let i = 0; i < 12; i++) {
+      await capture.onData('\x1b[H'); // cursor home — no visible change
+      timer.advance(100);
+    }
+    // Total: 1250ms elapsed (50 + 12*100). idleDelay=500, so timer should have fired.
+
+    assert.equal(completionFired, true,
+      'onPromptComplete should fire despite periodic invisible PTY data');
+  });
+
+  it('completion detection: fires despite invisible PTY data after idle prompt', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 500 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Write idle prompt (no completion marker)
+    await capture.onData('response text\r\n\u276F \r\n');
+    timer.advance(50); // debounce fires, crunched=true via ❯ detection
+
+    // Simulate cursor blinks
+    for (let i = 0; i < 12; i++) {
+      await capture.onData('\x1b[H');
+      timer.advance(100);
+    }
+
+    assert.equal(completionFired, true,
+      'onPromptComplete should fire for ❯ prompt despite invisible PTY data');
+  });
+
+  it('completion detection: real screen change after marker restarts idle timer', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 500 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Completion marker detected
+    await capture.onData('\u273B Crunched for 1m 22s\r\n');
+    timer.advance(50); // crunched=true, idle timer starts
+
+    // Wait 400ms (just under idleDelay=500)
+    for (let i = 0; i < 4; i++) {
+      await capture.onData('\x1b[H'); // invisible
+      timer.advance(100);
+    }
+    assert.equal(completionFired, false, 'should NOT have fired yet');
+
+    // Now real visible data arrives (worker starts new work)
+    await capture.onData('\x1b[H\x1b[2J\u273B Working on something...\r\n');
+    timer.advance(50); // debounce fires, screen changed, has active spinner
+
+    // Wait past original idle delay
+    timer.advance(500);
+    assert.equal(completionFired, false,
+      'should NOT fire — active spinner detected on real screen change');
+  });
+
   // ---------- Scroll lock suppresses output ----------
 
   it('scroll unlocked: new PTY data does NOT emit output events', async () => {

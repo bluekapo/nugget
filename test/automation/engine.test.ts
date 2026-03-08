@@ -201,6 +201,28 @@ describe('AutomationEngine', () => {
       'engine should detect worker completion via ❯ prompt and start cycle');
   });
 
+  // ---------- Test 3c: idle timer starvation from invisible PTY data ----------
+
+  it('worker completion fires despite periodic invisible PTY data after marker', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Worker completes with marker
+    await emitOutput(bus, 'worker', completionOutput('done'));
+    timer.advance(50); // debounce fires, crunched=true
+
+    // Simulate cursor blinks that don't change visible content
+    for (let i = 0; i < 12; i++) {
+      bus.emit('session:output', 'worker', '\x1b[H');
+      await flush();
+      timer.advance(100);
+    }
+    // 1250ms total. idleDelay=100 in test config, so should have triggered.
+
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'engine should detect worker completion despite invisible PTY data');
+  });
+
   // ---------- Test 3: full COMMAND cycle ----------
 
   it('full COMMAND cycle: worker idle -> capture -> /clear -> prompt -> parse -> execute', async () => {
