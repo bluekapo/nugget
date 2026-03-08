@@ -1,4 +1,4 @@
-import type { ContextPacket } from './types.js';
+import type { ContextPacket, ConsultationPacket } from './types.js';
 
 export function buildPrompt(ctx: ContextPacket): string {
   const lines: string[] = [];
@@ -62,6 +62,47 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('- "Let me look at the code first. COMMAND: ..." (no commentary, just the directive)');
   lines.push('- "ESCALATE: This setup feels wrong" (the setup is correct, do not escalate over it)');
   lines.push('- "ESCALATE: Task is complete" (use DONE for completion, not ESCALATE)');
+
+  return lines.join('\n');
+}
+
+export function buildConsultationPrompt(ctx: ConsultationPacket): string {
+  const lines: string[] = [];
+
+  lines.push('## Your Role');
+  lines.push('You are the ORCHESTRATOR monitoring a WORKER session.');
+  lines.push('');
+
+  lines.push('## Task');
+  lines.push('```');
+  lines.push(ctx.taskDescription);
+  lines.push('```');
+  lines.push('');
+
+  lines.push('## Current Worker Terminal Output');
+  lines.push('```');
+  lines.push(ctx.workerScreen);
+  lines.push('```');
+  lines.push('');
+
+  const actionCount = ctx.actionLog.length;
+  lines.push(`## Action Log (${actionCount} actions taken, cycle ${ctx.cycleNumber})`);
+
+  if (actionCount === 0) {
+    lines.push('(no actions taken yet -- this is the first cycle)');
+  } else {
+    for (let i = 0; i < actionCount; i++) {
+      const entry = ctx.actionLog[i];
+      lines.push(`${i + 1}. Sent: ${entry.action}`);
+      lines.push(`   Result: ${entry.outcome}`);
+    }
+  }
+  lines.push('');
+
+  lines.push('## Question');
+  lines.push('The worker has stopped producing output. Based on the terminal state above, is the worker FINISHED with the task?');
+  lines.push('');
+  lines.push('Respond with exactly YES or NO. Nothing else.');
 
   return lines.join('\n');
 }
