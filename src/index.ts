@@ -115,9 +115,12 @@ async function startPrimary(
   // 8. Create Telegram bot (validates token via getMe)
   const bot = await createBot(config.botToken, config.ownerId);
 
+  // 8b. Create SettingsStore early (needed by keyboard builders below)
+  const settingsStore = new SettingsStore(db);
+
   // 9. Create output sink
   // Pass CLI keyboard so every output message shows navigation buttons (no Delete)
-  const outputSink = new TelegramOutputSink(bot.api, config.ownerId, buildCLIKeyboard());
+  const outputSink = new TelegramOutputSink(bot.api, config.ownerId, buildCLIKeyboard(true, settingsStore.get('enter_confirmation')));
 
   // 9b. Create TerminalEmulator + ScreenCapture pipeline
   // PTY data -> ScreenCapture.onData -> emulator -> OutputEvent -> sink.handleEvent
@@ -142,9 +145,6 @@ async function startPrimary(
     () => router.getAll(),
     hubStore,
   );
-
-  // 11b. Create SettingsStore for user preferences (notifications, etc.)
-  const settingsStore = new SettingsStore(db);
 
   // 11c. Create AutomationHubRenderer with engine factory
   const automationHub = new AutomationHubRenderer(
@@ -283,12 +283,12 @@ async function startPrimary(
   const ephemeralTracker = new EphemeralTracker(bot.api, config.ownerId);
   registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore, automationHub);
   bot.command('controls', async (ctx) => {
-    const result = await ctx.reply('Session controls:', { reply_markup: buildControlsKeyboard() });
+    const result = await ctx.reply('Session controls:', { reply_markup: buildControlsKeyboard(true, settingsStore.get('enter_confirmation')) });
     await ephemeralTracker.track((result as { message_id: number }).message_id);
     try { await ctx.deleteMessage(); } catch { /* ignore */ }
   });
   bot.on('message:text', inputHandler.handler());
-  registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), screenCapture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { shutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, automationHub);
+  registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), screenCapture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { shutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, automationHub, settingsStore);
 
   // 17. Start bot long polling in background (do NOT await -- it blocks forever)
   bot.start({ onStart: () => logInfo('Telegram bot listening') });
@@ -591,7 +591,8 @@ async function becomeNewPrimary(
 ): Promise<void> {
   try {
     const bot = await createBot(config.botToken, config.ownerId);
-    const outputSink = new TelegramOutputSink(bot.api, config.ownerId, buildCLIKeyboard());
+    const settingsStore = new SettingsStore(db);
+    const outputSink = new TelegramOutputSink(bot.api, config.ownerId, buildCLIKeyboard(true, settingsStore.get('enter_confirmation')));
 
     const emulator = new TerminalEmulator(ptyCols, ptyRows);
     const capture = new ScreenCapture(emulator, (event) => {
@@ -621,8 +622,6 @@ async function becomeNewPrimary(
       () => router.getAll(),
       hubStore,
     );
-
-    const settingsStore = new SettingsStore(db);
 
     // Create AutomationHubRenderer for promoted primary
     const promotedAutomationHub = new AutomationHubRenderer(
@@ -707,12 +706,12 @@ async function becomeNewPrimary(
     const ephemeralTracker = new EphemeralTracker(bot.api, config.ownerId);
     registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore, promotedAutomationHub);
     bot.command('controls', async (ctx) => {
-      const result = await ctx.reply('Session controls:', { reply_markup: buildControlsKeyboard() });
+      const result = await ctx.reply('Session controls:', { reply_markup: buildControlsKeyboard(true, settingsStore.get('enter_confirmation')) });
       await ephemeralTracker.track((result as { message_id: number }).message_id);
       try { await ctx.deleteMessage(); } catch { /* ignore */ }
     });
     bot.on('message:text', inputHandler.handler());
-    registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), capture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { promotedShutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, promotedAutomationHub);
+    registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), capture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { promotedShutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, promotedAutomationHub, settingsStore);
 
     bus.on('session:exit', (name: string) => {
       const wasActive = router.activeSession === name;

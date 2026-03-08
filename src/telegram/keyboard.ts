@@ -2,6 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import type { Bot } from 'grammy';
 import type { SessionManager } from '../session/manager.js';
 import type { SessionRouter } from '../session/router.js';
+import type { SettingsStore } from '../db/settings-store.js';
 
 /** Inline button definitions for common Claude Code actions. */
 export const ACTION_BUTTONS = {
@@ -87,7 +88,11 @@ export function registerCallbackHandlers(
   onShutdown?: () => Promise<void>,
   deleteHub?: () => Promise<void>,
   automationHub?: { handleCallback(data: string): Promise<string>; render(): Promise<void> },
+  settingsStore?: SettingsStore,
 ): void {
+  // Enter confirmation: double-press state
+  let enterPendingConfirm = false;
+  let enterConfirmTimer: ReturnType<typeof setTimeout> | null = null;
   // Delete button -- removes the bot message it's attached to (no session required)
   bot.callbackQuery('action:delete', async (ctx) => {
     try {
@@ -103,7 +108,7 @@ export function registerCallbackHandlers(
     if (!scrollHandler) { await ctx.answerCallbackQuery(); return; }
     scrollHandler.toggleLock();
     try {
-      await ctx.editMessageReplyMarkup({ reply_markup: buildCLIKeyboard(scrollHandler.scrollLocked) });
+      await ctx.editMessageReplyMarkup({ reply_markup: buildCLIKeyboard(scrollHandler.scrollLocked, settingsStore?.get('enter_confirmation') ?? false) });
     } catch { /* message may not be editable */ }
     await ctx.answerCallbackQuery();
   });
@@ -123,13 +128,13 @@ export function registerCallbackHandlers(
           scrollHandler.scrollUp();
           // After scrollUp, always unlocked — update keyboard to remove lock emoji
           try {
-            await ctx.editMessageReplyMarkup({ reply_markup: buildCLIKeyboard(false) });
+            await ctx.editMessageReplyMarkup({ reply_markup: buildCLIKeyboard(false, settingsStore?.get('enter_confirmation') ?? false) });
           } catch { /* message may not be editable */ }
         } else {
           scrollHandler.scrollDown();
           // After scrollDown, check if re-locked (at bottom) — update keyboard accordingly
           try {
-            await ctx.editMessageReplyMarkup({ reply_markup: buildCLIKeyboard(scrollHandler.scrollLocked) });
+            await ctx.editMessageReplyMarkup({ reply_markup: buildCLIKeyboard(scrollHandler.scrollLocked, settingsStore?.get('enter_confirmation') ?? false) });
           } catch { /* message may not be editable */ }
         }
         await ctx.answerCallbackQuery();
@@ -139,6 +144,27 @@ export function registerCallbackHandlers(
       // Clear input: send backspaces (clear before cursor) + Ctrl+K (kill to end of line)
       if (action.data === 'action:clear-input') {
         sessionManager.writeToSession(sessionName, '\x7f'.repeat(300) + '\x0b');
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      // Enter confirmation: double-press required when setting is ON
+      if (action.data === 'action:enter' && settingsStore?.get('enter_confirmation')) {
+        if (enterPendingConfirm) {
+          // Second press within window -- send the signal
+          enterPendingConfirm = false;
+          if (enterConfirmTimer) { clearTimeout(enterConfirmTimer); enterConfirmTimer = null; }
+          sessionManager.writeToSession(sessionName, '\r');
+        } else {
+          // First press -- set pending, start 7s timeout
+          enterPendingConfirm = true;
+          enterConfirmTimer = setTimeout(() => {
+            enterPendingConfirm = false;
+            enterConfirmTimer = null;
+          }, 7000);
+          await ctx.answerCallbackQuery({ text: 'Press again within 7s to confirm' });
+          return;
+        }
         await ctx.answerCallbackQuery();
         return;
       }
