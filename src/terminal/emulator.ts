@@ -96,6 +96,33 @@ export class TerminalEmulator {
     return lines.join('\n');
   }
 
+  /**
+   * Extract ALL buffer content including scrollback as plain text.
+   * Unlike getScreenText() which only returns the last `rows` lines (viewport),
+   * this reads the entire buffer from line 0. Useful when responses scroll
+   * past the viewport due to long prompt echoes.
+   */
+  getFullBufferText(): string {
+    const buffer = this.terminal.buffer.active;
+    const lines: string[] = [];
+
+    for (let y = 0; y < buffer.length; y++) {
+      const line: IBufferLine | undefined = buffer.getLine(y);
+      if (line) {
+        lines.push(line.translateToString(true));
+      } else {
+        lines.push('');
+      }
+    }
+
+    // Trim trailing empty lines
+    while (lines.length > 0 && lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+
+    return lines.join('\n');
+  }
+
   /** Scroll the viewport by N pages (negative = up, positive = down). */
   scrollPages(count: number): void {
     this.terminal.scrollPages(count);

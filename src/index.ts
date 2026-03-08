@@ -153,7 +153,19 @@ async function startPrimary(
     () => router.getAll(),
     (engineConfig: EngineConfig, engineBus: EventBus) =>
       new AutomationEngine(
-        { ...engineConfig, maxCycles: settingsStore.getNumber('cycle_limit', 100) },
+        {
+          ...engineConfig,
+          maxCycles: settingsStore.getNumber('cycle_limit', 100),
+          requestOrchestratorRedraw: () => {
+            const bridge = router.getRemoteBridge(engineConfig.orchestratorSession);
+            if (bridge) {
+              bridge.requestRedraw();
+            } else {
+              // Local session: resize to trigger SIGWINCH
+              try { sessionManager.resizeSession(engineConfig.orchestratorSession, ptyCols, ptyRows); } catch { /* may have exited */ }
+            }
+          },
+        },
         sessionManager,
         engineBus,
       ),
@@ -619,7 +631,18 @@ async function becomeNewPrimary(
       () => router.getAll(),
       (engineConfig: EngineConfig, engineBus: EventBus) =>
         new AutomationEngine(
-          { ...engineConfig, maxCycles: settingsStore.getNumber('cycle_limit', 100) },
+          {
+            ...engineConfig,
+            maxCycles: settingsStore.getNumber('cycle_limit', 100),
+            requestOrchestratorRedraw: () => {
+              const bridge = router.getRemoteBridge(engineConfig.orchestratorSession);
+              if (bridge) {
+                bridge.requestRedraw();
+              } else {
+                try { sessionManager.resizeSession(engineConfig.orchestratorSession, ptyCols, ptyRows); } catch { /* may have exited */ }
+              }
+            },
+          },
           sessionManager,
           engineBus,
         ),

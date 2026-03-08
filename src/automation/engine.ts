@@ -29,6 +29,16 @@ function debugLog(msg: string): void {
   try { appendFileSync(LOG_FILE, `[${ts}] ${msg}\n`); } catch { /* ignore */ }
 }
 
+/** Strip all ANSI escape sequences from raw PTY data. */
+function stripAnsi(raw: string): string {
+  return raw
+    .replace(/\x1b\][^\x07]*\x07/g, '')           // OSC sequences (window title etc.)
+    .replace(/\x1b\[[\?]?[0-9;]*[a-zA-Z]/g, '')   // CSI sequences (including private modes like ?2026l)
+    .replace(/\x1b[()][0-9A-Za-z]/g, '')           // Character set selection
+    .replace(/\x1b[A-Za-z]/g, '')                  // Single-char escapes
+    .replace(/\r(?!\n)/g, '');                      // Bare CR (without LF) — cursor to start of line
+}
+
 const RETRY_PROMPT = 'Your previous response could not be parsed as a valid directive. '
   + 'Please respond with exactly ONE of the following formats:\n'
   + '- COMMAND: <shell command>\n'
@@ -57,6 +67,9 @@ export interface EngineConfig {
   idleDelay?: number;
   arrowKeyDelayMs?: number;
   maxCycles?: number;
+  /** Optional callback to trigger a PTY redraw on the orchestrator session.
+   *  Used to flush stuck IPC output when the remote TUI goes idle after rendering. */
+  requestOrchestratorRedraw?: () => void;
 }
 
 interface SessionMonitor {
@@ -84,6 +97,8 @@ export class AutomationEngine {
   private clearPollTimer: unknown = null;
   private responsePollTimer: unknown = null;
   private clearingBuffer = '';
+  private responseBuffer = '';
+  private lastResponseBufLen = 0;
 
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
@@ -135,6 +150,13 @@ export class AutomationEngine {
       if (this._state === 'clearing-orchestrator' && sessionName === this.config.orchestratorSession) {
         this.clearingBuffer += data;
         debugLog(`[buffer-append] bufferLen=${this.clearingBuffer.length} chunkPreview=${JSON.stringify(data.slice(0, 100))}`);
+      }
+
+      // Accumulate raw PTY data during waiting-response state.
+      // The emulator viewport is only 40 rows — long prompts push the
+      // response off-screen. Parsing the raw buffer avoids this limitation.
+      if (this._state === 'waiting-response' && sessionName === this.config.orchestratorSession) {
+        this.responseBuffer += data;
       }
 
       if (sessionName === this.config.workerSession && this.workerMonitor) {
@@ -199,8 +221,9 @@ export class AutomationEngine {
     this.cancelClearPolling();
     this.cancelResponsePolling();
 
-    // Reset clearing buffer
+    // Reset buffers
     this.clearingBuffer = '';
+    this.responseBuffer = '';
 
     this.setState('stopped');
   }
@@ -307,6 +330,8 @@ export class AutomationEngine {
         this.orchestratorMonitor.capture.markInputSent();
       }
 
+      this.responseBuffer = '';
+      this.lastResponseBufLen = 0;
       this.setState('waiting-response');
 
       // Poll orchestrator screen for a parseable directive
@@ -321,10 +346,10 @@ export class AutomationEngine {
 
     this.setState('executing');
 
-    // Capture orchestrator screen and parse directive
-    const orchestratorScreen = this.orchestratorMonitor?.emulator.getScreenText() ?? '';
-    debugLog(`[onResponseReady] screenLen=${orchestratorScreen.length} screen=${JSON.stringify(orchestratorScreen.slice(0, 300))}`);
-    const directive = parseDirective(orchestratorScreen);
+    // Parse directive from raw PTY buffer (emulator viewport is too small, Ink redraws in-place)
+    const stripped = stripAnsi(this.responseBuffer);
+    debugLog(`[onResponseReady] bufLen=${this.responseBuffer.length} strippedLen=${stripped.length} tail300=${JSON.stringify(stripped.slice(-300))}`);
+    const directive = parseDirective(stripped);
 
     // SAF-02: Parse retry logic
     if (!directive && !this.retryAttempted) {
@@ -345,6 +370,8 @@ export class AutomationEngine {
           this.orchestratorMonitor.capture.resetBaseline();
           this.orchestratorMonitor.capture.markInputSent();
         }
+        this.responseBuffer = '';
+        this.lastResponseBufLen = 0;
         this.setState('waiting-response');
 
         // Poll orchestrator screen for a parseable directive
@@ -354,7 +381,7 @@ export class AutomationEngine {
     }
 
     if (!directive && this.retryAttempted) {
-      this.actionLog.add('PARSE_FAILURE', orchestratorScreen.slice(0, 200));
+      this.actionLog.add('PARSE_FAILURE', stripped.slice(0, 200));
       this.bus.emit('automation:escalation', 'Failed to parse orchestrator response after retry');
       this.setState('paused');
       return;
@@ -516,19 +543,29 @@ export class AutomationEngine {
         return;
       }
 
-      const screenText = this.orchestratorMonitor?.emulator.getScreenText() ?? '';
-      const directive = parseDirective(screenText);
-      debugLog(`[response-poll] screenLen=${screenText.length} hasDirective=${!!directive} screen=${JSON.stringify(screenText.slice(0, 200))}`);
+      // Parse directives from the raw PTY buffer. The emulator viewport (40 rows)
+      // is too small for the prompt echo + response, and Ink redraws in-place
+      // so scrollback doesn't accumulate. The raw buffer captures everything.
+      const stripped = stripAnsi(this.responseBuffer);
+      const directive = parseDirective(stripped);
+      debugLog(`[response-poll] bufLen=${this.responseBuffer.length} strippedLen=${stripped.length} hasDirective=${!!directive} tail300=${JSON.stringify(stripped.slice(-300))}`);
 
       if (directive) {
-        debugLog(`[response-poll] directive found: ${directive.type}`);
+        debugLog(`[response-poll] directive found: ${directive.type} => ${JSON.stringify(directive)}`);
         this.responsePollTimer = null;
         this.onResponseReady();
-      } else if (/\u273B\s+Crunched for/.test(screenText)) {
+      } else if (/\u273B\s+(Crunched|Saut\u00e9ed|Mustered) for/.test(stripped)) {
         debugLog(`[response-poll] completion marker found but no directive — triggering retry`);
         this.responsePollTimer = null;
         this.onResponseReady();
       } else {
+        // If buffer hasn't grown since last poll, request a redraw to flush
+        // any output stuck in TCP/Nagle buffering or Ink's idle state.
+        if (this.responseBuffer.length === this.lastResponseBufLen && this.config.requestOrchestratorRedraw) {
+          debugLog(`[response-poll] buffer stale (${this.lastResponseBufLen}), requesting redraw`);
+          this.config.requestOrchestratorRedraw();
+        }
+        this.lastResponseBufLen = this.responseBuffer.length;
         debugLog(`[response-poll] no directive yet — re-polling`);
         this.startResponsePolling();
       }
