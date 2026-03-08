@@ -141,9 +141,9 @@ export function registerCallbackHandlers(
         return;
       }
 
-      // Clear input: send backspaces (clear before cursor) + Ctrl+K (kill to end of line)
+      // Clear input: send right-arrows (move cursor to end) + backspaces (delete all)
       if (action.data === 'action:clear-input') {
-        sessionManager.writeToSession(sessionName, '\x7f'.repeat(300) + '\x0b');
+        sessionManager.writeToSession(sessionName, '\x1b[C'.repeat(300) + '\x7f'.repeat(300));
         await ctx.answerCallbackQuery();
         return;
       }
