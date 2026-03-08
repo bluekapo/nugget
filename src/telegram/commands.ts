@@ -173,6 +173,24 @@ export function registerCommands(
       await ctx.answerCallbackQuery({ text: `Notifications ${!current ? 'ON' : 'OFF'}` });
     });
 
+    // Toggle enter confirmation callback: edit the same message in-place
+    bot.callbackQuery('settings:toggle-enter-confirmation', async (ctx) => {
+      const current = settingsStore.get('enter_confirmation');
+      settingsStore.set('enter_confirmation', !current);
+      const { text, keyboard } = buildSettingsMessage(settingsStore);
+      try {
+        await ctx.editMessageText(text, {
+          parse_mode: 'HTML',
+          reply_markup: keyboard,
+        });
+      } catch (err) {
+        if (!isNotModifiedError(err)) {
+          logError('Settings editMessageText failed:', err);
+        }
+      }
+      await ctx.answerCallbackQuery({ text: `Confirm Enter ${!current ? 'ON' : 'OFF'}` });
+    });
+
     // Cycle limit decrease: subtract 10, clamp to minimum 10
     bot.callbackQuery('settings:cycle-limit-dec', async (ctx) => {
       const current = settingsStore.getNumber('cycle_limit', 100);
@@ -243,18 +261,23 @@ function buildSettingsMessage(store: SettingsStore): {
 
   const cycleLimit = store.getNumber('cycle_limit', 100);
 
+  const enterConfirm = store.get('enter_confirmation');
+
   const text = [
     '<b>Settings</b>',
     '',
     `Notifications: <b>${enabled ? 'ON' : 'OFF'}</b>`,
+    `Confirm Enter: <b>${enterConfirm ? 'ON' : 'OFF'}</b>`,
     `Cycle limit: <b>${cycleLimit}</b>`,
     `Last updated: ${lastUpdated}`,
   ].join('\n');
 
   const toggleLabel = enabled ? '\uD83D\uDD15 Turn OFF' : '\uD83D\uDD14 Turn ON';
+  const enterConfirmLabel = enterConfirm ? '\uD83D\uDEE1 Confirm Enter: OFF' : '\uD83D\uDEE1 Confirm Enter: ON';
   const keyboard = {
     inline_keyboard: [
       [{ text: toggleLabel, callback_data: 'settings:toggle-notifications' }],
+      [{ text: enterConfirmLabel, callback_data: 'settings:toggle-enter-confirmation' }],
       [
         { text: '-10', callback_data: 'settings:cycle-limit-dec' },
         { text: String(cycleLimit), callback_data: 'settings:cycle-limit-noop' },

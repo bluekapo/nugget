@@ -21,10 +21,11 @@ export const ACTION_BUTTONS = {
 /** Build an InlineKeyboard for CLI output messages (no Delete button).
  *  Row 1: Scroll Up / Lock toggle / Scroll Down, Row 2: Clear-input + /clear + Enter, Row 3: Esc/Up/Bksp, Row 4: Left/Down/Right.
  *  Lock button shows current state: locked (auto-scroll on) or unlocked (manual scroll). */
-export function buildCLIKeyboard(locked = true): InlineKeyboard {
+export function buildCLIKeyboard(locked = true, enterConfirmation = false): InlineKeyboard {
   const lockLabel = locked ? '\uD83D\uDD34\uD83D\uDD12' : '\uD83D\uDFE2\uD83D\uDD13';
   const scrollUpLabel = locked ? '\uD83D\uDD12 \u2B06 Scroll Up' : '\u2B06 Scroll Up';
   const scrollDownLabel = locked ? '\uD83D\uDD12 \u2B07 Scroll Down' : '\u2B07 Scroll Down';
+  const enterLabel = enterConfirmation ? '\uD83D\uDEE1 \u21A9 Enter' : ACTION_BUTTONS.enter.label;
   return new InlineKeyboard()
     .text(scrollUpLabel, ACTION_BUTTONS.scrollUp.data)
     .text(lockLabel, 'action:scroll-lock')
@@ -32,7 +33,7 @@ export function buildCLIKeyboard(locked = true): InlineKeyboard {
     .row()
     .text(ACTION_BUTTONS.clearInput.label, ACTION_BUTTONS.clearInput.data)
     .text(ACTION_BUTTONS.clear.label, ACTION_BUTTONS.clear.data)
-    .text(ACTION_BUTTONS.enter.label, ACTION_BUTTONS.enter.data)
+    .text(enterLabel, ACTION_BUTTONS.enter.data)
     .row()
     .text(ACTION_BUTTONS.escape.label, ACTION_BUTTONS.escape.data)
     .text(ACTION_BUTTONS.arrowUp.label, ACTION_BUTTONS.arrowUp.data)
@@ -46,10 +47,11 @@ export function buildCLIKeyboard(locked = true): InlineKeyboard {
 /** Build an InlineKeyboard for /controls command (includes Delete button).
  *  Row 1: Scroll Up / Lock toggle / Scroll Down, Row 2: Clear-input + /clear + Enter, Row 3: Esc/Up/Bksp, Row 4: Left/Down/Right, Row 5: Delete.
  *  Lock button shows current state: locked (auto-scroll on) or unlocked (manual scroll). */
-export function buildControlsKeyboard(locked = true): InlineKeyboard {
+export function buildControlsKeyboard(locked = true, enterConfirmation = false): InlineKeyboard {
   const lockLabel = locked ? '\uD83D\uDD34\uD83D\uDD12' : '\uD83D\uDFE2\uD83D\uDD13';
   const scrollUpLabel = locked ? '\uD83D\uDD12 \u2B06 Scroll Up' : '\u2B06 Scroll Up';
   const scrollDownLabel = locked ? '\uD83D\uDD12 \u2B07 Scroll Down' : '\u2B07 Scroll Down';
+  const enterLabel = enterConfirmation ? '\uD83D\uDEE1 \u21A9 Enter' : ACTION_BUTTONS.enter.label;
   return new InlineKeyboard()
     .text(scrollUpLabel, ACTION_BUTTONS.scrollUp.data)
     .text(lockLabel, 'action:scroll-lock')
@@ -57,7 +59,7 @@ export function buildControlsKeyboard(locked = true): InlineKeyboard {
     .row()
     .text(ACTION_BUTTONS.clearInput.label, ACTION_BUTTONS.clearInput.data)
     .text(ACTION_BUTTONS.clear.label, ACTION_BUTTONS.clear.data)
-    .text(ACTION_BUTTONS.enter.label, ACTION_BUTTONS.enter.data)
+    .text(enterLabel, ACTION_BUTTONS.enter.data)
     .row()
     .text(ACTION_BUTTONS.escape.label, ACTION_BUTTONS.escape.data)
     .text(ACTION_BUTTONS.arrowUp.label, ACTION_BUTTONS.arrowUp.data)
