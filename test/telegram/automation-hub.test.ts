@@ -394,6 +394,95 @@ describe('AutomationHubRenderer', () => {
     });
   });
 
+  describe('notification delete buttons', () => {
+    it('error notification (automation stopped) includes reply_markup with action:delete button', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const mockEng = createMockEngine('idle');
+      const { hub } = createHub(api, {
+        sessions: ['w', 'o'],
+        engineFactory: () => mockEng as any,
+        bus,
+      });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.completeCreation('run tests');
+      api.calls.length = 0;
+
+      // Trigger error event
+      bus.emit('automation:error', 'something broke');
+
+      // Wait for async sendMessage
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Find the standalone sendMessage for the error notification (not the hub re-render)
+      const errorSend = api.calls.find(
+        c => c.method === 'sendMessage' && (c.args[1] as string).includes('Automation stopped'),
+      );
+      assert.ok(errorSend, 'should send error notification');
+      const opts = errorSend!.args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'error notification should have inline keyboard');
+      const allData = keyboard!.flat().map((b: any) => b.callback_data);
+      assert.ok(allData.includes('action:delete'), 'error notification should have action:delete button');
+    });
+
+    it('escalation notification includes reply_markup with action:delete button', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const mockEng = createMockEngine('idle');
+      const { hub } = createHub(api, {
+        sessions: ['w', 'o'],
+        engineFactory: () => mockEng as any,
+        bus,
+      });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.completeCreation('run tests');
+      api.calls.length = 0;
+
+      // Trigger escalation event
+      bus.emit('automation:escalation', 'needs human help');
+
+      // Wait for async sendMessage
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Find the standalone sendMessage for the escalation notification
+      const escalationSend = api.calls.find(
+        c => c.method === 'sendMessage' && (c.args[1] as string).includes('Automation escalated'),
+      );
+      assert.ok(escalationSend, 'should send escalation notification');
+      const opts = escalationSend!.args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'escalation notification should have inline keyboard');
+      const allData = keyboard!.flat().map((b: any) => b.callback_data);
+      assert.ok(allData.includes('action:delete'), 'escalation notification should have action:delete button');
+    });
+  });
+
+  describe('idle state delete button', () => {
+    it('idle state keyboard includes action:delete button alongside auto:new', async () => {
+      const api = createMockApi();
+      const { hub } = createHub(api);
+
+      await hub.render();
+
+      assert.equal(api.calls.length, 1);
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'should have inline keyboard');
+      const allData = keyboard!.flat().map((b: any) => b.callback_data);
+      assert.ok(allData.includes('auto:new'), 'should have New Automation button');
+      assert.ok(allData.includes('action:delete'), 'should have Delete button');
+    });
+  });
+
   describe('stale session handling', () => {
     it('handleCallback auto:w:<stale> where session no longer exists resets to idle with error', async () => {
       const api = createMockApi();
