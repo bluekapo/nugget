@@ -210,8 +210,7 @@ describe('AutomationEngine', () => {
 
     // Step 3: Orchestrator responds with directive
     await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: npm test'));
-    timer.advance(50);  // debounce
-    timer.advance(100); // idle -> onPromptComplete for response
+    timer.advance(1000); // response poll fires, finds COMMAND directive
 
     // Engine should have written command to worker
     const cmdWrite = writes.find(w => w.name === 'worker' && w.data.includes('npm test'));
@@ -247,8 +246,7 @@ describe('AutomationEngine', () => {
 
     // Engine sends prompt, orchestrator responds with ESCALATE
     await emitOutput(bus, 'orchestrator', directiveOutput('ESCALATE: task is complete'));
-    timer.advance(50);
-    timer.advance(100);
+    timer.advance(1000); // response poll fires, finds ESCALATE directive
 
     assert.equal(engine.state, 'paused', 'ESCALATE should pause the engine');
     assert.equal(escalations.length, 1, 'should emit one escalation event');
@@ -274,8 +272,7 @@ describe('AutomationEngine', () => {
 
     // Orchestrator responds with WAIT: 5
     await emitOutput(bus, 'orchestrator', directiveOutput('WAIT: 5'));
-    timer.advance(50);
-    timer.advance(100);
+    timer.advance(1000); // response poll fires, finds WAIT directive
 
     assert.equal(engine.state, 'waiting', 'should be in waiting state after WAIT directive');
 
@@ -403,8 +400,7 @@ describe('AutomationEngine', () => {
 
     // Orchestrator responds with SELECT: 3 (needs 2 arrow-downs then Enter)
     await emitOutput(bus, 'orchestrator', directiveOutput('SELECT: 3'));
-    timer.advance(50);
-    timer.advance(100);
+    timer.advance(1000); // response poll fires, finds SELECT directive
 
     // Engine handles SELECT with delays, advance enough for arrow key delays
     // Default arrowKeyDelayMs=50, 2 arrow-downs + Enter
@@ -435,7 +431,7 @@ describe('AutomationEngine', () => {
     await emitOutput(bus, 'orchestrator', clearOutput());
     timer.advance(1000); timer.advance(500); timer.advance(50); // poll + settle + Enter
     await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo 1'));
-    timer.advance(50); timer.advance(100);
+    timer.advance(1000); // response poll fires, finds COMMAND directive
 
     assert.equal(engine.state, 'idle', 'should be idle after cycle 1');
 
@@ -445,7 +441,7 @@ describe('AutomationEngine', () => {
     await emitOutput(bus, 'orchestrator', clearOutput());
     timer.advance(1000); timer.advance(500); timer.advance(50); // poll + settle + Enter
     await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo 2'));
-    timer.advance(50); timer.advance(100);
+    timer.advance(1000); // response poll fires, finds COMMAND directive
 
     assert.equal(engine.state, 'idle', 'should be idle after cycle 2');
 
@@ -476,7 +472,7 @@ describe('AutomationEngine', () => {
       await emitOutput(bus, 'orchestrator', clearOutput());
       timer.advance(1000); timer.advance(500); timer.advance(50); // poll + settle + Enter
       await emitOutput(bus, 'orchestrator', directiveOutput(`COMMAND: echo ${i}`));
-      timer.advance(50); timer.advance(100);
+      timer.advance(1000); // response poll fires, finds COMMAND directive
     }
 
     assert.equal(cycles.length, 3, 'should complete exactly 3 cycles');
@@ -504,9 +500,9 @@ describe('AutomationEngine', () => {
     await emitOutput(bus, 'orchestrator', clearOutput());
     timer.advance(1000); timer.advance(500); timer.advance(50); // poll + settle + Enter
 
-    // Orchestrator responds with unparseable text
+    // Orchestrator responds with unparseable text (includes completion marker)
     await emitOutput(bus, 'orchestrator', directiveOutput('I think we should run tests'));
-    timer.advance(50); timer.advance(100);
+    timer.advance(1000); // response poll fires, finds completion marker -> onResponseReady
 
     // onResponseReady sends retry prompt text, then delayed Enter
     timer.advance(50); // delayed Enter for retry prompt
@@ -536,7 +532,7 @@ describe('AutomationEngine', () => {
 
     // First unparseable response -> triggers retry
     await emitOutput(bus, 'orchestrator', directiveOutput('I think we should run tests'));
-    timer.advance(50); timer.advance(100);
+    timer.advance(1000); // response poll fires, finds completion marker -> onResponseReady
 
     // Retry prompt has delayed Enter
     timer.advance(50);
@@ -544,7 +540,7 @@ describe('AutomationEngine', () => {
 
     // Second unparseable response -> should ESCALATE
     await emitOutput(bus, 'orchestrator', directiveOutput('Hmm let me think about that'));
-    timer.advance(50); timer.advance(100);
+    timer.advance(1000); // response poll fires, finds completion marker -> onResponseReady
 
     assert.equal(engine.state, 'paused', 'should be paused after double parse failure');
     assert.ok(escalations.some(e => e.includes('parse')), 'should emit escalation about parse failure');
@@ -730,8 +726,7 @@ describe('AutomationEngine', () => {
 
     // Step 3: Orchestrator responds with directive (normal completion marker)
     await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: npm test'));
-    timer.advance(50);
-    timer.advance(100);
+    timer.advance(1000); // response poll fires, finds COMMAND directive
 
     // Verify command was written to worker
     const cmdWrite = writes.find(w => w.name === 'worker' && w.data.includes('npm test'));
@@ -809,8 +804,7 @@ describe('AutomationEngine', () => {
     // In production, Claude Code's TUI shows ✻ as the idle prompt indicator after completing.
     // This bare ✻ must NOT trigger the subagent spinner guard.
     await emitOutput(bus, 'orchestrator', 'COMMAND: npm test\r\n\u273B Crunched for 5s\r\n\u273B\r\n');
-    timer.advance(50);  // debounce
-    timer.advance(100); // idle -> should fire onResponseReady despite bare ✻
+    timer.advance(1000); // response poll fires, finds COMMAND directive
 
     // Engine should have parsed the COMMAND and sent it to the worker
     const cmdWrite = writes.find(w => w.name === 'worker' && w.data.includes('npm test'));
@@ -819,10 +813,9 @@ describe('AutomationEngine', () => {
     assert.equal(cycleEvents.length, 1, 'should complete one cycle');
   });
 
-  // ---------- Test 25: waiting-response timeout when completion marker is absent ----------
+  // ---------- Test 25: waiting-response poll detects directive without completion marker ----------
 
-  it('waiting-response timeout: engine detects response when completion marker is absent from screen', async () => {
-    config = { ...config, responseTimeoutMs: 500 };
+  it('waiting-response poll: engine detects response via directive polling when completion marker is absent', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const cycleEvents: Array<{ cycle: number; action: string }> = [];
     bus.on('automation:cycle-complete', (cycle, action) => {
@@ -844,22 +837,61 @@ describe('AutomationEngine', () => {
     assert.equal(engine.state, 'waiting-response', 'should be waiting for response');
 
     // Orchestrator responds with COMMAND but NO completion marker.
-    // This happens in production when Claude Code's Ink TUI re-renders
-    // and overwrites the "✻ Crunched for Xs" marker before capture runs.
+    // With poll-based detection, the poll reads screen text and finds
+    // the COMMAND directive directly -- no marker needed.
     await emitOutput(bus, 'orchestrator', 'COMMAND: npm test\r\n');
-    timer.advance(50);  // debounce fires capture
-    timer.advance(100); // idle fires but crunched=false, requireMarker=true -> no-op
 
-    // Engine should still be stuck without the timeout
-    assert.equal(engine.state, 'waiting-response', 'should still be waiting (no marker detected)');
-
-    // Advance past responseTimeoutMs -> timeout forces onResponseReady
-    timer.advance(500);
+    // Advance 1000ms to fire the response poll
+    timer.advance(1000); // poll fires, finds COMMAND directive
 
     // Engine should have parsed COMMAND and sent it to worker
     const cmdWrite = writes.find(w => w.name === 'worker' && w.data.includes('npm test'));
-    assert.ok(cmdWrite, 'timeout should force response detection, COMMAND sent to worker');
-    assert.equal(engine.state, 'idle', 'should return to idle after timeout-forced response');
+    assert.ok(cmdWrite, 'poll should detect COMMAND directive, sent to worker');
+    assert.equal(engine.state, 'idle', 'should return to idle after poll-based response detection');
+    assert.equal(cycleEvents.length, 1, 'should complete one cycle');
+  });
+
+  // ---------- Test 26: response poll runs indefinitely until directive appears ----------
+
+  it('response poll runs indefinitely when no directive appears, then completes when it does', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const cycleEvents: Array<{ cycle: number; action: string }> = [];
+    bus.on('automation:cycle-complete', (cycle, action) => {
+      cycleEvents.push({ cycle, action });
+    });
+
+    engine.start();
+
+    // Worker goes idle (first cycle via deferred timer)
+    timer.advance(1);
+    assert.equal(engine.state, 'clearing-orchestrator');
+
+    // Orchestrator clears -- poll detects (no content)
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter -> waiting-response
+
+    assert.equal(engine.state, 'waiting-response', 'should be waiting for response');
+
+    // Orchestrator has no parseable directive yet (e.g., "thinking..." text)
+    await emitOutput(bus, 'orchestrator', 'Thinking about the task...\r\n');
+
+    // Advance 5000ms (5 polls fire, none find a directive) -- still waiting
+    timer.advance(5000);
+    assert.equal(engine.state, 'waiting-response',
+      'should still be waiting-response after 5s of polling without a directive');
+
+    // Now orchestrator responds with a directive
+    await emitOutput(bus, 'orchestrator', 'COMMAND: echo hello\r\n');
+
+    // Next poll fires after 1000ms, finds the directive
+    timer.advance(1000);
+
+    // Engine should have written command to worker and returned to idle
+    const cmdWrite = writes.find(w => w.name === 'worker' && w.data.includes('echo hello'));
+    assert.ok(cmdWrite, 'poll should detect COMMAND directive after extended wait');
+    assert.equal(engine.state, 'idle', 'should return to idle after directive found');
     assert.equal(cycleEvents.length, 1, 'should complete one cycle');
   });
 

@@ -136,4 +136,24 @@ describe('parseDirective', () => {
       });
     });
   });
+
+  describe('long COMMAND values', () => {
+    it('preserves docker run command with flags, volumes, and quoted arguments', () => {
+      const cmd = 'docker run --rm -v /tmp:/data -e FOO=bar ubuntu:22.04 bash -c "echo hello world"';
+      const result = parseDirective(`output\nCOMMAND: ${cmd}\nend`);
+      assert.deepStrictEqual(result, { type: 'COMMAND', command: cmd });
+    });
+
+    it('preserves chained commands with flags and coverage filter', () => {
+      const cmd = 'npm run build && npm test -- --filter=auth --coverage';
+      const result = parseDirective(`output\nCOMMAND: ${cmd}\nend`);
+      assert.deepStrictEqual(result, { type: 'COMMAND', command: cmd });
+    });
+
+    it('preserves pipes with single quotes and awk expressions', () => {
+      const cmd = "cat /etc/hosts | grep -v \"^#\" | awk '{print $2}' | sort -u";
+      const result = parseDirective(`output\nCOMMAND: ${cmd}\nend`);
+      assert.deepStrictEqual(result, { type: 'COMMAND', command: cmd });
+    });
+  });
 });
