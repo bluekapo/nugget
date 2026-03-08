@@ -1253,7 +1253,7 @@ describe('InlineKeyboard', () => {
       );
     });
 
-    it('clear-input handler sends 300 backspaces + Ctrl+K to sessionManager', async () => {
+    it('clear-input handler sends 300 right-arrows + 300 backspaces to sessionManager', async () => {
       const writeCalls: Array<{ name: string; data: string }> = [];
       const handlers: Map<string, (ctx: any) => Promise<void>> = new Map();
       const mockBot = {
@@ -1298,8 +1298,8 @@ describe('InlineKeyboard', () => {
 
       assert.equal(writeCalls.length, 1, 'should write exactly once');
       assert.equal(writeCalls[0].name, 'clear-test-session', 'should write to the active session');
-      const expected = '\x7f'.repeat(300) + '\x0b';
-      assert.equal(writeCalls[0].data, expected, 'should send 300 backspaces + Ctrl+K (kill to end of line)');
+      const expected = '\x1b[C'.repeat(300) + '\x7f'.repeat(300);
+      assert.equal(writeCalls[0].data, expected, 'should send 300 right-arrows (move to end) + 300 backspaces (delete all)');
     });
 
     it('hub:disconnect does NOT trigger onShutdown when sessions remain', async () => {
