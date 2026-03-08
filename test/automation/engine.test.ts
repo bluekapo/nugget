@@ -1230,6 +1230,124 @@ describe('AutomationEngine', () => {
     assert.equal(escalations.length, 1, 'should emit escalation event');
   });
 
+  // ---------- Test A: onWorkerIdle is ignored when engine is not in idle state (false idle guard) ----------
+
+  it('onWorkerIdle is ignored when engine is not in idle state (false idle guard)', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Step 1: Trigger first cycle via deferred timer -> clearing-orchestrator
+    timer.advance(1);
+    assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator');
+
+    // Step 2: Complete clear and get to waiting-response
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter -> waiting-response
+
+    assert.equal(engine.state, 'waiting-response', 'should be waiting for orchestrator response');
+
+    // Step 3: Worker emits output with completion marker (simulating subagent pause).
+    // In buggy code, this triggers onWorkerIdle and corrupts the current cycle.
+    await emitOutput(bus, 'worker', completionOutput('subagent paused'));
+
+    // Advance past debounce (50) + idle (100) -- triggers onPromptComplete on worker monitor
+    timer.advance(50);  // debounce fires, capture runs, crunched=true
+    timer.advance(100); // idle fires -> onPromptComplete -> onWorkerIdle
+
+    // Assert: engine state must STILL be waiting-response (not clearing-orchestrator)
+    assert.equal(engine.state, 'waiting-response',
+      'onWorkerIdle must be ignored when engine is in waiting-response state (false idle guard)');
+
+    // Step 4: Complete the cycle normally -- orchestrator responds with directive
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo done'));
+    timer.advance(1000); // response poll fires, finds COMMAND directive
+
+    // Engine should complete normally
+    assert.equal(engine.state, 'idle', 'engine should return to idle after completing cycle');
+    const cmdWrite = writes.find(w => w.name === 'worker' && w.data.includes('echo done'));
+    assert.ok(cmdWrite, 'command should be written to worker');
+  });
+
+  // ---------- Test B: WAIT directive recovery when worker finishes during wait period ----------
+
+  it('WAIT directive recovery when worker finishes during wait period', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle up to WAIT: 2
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter -> waiting-response
+
+    // Orchestrator responds with WAIT: 2
+    await emitOutput(bus, 'orchestrator', directiveOutput('WAIT: 2'));
+    timer.advance(1000); // response poll fires, finds WAIT directive
+
+    assert.equal(engine.state, 'waiting', 'should be in waiting state');
+
+    // Worker finishes during wait -- emit completion output
+    await emitOutput(bus, 'worker', completionOutput('task done'));
+
+    // Advance past debounce (50ms) so worker screen captures the completion
+    timer.advance(50);
+
+    // Advance remaining time to expire WAIT timer (total 2000ms - we already used ~50ms from the 2000ms WAIT period)
+    // The WAIT timer fires at 2000ms from when it was set. We've advanced 50ms since then.
+    timer.advance(1950);
+
+    // After WAIT expires, engine should detect worker is already idle and start new cycle.
+    // In buggy code, engine sits at idle forever because no new onPromptComplete fires.
+    // Give a short advance for the deferred check to fire.
+    timer.advance(1);
+
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'engine should detect worker already idle after WAIT expires and start new cycle (not stuck at idle)');
+
+    // Verify /clear was sent (proves new cycle started)
+    const clearWrites = writes.filter(w => w.name === 'orchestrator' && w.data.includes('/clear'));
+    assert.ok(clearWrites.length >= 2, 'should send /clear for both cycles');
+  });
+
+  // ---------- Test C: WAIT normal case -- worker still busy after wait expires ----------
+
+  it('WAIT directive normal case -- worker still busy after wait expires', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle up to WAIT: 2
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter -> waiting-response
+
+    // Orchestrator responds with WAIT: 2
+    await emitOutput(bus, 'orchestrator', directiveOutput('WAIT: 2'));
+    timer.advance(1000); // response poll fires, finds WAIT directive
+
+    assert.equal(engine.state, 'waiting', 'should be in waiting state');
+
+    // Do NOT emit any worker output during wait -- worker is still busy
+
+    // Advance 2000ms to expire WAIT timer
+    timer.advance(2000);
+
+    // Engine should go to idle and wait for worker to complete
+    assert.equal(engine.state, 'idle', 'should return to idle after WAIT expires with worker still busy');
+
+    // Now emit worker completion -- engine should start next cycle
+    await emitOutput(bus, 'worker', completionOutput('worker finished'));
+    timer.advance(50);  // debounce
+    timer.advance(100); // idle -> onPromptComplete
+
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'should start new cycle when worker completes after WAIT expired');
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------
