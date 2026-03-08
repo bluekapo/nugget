@@ -6,6 +6,7 @@ export interface ExecutionResult {
   description: string;
   waitSeconds?: number;
   escalateReason?: string;
+  doneSummary?: string;
 }
 
 export function executeDirective(
@@ -38,6 +39,13 @@ export function executeDirective(
         executed: false,
         description: `ESCALATE: ${directive.reason}`,
         escalateReason: directive.reason,
+      };
+
+    case 'DONE':
+      return {
+        executed: false,
+        description: `DONE: ${directive.summary}`,
+        doneSummary: directive.summary,
       };
   }
 }

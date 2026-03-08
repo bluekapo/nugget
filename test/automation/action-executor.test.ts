@@ -82,4 +82,16 @@ describe('executeDirective', () => {
     assert.strictEqual(result.description, 'ESCALATE: task complete');
     assert.strictEqual(result.escalateReason, 'task complete');
   });
+
+  it('DONE returns doneSummary, sets executed=false, does NOT write', () => {
+    const writes: string[] = [];
+    const writeFn = (data: string) => { writes.push(data); };
+
+    const result = executeDirective({ type: 'DONE', summary: 'All tests pass' }, writeFn);
+
+    assert.deepStrictEqual(writes, []);
+    assert.strictEqual(result.executed, false);
+    assert.strictEqual(result.description, 'DONE: All tests pass');
+    assert.strictEqual(result.doneSummary, 'All tests pass');
+  });
 });

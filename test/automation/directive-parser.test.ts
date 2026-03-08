@@ -255,4 +255,29 @@ describe('parseDirective', () => {
       assert.ok(result!.reason!.includes('matches the requirements.'));
     });
   });
+
+  describe('DONE directive', () => {
+    it('extracts summary string from ● DONE: <text>', () => {
+      const result = parseDirective('some output\n● DONE: All tests pass and feature works\n\n❯ ');
+      assert.deepStrictEqual(result, { type: 'DONE', summary: 'All tests pass and feature works' });
+    });
+
+    it('collects multi-line continuation', () => {
+      const screenText = [
+        '● DONE: All tests pass and the implementation',
+        '  matches the requirements perfectly.',
+        '',
+      ].join('\n');
+      const result = parseDirective(screenText);
+      assert.ok(result);
+      assert.strictEqual(result!.type, 'DONE');
+      assert.ok((result as any).summary.includes('All tests pass'));
+      assert.ok((result as any).summary.includes('matches the requirements perfectly.'));
+    });
+
+    it('returns null without ● prefix', () => {
+      const result = parseDirective('DONE: All tests pass');
+      assert.strictEqual(result, null);
+    });
+  });
 });

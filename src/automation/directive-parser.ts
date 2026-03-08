@@ -38,6 +38,13 @@ export function parseDirective(text: string): Directive | null {
       return { type: 'ESCALATE', reason };
     }
 
+    // DONE: collect continuation lines for wrapped summary
+    const doneMatch = line.match(/^DONE:\s+(.+)$/);
+    if (doneMatch) {
+      const summary = collectContinuation(doneMatch[1].trim(), lines, i);
+      return { type: 'DONE', summary };
+    }
+
     // Single-line directives
     const directive = matchSingleLine(line);
     if (directive) return directive;
