@@ -60,6 +60,9 @@ const RETRY_PROMPT = 'Your previous response could not be parsed as a valid dire
   + '- ESCALATE: <reason>\n'
   + '- DONE: <summary>';
 
+const CONSULTATION_RETRY_PROMPT = 'Your previous response could not be parsed. '
+  + 'Please respond with exactly YES or NO. Is the worker finished?';
+
 export type EngineState =
   | 'stopped'
   | 'idle'
@@ -69,6 +72,7 @@ export type EngineState =
   | 'waiting-response'
   | 'consulting-orchestrator'
   | 'waiting-consultation'
+  | 'consultation-wait'
   | 'executing'
   | 'waiting'
   | 'paused';
@@ -85,6 +89,9 @@ export interface EngineConfig {
   /** Stagnation delay in ms -- how long worker must be silent before consultation.
    *  Default: 10000 (10s). */
   stagnationDelay?: number;
+  /** Consultation wait delay in ms -- how long to wait after NO response before re-checking.
+   *  Default: 60000 (60s). */
+  consultationWaitDelay?: number;
   /** Optional callback to trigger a PTY redraw on the orchestrator session.
    *  Used to flush stuck IPC output when the remote TUI goes idle after rendering. */
   requestOrchestratorRedraw?: () => void;
@@ -119,12 +126,14 @@ export class AutomationEngine {
   private lastResponseBufLen = 0;
   private stagnationTimer: unknown = null;
   private consultationMode = false;
+  private consultationWaitTimer: unknown = null;
 
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
   private readonly idleDelay: number;
   private readonly arrowKeyDelayMs: number;
   private readonly stagnationDelay: number;
+  private readonly consultationWaitDelay: number;
 
   constructor(
     private readonly config: EngineConfig,
@@ -141,6 +150,7 @@ export class AutomationEngine {
     this.arrowKeyDelayMs = config.arrowKeyDelayMs ?? 50;
     this.maxCycles = config.maxCycles ?? 100;
     this.stagnationDelay = config.stagnationDelay ?? 10000;
+    this.consultationWaitDelay = config.consultationWaitDelay ?? 60000;
   }
 
   get state(): EngineState {
@@ -248,6 +258,7 @@ export class AutomationEngine {
     this.cancelClearPolling();
     this.cancelResponsePolling();
     this.cancelStagnationTimer();
+    this.cancelConsultationWaitTimer();
 
     // Reset buffers
     this.clearingBuffer = '';
@@ -262,6 +273,7 @@ export class AutomationEngine {
     this.cancelClearPolling();
     this.cancelResponsePolling();
     this.cancelStagnationTimer();
+    this.cancelConsultationWaitTimer();
     this.setState('paused');
   }
 
@@ -764,17 +776,101 @@ export class AutomationEngine {
       debugLog(`[onConsultationResponse] YES — triggering normal cycle via onWorkerIdle`);
       // Orchestrator confirms worker is done — start a normal directive cycle
       this.consultationMode = false;
+      this.retryAttempted = false;
       this.setState('idle');
       this.onWorkerIdle();
-    } else {
-      // NO or unparseable — stub: emit error and pause (Plan 02 will flesh out NO/re-check)
-      debugLog(`[onConsultationResponse] NO or unparseable — pausing`);
-      this.consultationMode = false;
-      const reason = directive?.type === 'NO'
-        ? 'Orchestrator says worker is NOT finished (NO response to consultation)'
-        : 'Failed to parse YES/NO from consultation response';
-      this.bus.emit('automation:error', reason);
-      this.setState('paused');
+      return;
+    }
+
+    if (directive && directive.type === 'NO') {
+      debugLog(`[onConsultationResponse] NO — waiting ${this.consultationWaitDelay}ms then re-checking`);
+      this.setState('consultation-wait');
+
+      // Re-arm worker completion detection during wait so a completion
+      // marker can cancel the wait and start a normal cycle
+      if (this.workerMonitor) {
+        this.workerMonitor.capture.onPromptComplete = () => {
+          if (this._state !== 'consultation-wait') return;
+          debugLog(`[consultation-wait] worker completed during wait — exiting consultation`);
+          this.cancelConsultationWaitTimer();
+          this.consultationMode = false;
+          this.retryAttempted = false;
+          this.setState('idle');
+          this.onWorkerIdle();
+        };
+      }
+
+      // Start wait timer — re-check after delay
+      this.consultationWaitTimer = this.timer.setTimeout(() => {
+        this.consultationWaitTimer = null;
+        if (this._state !== 'consultation-wait') return;
+
+        debugLog(`[consultation-wait] timer expired — re-checking worker stagnation`);
+        // Check if worker produced a completion marker during the wait
+        if (this.workerMonitor) {
+          const screen = this.workerMonitor.emulator.getScreenText();
+          const hasIdlePrompt = screen.split('\n').some(
+            line => /^\u276F\s*$/.test(line)
+          );
+          const hasMarker = screen.split('\n').some(
+            line => /\u273B .+ for (?:\d+m )?\d+s/.test(line)
+          );
+          if (hasIdlePrompt || hasMarker) {
+            debugLog(`[consultation-wait] worker idle detected during wait — starting normal cycle`);
+            this.consultationMode = false;
+            this.retryAttempted = false;
+            this.setState('idle');
+            this.onWorkerIdle();
+            return;
+          }
+        }
+
+        // Worker still stagnant — transition to idle then re-trigger consultation
+        this.retryAttempted = false;
+        this.setState('idle');
+        this.onWorkerStagnation();
+      }, this.consultationWaitDelay);
+      return;
+    }
+
+    // Neither YES nor NO — retry logic
+    if (!this.retryAttempted) {
+      debugLog(`[onConsultationResponse] unparseable — retrying with clarifying prompt`);
+      this.retryAttempted = true;
+
+      // Send clarifying prompt
+      this.sessionManager.writeToSession(this.config.orchestratorSession, CONSULTATION_RETRY_PROMPT);
+      this.setState('consulting-orchestrator');
+
+      this.timer.setTimeout(() => {
+        if (this._state !== 'consulting-orchestrator') return;
+
+        this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+
+        if (this.orchestratorMonitor) {
+          this.orchestratorMonitor.capture.resetBaseline();
+          this.orchestratorMonitor.capture.markInputSent();
+        }
+        this.responseBuffer = '';
+        this.lastResponseBufLen = 0;
+        this.setState('waiting-consultation');
+
+        this.startResponsePolling();
+      }, this.baseDelay);
+      return;
+    }
+
+    // Retry already attempted — escalate
+    debugLog(`[onConsultationResponse] unparseable after retry — escalating`);
+    this.consultationMode = false;
+    this.bus.emit('automation:escalation', 'Failed to parse YES/NO from consultation response after retry');
+    this.setState('paused');
+  }
+
+  private cancelConsultationWaitTimer(): void {
+    if (this.consultationWaitTimer !== null) {
+      this.timer.clearTimeout(this.consultationWaitTimer);
+      this.consultationWaitTimer = null;
     }
   }
 }

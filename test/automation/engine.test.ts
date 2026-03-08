@@ -1553,7 +1553,8 @@ describe('AutomationEngine', () => {
     timer.advance(1000);
 
     assert.equal(engine.state, 'idle', 'should return to idle after directive cycle completes');
-    assert.equal(cycleEvents.length, 1, 'should have completed one additional cycle after YES');
+    // cycleEvents includes the initial cycle from driveToConsultationWaiting (COMMAND: echo test) + the post-YES cycle
+    assert.equal(cycleEvents.length, 2, 'should have completed initial cycle + post-YES cycle');
   });
 
   it('consultation NO: orchestrator says NO -> engine waits then re-checks', async () => {
