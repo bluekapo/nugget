@@ -325,9 +325,13 @@ describe('AutomationEngine', () => {
     timer.advance(4000);
     assert.equal(engine.state, 'waiting', 'should still be waiting after 4s');
 
-    // Advance remaining 1 second -- should re-enter idle
+    // Advance remaining 1 second -- WAIT timer expires.
+    // Worker screen still has completion marker from initial cycle setup,
+    // so the deferred worker-already-idle check fires and starts a new cycle.
     timer.advance(1000);
-    assert.equal(engine.state, 'idle', 'should return to idle after wait period');
+    // The deferred check (setTimeout 0) fires within this advance
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'should detect worker already idle after WAIT expires and start new cycle');
   });
 
   // ---------- Test 6: pause/resume ----------

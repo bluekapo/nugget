@@ -278,7 +278,7 @@ export class AutomationEngine {
 
   private onWorkerIdle(): void {
     debugLog(`[onWorkerIdle] state=${this._state} cycle=${this.cycleNumber}`);
-    if (this._state === 'paused' || this._state === 'stopped') return;
+    if (this._state !== 'idle') return;
 
     // SAF-01: Cycle limit guard
     if (this.cycleNumber >= this.maxCycles) {
@@ -442,6 +442,24 @@ export class AutomationEngine {
         if (this.workerMonitor) {
           this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
         }
+        // Check if worker already finished during WAIT: capture screen and look
+        // for idle prompt (❯) or completion marker. If found, start next cycle
+        // immediately instead of waiting for a future onPromptComplete that may
+        // never fire (worker is already idle, no new output coming).
+        this.timer.setTimeout(() => {
+          if (this._state !== 'idle') return;
+          if (!this.workerMonitor) return;
+          const screen = this.workerMonitor.emulator.getScreenText();
+          const hasIdlePrompt = screen.split('\n').some(
+            line => /^\u276F\s*$/.test(line)
+          );
+          const hasCompletionMarker = screen.split('\n').some(
+            line => /\u273B .+ for (?:\d+m )?\d+s/.test(line)
+          );
+          if (hasIdlePrompt || hasCompletionMarker) {
+            this.onWorkerIdle();
+          }
+        }, 0);
       }, waitMs);
       return;
     }
