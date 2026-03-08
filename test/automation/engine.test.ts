@@ -72,6 +72,11 @@ function completionOutput(text: string = 'some output'): string {
   return `${text}\r\n\u273B Crunched for 1m 22s\r\n`;
 }
 
+/** Simulate Claude Code response without completion marker, just idle prompt */
+function markerlessOutput(text: string = 'some output'): string {
+  return `${text}\r\n\u276F \r\n`;
+}
+
 /** Simulate Claude Code /clear response with (no content) */
 function clearOutput(): string {
   return '> /clear\r\n\r\n  \u23BF  (no content)\r\n';
@@ -176,6 +181,24 @@ describe('AutomationEngine', () => {
     // We check that it moved past idle (capturing-worker was transient)
     assert.notEqual(engine.state, 'idle', 'should have left idle state on worker idle');
     assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator after capturing worker');
+  });
+
+  // ---------- Test 3b: markerless worker completion via idle prompt (❯) ----------
+
+  it('worker completion detected via idle prompt (❯) when no completion marker present', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Emit worker output with NO completion marker, just the idle prompt ❯
+    await emitOutput(bus, 'worker', markerlessOutput('quick answer with no marker'));
+
+    // Advance past baseDelay (debounce) + idleDelay (completion detection)
+    timer.advance(50);  // debounce fires, capture runs, crunched=true via ❯ detection
+    timer.advance(100); // idle fires -> onPromptComplete -> state changes
+
+    // Engine should transition past idle into clearing-orchestrator
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'engine should detect worker completion via ❯ prompt and start cycle');
   });
 
   // ---------- Test 3: full COMMAND cycle ----------
