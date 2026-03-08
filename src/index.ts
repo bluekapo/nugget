@@ -297,14 +297,11 @@ async function startPrimary(
       logInfo(`IPC: Remote session '${name}' registered`);
       hubRenderer.render();
 
-      // Wire remote session output directly to ScreenCapture (bypassing bus)
-      // Remote output should NOT go through the bus -- it would hit the stdout
-      // listener and bleed remote text into the primary CLI. The primary only
-      // needs remote output for Telegram display via ScreenCapture.
+      // Emit remote session output on the bus so all listeners (ScreenCapture,
+      // AutomationEngine, etc.) see it uniformly. The stdout listener (step 7)
+      // filters by local sessionName, so remote output won't bleed to the CLI.
       bridge.onOutput((data: string) => {
-        if (router.activeSession === name) {
-          screenCapture.onData(data);
-        }
+        bus.emit('session:output', name, data);
       });
     },
     onUnregister: (name) => {

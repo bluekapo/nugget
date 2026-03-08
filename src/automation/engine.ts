@@ -13,6 +13,7 @@
  *   5. Executes directive on worker (or handles WAIT/ESCALATE)
  */
 
+import { appendFileSync } from 'node:fs';
 import { TerminalEmulator } from '../terminal/emulator.js';
 import { ScreenCapture } from '../terminal/capture.js';
 import type { TimerProvider } from '../terminal/capture.js';
@@ -21,6 +22,12 @@ import { parseDirective } from './directive-parser.js';
 import { buildPrompt } from './prompt-builder.js';
 import { executeDirective } from './action-executor.js';
 import { ActionLog } from './action-log.js';
+
+const LOG_FILE = 'nugget.log';
+function debugLog(msg: string): void {
+  const ts = new Date().toISOString();
+  try { appendFileSync(LOG_FILE, `[${ts}] ${msg}\n`); } catch { /* ignore */ }
+}
 
 const RETRY_PROMPT = 'Your previous response could not be parsed as a valid directive. '
   + 'Please respond with exactly ONE of the following formats:\n'
@@ -106,6 +113,8 @@ export class AutomationEngine {
   start(): void {
     if (this._state !== 'stopped') return;
 
+    debugLog(`[start] worker="${this.config.workerSession}" orchestrator="${this.config.orchestratorSession}"`);
+
     // Create dedicated monitors for each session
     this.workerMonitor = this.createMonitor();
     this.orchestratorMonitor = this.createMonitor();
@@ -117,12 +126,15 @@ export class AutomationEngine {
     this.sessionOutputHandler = (sessionName: string, data: string) => {
       if (this._state === 'stopped') return;
 
+      debugLog(`[session:output] session="${sessionName}" len=${data.length} state=${this._state} isOrch=${sessionName === this.config.orchestratorSession} isWorker=${sessionName === this.config.workerSession}`);
+
       // Accumulate raw PTY data during clearing-orchestrator state.
       // This buffer is checked by the clear poll instead of the emulator,
       // because xterm.js processes writes asynchronously and the emulator
       // may not have the data ready when the poll fires.
       if (this._state === 'clearing-orchestrator' && sessionName === this.config.orchestratorSession) {
         this.clearingBuffer += data;
+        debugLog(`[buffer-append] bufferLen=${this.clearingBuffer.length} chunkPreview=${JSON.stringify(data.slice(0, 100))}`);
       }
 
       if (sessionName === this.config.workerSession && this.workerMonitor) {
@@ -157,6 +169,7 @@ export class AutomationEngine {
   }
 
   stop(): void {
+    debugLog(`[stop] state=${this._state} (trace: ${new Error().stack?.split('\n').slice(1, 4).join(' <- ')})`);
     if (this._state === 'stopped') return;
 
     // Remove bus listeners
@@ -222,11 +235,13 @@ export class AutomationEngine {
   }
 
   private setState(newState: EngineState): void {
+    debugLog(`[setState] ${this._state} -> ${newState}`);
     this._state = newState;
     this.bus.emit('automation:state-change', newState);
   }
 
   private onWorkerIdle(): void {
+    debugLog(`[onWorkerIdle] state=${this._state} cycle=${this.cycleNumber}`);
     if (this._state === 'paused' || this._state === 'stopped') return;
 
     // SAF-01: Cycle limit guard
@@ -249,6 +264,7 @@ export class AutomationEngine {
     // Reset clearing buffer before sending /clear
     this.clearingBuffer = '';
 
+    debugLog(`[onWorkerIdle] writing /clear to orchestrator="${this.config.orchestratorSession}"`);
     // Send /clear to orchestrator
     this.sessionManager.writeToSession(this.config.orchestratorSession, '/clear\r');
 
@@ -259,6 +275,7 @@ export class AutomationEngine {
   }
 
   private onClearComplete(): void {
+    debugLog(`[onClearComplete] state=${this._state}`);
     this.cancelClearPolling();
     this.clearingBuffer = '';
     if (this._state !== 'clearing-orchestrator') return;
@@ -298,6 +315,7 @@ export class AutomationEngine {
   }
 
   private onResponseReady(): void {
+    debugLog(`[onResponseReady] state=${this._state}`);
     this.cancelResponsePolling();
     if (this._state === 'paused' || this._state === 'stopped') return;
 
@@ -305,6 +323,7 @@ export class AutomationEngine {
 
     // Capture orchestrator screen and parse directive
     const orchestratorScreen = this.orchestratorMonitor?.emulator.getScreenText() ?? '';
+    debugLog(`[onResponseReady] screenLen=${orchestratorScreen.length} screen=${JSON.stringify(orchestratorScreen.slice(0, 300))}`);
     const directive = parseDirective(orchestratorScreen);
 
     // SAF-02: Parse retry logic
@@ -457,19 +476,24 @@ export class AutomationEngine {
 
   private startClearPolling(): void {
     this.cancelClearPolling();
+    debugLog(`[startClearPolling] scheduling poll in 1000ms, bufferLen=${this.clearingBuffer.length}`);
     this.clearPollTimer = this.timer.setTimeout(() => {
-      if (this._state !== 'clearing-orchestrator') return;
+      if (this._state !== 'clearing-orchestrator') {
+        debugLog(`[clear-poll] SKIPPED — state changed to ${this._state}`);
+        return;
+      }
 
       // Check raw PTY buffer instead of emulator screen text.
-      // The emulator processes writes asynchronously (xterm.js batches via setTimeout),
-      // so getScreenText() may return empty even though data has arrived.
       const stripped = this.clearingBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+      debugLog(`[clear-poll] rawBufferLen=${this.clearingBuffer.length} strippedLen=${stripped.length} stripped=${JSON.stringify(stripped.slice(-300))}`);
       this.bus.emit('automation:error', `[clear-poll] buffer (${stripped.length} chars): ${JSON.stringify(stripped.slice(-200))}`);
       if (stripped.includes('(no content)')) {
+        debugLog(`[clear-poll] FOUND "(no content)" — scheduling onClearComplete in 500ms`);
         this.clearPollTimer = null;
         // 500ms settling delay so TUI finishes rendering before prompt text is typed
         this.timer.setTimeout(() => this.onClearComplete(), 500);
       } else {
+        debugLog(`[clear-poll] "(no content)" NOT found — re-polling`);
         // Poll again in 1 second
         this.startClearPolling();
       }
@@ -485,23 +509,27 @@ export class AutomationEngine {
 
   private startResponsePolling(): void {
     this.cancelResponsePolling();
+    debugLog(`[startResponsePolling] scheduling poll in 1000ms`);
     this.responsePollTimer = this.timer.setTimeout(() => {
-      if (this._state !== 'waiting-response') return;
+      if (this._state !== 'waiting-response') {
+        debugLog(`[response-poll] SKIPPED — state changed to ${this._state}`);
+        return;
+      }
 
       const screenText = this.orchestratorMonitor?.emulator.getScreenText() ?? '';
       const directive = parseDirective(screenText);
+      debugLog(`[response-poll] screenLen=${screenText.length} hasDirective=${!!directive} screen=${JSON.stringify(screenText.slice(0, 200))}`);
 
       if (directive) {
-        // Valid directive found -- fire response handler
+        debugLog(`[response-poll] directive found: ${directive.type}`);
         this.responsePollTimer = null;
         this.onResponseReady();
       } else if (/\u273B\s+Crunched for/.test(screenText)) {
-        // Completion marker present but no parseable directive --
-        // fire response handler to trigger SAF-02 retry logic
+        debugLog(`[response-poll] completion marker found but no directive — triggering retry`);
         this.responsePollTimer = null;
         this.onResponseReady();
       } else {
-        // Poll again in 1 second
+        debugLog(`[response-poll] no directive yet — re-polling`);
         this.startResponsePolling();
       }
     }, 1000);
