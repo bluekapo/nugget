@@ -673,6 +673,65 @@ describe('ScreenCapture', () => {
     assert.equal(completionFired, false, 'should NOT fire while spinner is active on non-completion line');
   });
 
+  // ---------- Prompt-based completion detection (❯) ----------
+
+  it('prompt detection: ❯ on its own line triggers onPromptComplete (no marker needed)', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 200 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Write idle prompt: ❯ followed by space on its own line
+    await capture.onData('\u276F \r\n');
+    timer.advance(50);  // debounce fires, capture runs, crunched=true via ❯ detection
+    timer.advance(200); // idle fires -> onPromptComplete
+
+    assert.equal(completionFired, true, 'onPromptComplete should fire when ❯ prompt appears on its own line');
+  });
+
+  it('prompt detection: echoed input ❯ npm test does NOT trigger completion', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 200 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Write echoed input line — ❯ followed by command text
+    await capture.onData('\u276F npm test\r\n');
+    timer.advance(50);  // debounce fires
+    timer.advance(200); // idle delay
+
+    assert.equal(completionFired, false, 'onPromptComplete should NOT fire for echoed input line');
+  });
+
+  it('prompt detection: spinner guard blocks when ❯ prompt AND active spinner present', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 200 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Write ❯ prompt AND active spinner on another line
+    await capture.onData('\u276F \r\n\u273B Working...\r\n');
+    timer.advance(50);  // debounce fires
+    timer.advance(200); // idle fires — spinner guard should block
+
+    assert.equal(completionFired, false, 'onPromptComplete should NOT fire when active spinner is present');
+  });
+
+  it('prompt detection: markInputSent() resets prompt-based detection', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 200 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Write idle prompt
+    await capture.onData('\u276F \r\n');
+    timer.advance(50); // debounce fires, crunched=true via ❯ detection
+
+    // User sends input — resets crunched state
+    capture.markInputSent();
+
+    // Advance past idle delay
+    timer.advance(200);
+
+    assert.equal(completionFired, false, 'onPromptComplete should NOT fire after markInputSent resets ❯ detection');
+  });
+
   // ---------- Scroll lock suppresses output ----------
 
   it('scroll unlocked: new PTY data does NOT emit output events', async () => {
