@@ -1253,9 +1253,10 @@ describe('InlineKeyboard', () => {
       );
     });
 
-    it('clear-input handler sends 300 right-arrows + 300 backspaces to sessionManager', async () => {
+    it('clear-input handler calls writeToSession multiple times (chunked, not single write)', async () => {
       const writeCalls: Array<{ name: string; data: string }> = [];
       const handlers: Map<string, (ctx: any) => Promise<void>> = new Map();
+      const timeoutCalls: Array<{ callback: () => void; delay: number }> = [];
       const mockBot = {
         callbackQuery(data: string | RegExp, handler: (ctx: any) => Promise<void>) {
           if (typeof data === 'string') {
@@ -1294,12 +1295,182 @@ describe('InlineKeyboard', () => {
 
       const clearHandler = handlers.get('action:clear-input');
       assert.ok(clearHandler, 'clear-input handler should be registered');
-      await clearHandler(mockCtx);
 
-      assert.equal(writeCalls.length, 1, 'should write exactly once');
-      assert.equal(writeCalls[0].name, 'clear-test-session', 'should write to the active session');
-      const expected = '\x1b[C'.repeat(300) + '\x7f'.repeat(300);
-      assert.equal(writeCalls[0].data, expected, 'should send 300 right-arrows (move to end) + 300 backspaces (delete all)');
+      // Use fake timers to capture setTimeout calls and flush them synchronously
+      const origSetTimeout = globalThis.setTimeout;
+      globalThis.setTimeout = ((cb: () => void, delay: number) => {
+        timeoutCalls.push({ callback: cb, delay });
+        return 0 as any;
+      }) as any;
+
+      try {
+        await clearHandler(mockCtx);
+
+        // Flush all scheduled timeouts synchronously (cascading -- each may schedule more)
+        let flushed = 0;
+        while (flushed < timeoutCalls.length) {
+          timeoutCalls[flushed].callback();
+          flushed++;
+        }
+
+        // Should have multiple write calls (not just 1)
+        assert.ok(writeCalls.length > 1, `expected multiple writes, got ${writeCalls.length}`);
+
+        // All writes should target the correct session
+        for (const call of writeCalls) {
+          assert.equal(call.name, 'clear-test-session');
+        }
+      } finally {
+        globalThis.setTimeout = origSetTimeout;
+      }
+    });
+
+    it('clear-input sends right-arrows first then backspaces in small batches', async () => {
+      const writeCalls: Array<{ name: string; data: string }> = [];
+      const handlers: Map<string, (ctx: any) => Promise<void>> = new Map();
+      const timeoutCalls: Array<{ callback: () => void; delay: number }> = [];
+      const mockBot = {
+        callbackQuery(data: string | RegExp, handler: (ctx: any) => Promise<void>) {
+          if (typeof data === 'string') {
+            handlers.set(data, handler);
+          }
+        },
+        on(_filter: string, _handler: unknown) {},
+      };
+
+      const mockSm = {
+        writeToSession(name: string, data: string) {
+          writeCalls.push({ name, data });
+        },
+        async stop(_name: string) {},
+      };
+
+      const mockRouter = {
+        switchTo(_name: string) {},
+        remove(_name: string) {},
+        isRemote(_name: string) { return false; },
+        removeRemote(_name: string) {},
+        getAll() { return []; },
+        getRemoteBridge(_name: string) { return undefined; },
+      };
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'clear-test-session',
+        mockRouter as any,
+      );
+
+      const mockCtx = {
+        async answerCallbackQuery(_opts?: unknown) {},
+      };
+
+      const clearHandler = handlers.get('action:clear-input');
+      assert.ok(clearHandler, 'clear-input handler should be registered');
+
+      const origSetTimeout = globalThis.setTimeout;
+      globalThis.setTimeout = ((cb: () => void, delay: number) => {
+        timeoutCalls.push({ callback: cb, delay });
+        return 0 as any;
+      }) as any;
+
+      try {
+        await clearHandler(mockCtx);
+
+        // Flush all scheduled timeouts
+        let flushed = 0;
+        while (flushed < timeoutCalls.length) {
+          timeoutCalls[flushed].callback();
+          flushed++;
+        }
+
+        // Find where right-arrows end and backspaces begin
+        const rightArrowWrites = writeCalls.filter(c => c.data.includes('\x1b[C'));
+        const backspaceWrites = writeCalls.filter(c => c.data.includes('\x7f'));
+
+        assert.ok(rightArrowWrites.length > 0, 'should have right-arrow writes');
+        assert.ok(backspaceWrites.length > 0, 'should have backspace writes');
+
+        // Each batch should be small (not 300+ chars)
+        for (const call of writeCalls) {
+          assert.ok(call.data.length <= 60, `batch too large: ${call.data.length} chars`);
+        }
+
+        // Right-arrows should come before backspaces
+        const lastRightIdx = writeCalls.findLastIndex(c => c.data.includes('\x1b[C'));
+        const firstBsIdx = writeCalls.findIndex(c => c.data.includes('\x7f'));
+        assert.ok(lastRightIdx < firstBsIdx, 'right-arrows should complete before backspaces start');
+      } finally {
+        globalThis.setTimeout = origSetTimeout;
+      }
+    });
+
+    it('clear-input writes are spaced apart in time via setTimeout', async () => {
+      const handlers: Map<string, (ctx: any) => Promise<void>> = new Map();
+      const timeoutCalls: Array<{ callback: () => void; delay: number }> = [];
+      const mockBot = {
+        callbackQuery(data: string | RegExp, handler: (ctx: any) => Promise<void>) {
+          if (typeof data === 'string') {
+            handlers.set(data, handler);
+          }
+        },
+        on(_filter: string, _handler: unknown) {},
+      };
+
+      const mockSm = {
+        writeToSession(_name: string, _data: string) {},
+        async stop(_name: string) {},
+      };
+
+      const mockRouter = {
+        switchTo(_name: string) {},
+        remove(_name: string) {},
+        isRemote(_name: string) { return false; },
+        removeRemote(_name: string) {},
+        getAll() { return []; },
+        getRemoteBridge(_name: string) { return undefined; },
+      };
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'clear-test-session',
+        mockRouter as any,
+      );
+
+      const mockCtx = {
+        async answerCallbackQuery(_opts?: unknown) {},
+      };
+
+      const clearHandler = handlers.get('action:clear-input');
+      assert.ok(clearHandler, 'clear-input handler should be registered');
+
+      const origSetTimeout = globalThis.setTimeout;
+      globalThis.setTimeout = ((cb: () => void, delay: number) => {
+        timeoutCalls.push({ callback: cb, delay });
+        return 0 as any;
+      }) as any;
+
+      try {
+        await clearHandler(mockCtx);
+
+        // Flush all
+        let flushed = 0;
+        while (flushed < timeoutCalls.length) {
+          timeoutCalls[flushed].callback();
+          flushed++;
+        }
+
+        // Should have multiple setTimeout calls (batching)
+        assert.ok(timeoutCalls.length > 1, `expected multiple setTimeout calls, got ${timeoutCalls.length}`);
+
+        // Each delay should be > 0 (timed batches)
+        for (const tc of timeoutCalls) {
+          assert.ok(tc.delay > 0, `expected positive delay, got ${tc.delay}`);
+        }
+      } finally {
+        globalThis.setTimeout = origSetTimeout;
+      }
     });
 
     it('hub:disconnect does NOT trigger onShutdown when sessions remain', async () => {
