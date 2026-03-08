@@ -50,7 +50,6 @@ export interface EngineConfig {
   idleDelay?: number;
   arrowKeyDelayMs?: number;
   maxCycles?: number;
-  clearingTimeoutMs?: number;
   responseTimeoutMs?: number;
 }
 
@@ -72,15 +71,13 @@ export class AutomationEngine {
   private cycleNumber = 0;
   private workerScreenText = '';
   private waitTimer: unknown = null;
-  private clearingTimer: unknown = null;
   private sessionOutputHandler: ((sessionName: string, data: string) => void) | null = null;
   private retryAttempted = false;
   private readonly maxCycles: number;
-  private readonly clearingTimeoutMs: number;
   private readonly responseTimeoutMs: number;
   private responseTimer: unknown = null;
   private sessionExitHandler: ((name: string, exitCode: number) => void) | null = null;
-  private clearingBuffer = '';
+  private clearPollTimer: unknown = null;
 
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
@@ -101,7 +98,6 @@ export class AutomationEngine {
     this.idleDelay = config.idleDelay ?? 5000;
     this.arrowKeyDelayMs = config.arrowKeyDelayMs ?? 50;
     this.maxCycles = config.maxCycles ?? 100;
-    this.clearingTimeoutMs = config.clearingTimeoutMs ?? 10000;
     this.responseTimeoutMs = config.responseTimeoutMs ?? 30000;
   }
 
@@ -126,20 +122,6 @@ export class AutomationEngine {
         this.workerMonitor.capture.onData(data);
       } else if (sessionName === this.config.orchestratorSession && this.orchestratorMonitor) {
         this.orchestratorMonitor.capture.onData(data);
-
-        // Accumulate raw PTY data and check the buffer for "(no content)".
-        // PTY data arrives in arbitrary chunks, so the string may be split across chunks.
-        // Strip ANSI escape codes before checking to avoid false negatives from embedded sequences.
-        if (this._state === 'clearing-orchestrator') {
-          this.clearingBuffer += data;
-          const stripped = this.clearingBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-          if (stripped.includes('(no content)')) {
-            this.clearingBuffer = '';
-            // Use 500ms settling delay (not 0) so the TUI finishes rendering
-            // before prompt text is typed into the input field.
-            this.timer.setTimeout(() => this.onClearComplete(), 500);
-          }
-        }
       }
     };
     this.bus.on('session:output', this.sessionOutputHandler);
@@ -194,17 +176,16 @@ export class AutomationEngine {
 
     // Clear any pending timers
     this.clearWaitTimer();
-    this.cancelClearingTimer();
+    this.cancelClearPolling();
     this.cancelResponseTimer();
 
-    this.clearingBuffer = '';
     this.setState('stopped');
   }
 
   pause(): void {
     if (this._state === 'stopped') return;
     this.clearWaitTimer();
-    this.cancelClearingTimer();
+    this.cancelClearPolling();
     this.cancelResponseTimer();
     this.setState('paused');
   }
@@ -255,37 +236,19 @@ export class AutomationEngine {
       this.workerScreenText = this.workerMonitor.emulator.getScreenText();
     }
 
-    // Reset clearing buffer and send /clear to orchestrator
-    this.clearingBuffer = '';
+    // Send /clear to orchestrator
     this.sessionManager.writeToSession(this.config.orchestratorSession, '/clear\r');
-
-    // Reset orchestrator monitor baseline and mark input sent.
-    // /clear does not produce a completion marker, so disable marker requirement
-    // so onPromptComplete fires on data-idle alone. resetBaseline() in onClearComplete()
-    // restores requireMarker=true for the subsequent prompt response step.
-    if (this.orchestratorMonitor) {
-      this.orchestratorMonitor.capture.resetBaseline();
-      this.orchestratorMonitor.capture.markInputSent();
-      this.orchestratorMonitor.capture.requireMarker = false;
-      this.orchestratorMonitor.capture.onPromptComplete = () => this.onClearComplete();
-    }
 
     this.setState('clearing-orchestrator');
 
-    // Safety net: force transition after clearingTimeoutMs if neither
-    // fast-path ((no content) detection) nor slow-path (idle detection) fires.
-    this.clearingTimer = this.timer.setTimeout(() => {
-      if (this._state === 'clearing-orchestrator') {
-        this.onClearComplete();
-      }
-    }, this.clearingTimeoutMs);
+    // Poll orchestrator screen text every 1s for "(no content)" pattern
+    this.startClearPolling();
   }
 
   private onClearComplete(): void {
-    this.cancelClearingTimer();
+    this.cancelClearPolling();
     if (this._state !== 'clearing-orchestrator') return;
 
-    this.clearingBuffer = '';
     this.setState('prompting-orchestrator');
 
     // Build prompt with context
@@ -491,10 +454,26 @@ export class AutomationEngine {
     }
   }
 
-  private cancelClearingTimer(): void {
-    if (this.clearingTimer !== null) {
-      this.timer.clearTimeout(this.clearingTimer);
-      this.clearingTimer = null;
+  private startClearPolling(): void {
+    this.clearPollTimer = this.timer.setTimeout(() => {
+      if (this._state !== 'clearing-orchestrator') return;
+
+      const screenText = this.orchestratorMonitor?.emulator.getScreenText() ?? '';
+      if (screenText.includes('(no content)')) {
+        this.clearPollTimer = null;
+        // 500ms settling delay so TUI finishes rendering before prompt text is typed
+        this.timer.setTimeout(() => this.onClearComplete(), 500);
+      } else {
+        // Poll again in 1 second
+        this.startClearPolling();
+      }
+    }, 1000);
+  }
+
+  private cancelClearPolling(): void {
+    if (this.clearPollTimer !== null) {
+      this.timer.clearTimeout(this.clearPollTimer);
+      this.clearPollTimer = null;
     }
   }
 
