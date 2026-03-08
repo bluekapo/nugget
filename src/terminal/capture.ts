@@ -397,9 +397,13 @@ export class ScreenCapture {
       // Subagent guard: check for active spinner (\u273B) on lines that do NOT
       // contain a completion marker. The \u273B appears on the completion line
       // itself ("\u273B Brewed for 1m 22s"), so we must exclude those.
+      // Also exclude bare \u273B (with no text or only whitespace after it) —
+      // that's Claude Code's idle prompt indicator, not an active spinner.
       const lines = this.lastSnapshot.split('\n');
       const hasActiveSpinner = lines.some(
-        (line) => line.includes('\u273B') && !/\u273B .+ for (?:\d+m )?\d+s/.test(line),
+        (line) => line.includes('\u273B')
+          && !/\u273B .+ for (?:\d+m )?\d+s/.test(line)
+          && !/^\s*\u273B\s*$/.test(line),
       );
 
       if (hasActiveSpinner && this.requireMarker) {

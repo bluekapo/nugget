@@ -51,6 +51,7 @@ export interface EngineConfig {
   arrowKeyDelayMs?: number;
   maxCycles?: number;
   clearingTimeoutMs?: number;
+  responseTimeoutMs?: number;
 }
 
 interface SessionMonitor {
@@ -76,6 +77,8 @@ export class AutomationEngine {
   private retryAttempted = false;
   private readonly maxCycles: number;
   private readonly clearingTimeoutMs: number;
+  private readonly responseTimeoutMs: number;
+  private responseTimer: unknown = null;
   private sessionExitHandler: ((name: string, exitCode: number) => void) | null = null;
   private clearingBuffer = '';
 
@@ -94,11 +97,12 @@ export class AutomationEngine {
       clearTimeout: (id) => globalThis.clearTimeout(id as ReturnType<typeof setTimeout>),
       now: () => Date.now(),
     };
-    this.baseDelay = config.baseDelay ?? 150;
+    this.baseDelay = config.baseDelay ?? 500;
     this.idleDelay = config.idleDelay ?? 5000;
     this.arrowKeyDelayMs = config.arrowKeyDelayMs ?? 50;
     this.maxCycles = config.maxCycles ?? 100;
     this.clearingTimeoutMs = config.clearingTimeoutMs ?? 10000;
+    this.responseTimeoutMs = config.responseTimeoutMs ?? 30000;
   }
 
   get state(): EngineState {
@@ -131,7 +135,9 @@ export class AutomationEngine {
           const stripped = this.clearingBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
           if (stripped.includes('(no content)')) {
             this.clearingBuffer = '';
-            this.timer.setTimeout(() => this.onClearComplete(), 0);
+            // Use 500ms settling delay (not 0) so the TUI finishes rendering
+            // before prompt text is typed into the input field.
+            this.timer.setTimeout(() => this.onClearComplete(), 500);
           }
         }
       }
@@ -189,6 +195,7 @@ export class AutomationEngine {
     // Clear any pending timers
     this.clearWaitTimer();
     this.cancelClearingTimer();
+    this.cancelResponseTimer();
 
     this.clearingBuffer = '';
     this.setState('stopped');
@@ -198,6 +205,7 @@ export class AutomationEngine {
     if (this._state === 'stopped') return;
     this.clearWaitTimer();
     this.cancelClearingTimer();
+    this.cancelResponseTimer();
     this.setState('paused');
   }
 
@@ -307,10 +315,21 @@ export class AutomationEngine {
       }
 
       this.setState('waiting-response');
+
+      // Safety net: force response detection after responseTimeoutMs if neither
+      // completion marker detection nor idle detection fires. In production,
+      // Claude Code's Ink TUI may overwrite the "✻ Crunched for Xs" marker
+      // before capture runs, leaving crunched=false permanently.
+      this.responseTimer = this.timer.setTimeout(() => {
+        if (this._state === 'waiting-response') {
+          this.onResponseReady();
+        }
+      }, this.responseTimeoutMs);
     }, this.baseDelay);
   }
 
   private onResponseReady(): void {
+    this.cancelResponseTimer();
     if (this._state === 'paused' || this._state === 'stopped') return;
 
     this.setState('executing');
@@ -340,6 +359,13 @@ export class AutomationEngine {
           this.orchestratorMonitor.capture.onPromptComplete = () => this.onResponseReady();
         }
         this.setState('waiting-response');
+
+        // Re-arm response timeout for retry
+        this.responseTimer = this.timer.setTimeout(() => {
+          if (this._state === 'waiting-response') {
+            this.onResponseReady();
+          }
+        }, this.responseTimeoutMs);
       }, this.baseDelay);
       return;
     }
@@ -469,6 +495,13 @@ export class AutomationEngine {
     if (this.clearingTimer !== null) {
       this.timer.clearTimeout(this.clearingTimer);
       this.clearingTimer = null;
+    }
+  }
+
+  private cancelResponseTimer(): void {
+    if (this.responseTimer !== null) {
+      this.timer.clearTimeout(this.responseTimer);
+      this.responseTimer = null;
     }
   }
 }

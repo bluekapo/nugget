@@ -12,7 +12,8 @@ export function parseDirective(screenText: string): Directive | null {
   const lines = screenText.split('\n');
 
   for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
+    // Strip Claude Code TUI bullet prefix (● for assistant responses)
+    const line = lines[i].trim().replace(/^●\s*/, '');
     if (!line) continue;
 
     // COMMAND: <text>

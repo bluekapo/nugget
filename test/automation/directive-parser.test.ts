@@ -87,6 +87,38 @@ describe('parseDirective', () => {
     });
   });
 
+  describe('Claude Code TUI bullet prefix', () => {
+    it('strips ● prefix from COMMAND directive', () => {
+      const result = parseDirective('● COMMAND: npm test');
+      assert.deepStrictEqual(result, { type: 'COMMAND', command: 'npm test' });
+    });
+
+    it('strips ● prefix from ESCALATE directive', () => {
+      const result = parseDirective('● ESCALATE: Task is complete');
+      assert.deepStrictEqual(result, { type: 'ESCALATE', reason: 'Task is complete' });
+    });
+
+    it('strips ● prefix from SELECT directive', () => {
+      const result = parseDirective('● SELECT: 2');
+      assert.deepStrictEqual(result, { type: 'SELECT', option: 2 });
+    });
+
+    it('strips ● prefix from WAIT directive', () => {
+      const result = parseDirective('● WAIT: 10');
+      assert.deepStrictEqual(result, { type: 'WAIT', delaySeconds: 10 });
+    });
+
+    it('strips ● prefix from ENTER directive', () => {
+      const result = parseDirective('● ENTER');
+      assert.deepStrictEqual(result, { type: 'ENTER' });
+    });
+
+    it('handles ● with leading whitespace', () => {
+      const result = parseDirective('  ● COMMAND: npm run build');
+      assert.deepStrictEqual(result, { type: 'COMMAND', command: 'npm run build' });
+    });
+  });
+
   describe('empty/blank lines', () => {
     it('finds directive in text with blank lines between content', () => {
       const screenText = [

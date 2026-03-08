@@ -614,26 +614,26 @@ describe('AutomationEngine', () => {
 
   // ---------- Test 19: /clear with (no content) triggers immediate clear completion ----------
 
-  it('/clear with (no content) response completes immediately without idle delay', async () => {
-    engine = new AutomationEngine(config, mockSessionManager, bus);
+  it('/clear with (no content) response completes without needing full idle delay', async () => {
+    // Use longer idleDelay so the (no content) fast path (500ms settling) fires before idle detection
+    const longIdleConfig = { ...config, idleDelay: 2000 };
+    engine = new AutomationEngine(longIdleConfig, mockSessionManager, bus);
 
     engine.start();
 
-    // Worker goes idle
-    await emitOutput(bus, 'worker', completionOutput('$ npm test\nall tests passed'));
-    timer.advance(50);
-    timer.advance(100);
+    // Worker goes idle (use first-cycle deferred timer to avoid idleDelay dependency)
+    timer.advance(1); // deferred start -> onWorkerIdle
 
     assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator');
 
     // /clear produces "(no content)" -- the actual Claude Code response
     await emitOutput(bus, 'orchestrator', '> /clear\r\n\r\n  \u23BF  (no content)\r\n');
 
-    // Should complete immediately (after microtask flush) without needing idle delay
-    timer.advance(1); // just fire the deferred setTimeout(0) -> onClearComplete
+    // Should complete quickly (after 500ms settling delay) without needing full idle delay (2000ms)
+    timer.advance(500); // settling delay -> onClearComplete
 
     assert.notEqual(engine.state, 'clearing-orchestrator',
-      'should transition past clearing-orchestrator immediately on (no content)');
+      'should transition past clearing-orchestrator on (no content)');
     assert.equal(engine.state, 'prompting-orchestrator',
       'should be in prompting-orchestrator (prompt text sent, Enter pending)');
 
@@ -729,14 +729,14 @@ describe('AutomationEngine', () => {
   // ---------- Test 22: (no content) split across PTY chunks ----------
 
   it('/clear with (no content) split across two PTY chunks transitions past clearing-orchestrator', async () => {
-    engine = new AutomationEngine(config, mockSessionManager, bus);
+    // Use longer idleDelay so the (no content) fast path (500ms settling) fires before idle detection
+    const longIdleConfig = { ...config, idleDelay: 2000 };
+    engine = new AutomationEngine(longIdleConfig, mockSessionManager, bus);
 
     engine.start();
 
-    // Worker goes idle
-    await emitOutput(bus, 'worker', completionOutput('$ npm test\nall tests passed'));
-    timer.advance(50);
-    timer.advance(100);
+    // Worker goes idle (use first-cycle deferred timer)
+    timer.advance(1);
 
     assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator');
 
@@ -746,8 +746,8 @@ describe('AutomationEngine', () => {
     await emitOutput(bus, 'orchestrator', 'content)\r\n');
     await flush();
 
-    // Fire the deferred setTimeout(0) -> onClearComplete
-    timer.advance(1);
+    // Fire the settling delay (500ms) -> onClearComplete
+    timer.advance(500);
 
     assert.notEqual(engine.state, 'clearing-orchestrator',
       'should transition past clearing-orchestrator when (no content) is split across chunks');
@@ -758,6 +758,88 @@ describe('AutomationEngine', () => {
     timer.advance(50);
     assert.equal(engine.state, 'waiting-response',
       'should transition to waiting-response after delayed Enter');
+  });
+
+  // ---------- Test 24: bare ✻ idle prompt does not block response detection ----------
+
+  it('orchestrator response with bare ✻ idle prompt does not stall at waiting-response', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const cycleEvents: Array<{ cycle: number; action: string }> = [];
+    bus.on('automation:cycle-complete', (cycle, action) => {
+      cycleEvents.push({ cycle, action });
+    });
+
+    engine.start();
+
+    // Worker goes idle
+    await emitOutput(bus, 'worker', completionOutput('$ npm test\nall tests passed'));
+    timer.advance(50);  // debounce
+    timer.advance(100); // idle -> onWorkerIdle -> clearing-orchestrator
+
+    // Orchestrator clears — idle detection fires before fast-path settling delay
+    await emitOutput(bus, 'orchestrator', '> /clear\r\n\r\n  \u23BF  (no content)\r\n');
+    timer.advance(50);  // debounce
+    timer.advance(100); // idle (requireMarker=false) -> onClearComplete
+    timer.advance(50);  // delayed Enter -> waiting-response
+
+    assert.equal(engine.state, 'waiting-response', 'should be waiting for orchestrator response');
+
+    // Orchestrator responds with COMMAND directive + completion marker + bare ✻ idle prompt.
+    // In production, Claude Code's TUI shows ✻ as the idle prompt indicator after completing.
+    // This bare ✻ must NOT trigger the subagent spinner guard.
+    await emitOutput(bus, 'orchestrator', 'COMMAND: npm test\r\n\u273B Crunched for 5s\r\n\u273B\r\n');
+    timer.advance(50);  // debounce
+    timer.advance(100); // idle -> should fire onResponseReady despite bare ✻
+
+    // Engine should have parsed the COMMAND and sent it to the worker
+    const cmdWrite = writes.find(w => w.name === 'worker' && w.data.includes('npm test'));
+    assert.ok(cmdWrite, 'engine should write COMMAND to worker (bare ✻ must not block response detection)');
+    assert.equal(engine.state, 'idle', 'should return to idle after executing COMMAND');
+    assert.equal(cycleEvents.length, 1, 'should complete one cycle');
+  });
+
+  // ---------- Test 25: waiting-response timeout when completion marker is absent ----------
+
+  it('waiting-response timeout: engine detects response when completion marker is absent from screen', async () => {
+    config = { ...config, responseTimeoutMs: 500 };
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const cycleEvents: Array<{ cycle: number; action: string }> = [];
+    bus.on('automation:cycle-complete', (cycle, action) => {
+      cycleEvents.push({ cycle, action });
+    });
+
+    engine.start();
+
+    // Worker goes idle (first cycle via deferred timer)
+    timer.advance(1);
+    assert.equal(engine.state, 'clearing-orchestrator');
+
+    // Orchestrator clears — idle detection fires before fast-path settling delay
+    await emitOutput(bus, 'orchestrator', '> /clear\r\n\r\n  \u23BF  (no content)\r\n');
+    timer.advance(50);  // debounce
+    timer.advance(100); // idle (requireMarker=false) -> onClearComplete
+    timer.advance(50);  // delayed Enter -> waiting-response
+
+    assert.equal(engine.state, 'waiting-response', 'should be waiting for response');
+
+    // Orchestrator responds with COMMAND but NO completion marker.
+    // This happens in production when Claude Code's Ink TUI re-renders
+    // and overwrites the "✻ Crunched for Xs" marker before capture runs.
+    await emitOutput(bus, 'orchestrator', 'COMMAND: npm test\r\n');
+    timer.advance(50);  // debounce fires capture
+    timer.advance(100); // idle fires but crunched=false, requireMarker=true -> no-op
+
+    // Engine should still be stuck without the timeout
+    assert.equal(engine.state, 'waiting-response', 'should still be waiting (no marker detected)');
+
+    // Advance past responseTimeoutMs -> timeout forces onResponseReady
+    timer.advance(500);
+
+    // Engine should have parsed COMMAND and sent it to worker
+    const cmdWrite = writes.find(w => w.name === 'worker' && w.data.includes('npm test'));
+    assert.ok(cmdWrite, 'timeout should force response detection, COMMAND sent to worker');
+    assert.equal(engine.state, 'idle', 'should return to idle after timeout-forced response');
+    assert.equal(cycleEvents.length, 1, 'should complete one cycle');
   });
 
   // ---------- Test 23: clearing-orchestrator timeout safety net ----------
