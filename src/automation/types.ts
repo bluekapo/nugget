@@ -7,7 +7,7 @@
 
 // --- Directive Types ---
 
-export type DirectiveType = 'COMMAND' | 'SELECT' | 'ENTER' | 'WAIT' | 'ESCALATE' | 'DONE';
+export type DirectiveType = 'COMMAND' | 'SELECT' | 'ENTER' | 'WAIT' | 'ESCALATE' | 'DONE' | 'YES' | 'NO';
 
 export interface CommandDirective {
   type: 'COMMAND';
@@ -38,13 +38,23 @@ export interface DoneDirective {
   summary: string;
 }
 
+export interface YesDirective {
+  type: 'YES';
+}
+
+export interface NoDirective {
+  type: 'NO';
+}
+
 export type Directive =
   | CommandDirective
   | SelectDirective
   | EnterDirective
   | WaitDirective
   | EscalateDirective
-  | DoneDirective;
+  | DoneDirective
+  | YesDirective
+  | NoDirective;
 
 // --- Context Types ---
 

@@ -91,6 +91,16 @@ function matchSingleLine(line: string): Directive | null {
     return { type: 'ENTER' };
   }
 
+  // YES (exact match)
+  if (line === 'YES') {
+    return { type: 'YES' };
+  }
+
+  // NO (exact match)
+  if (line === 'NO') {
+    return { type: 'NO' };
+  }
+
   // WAIT (bare) or WAIT: <seconds>
   if (line === 'WAIT') {
     return { type: 'WAIT' };
