@@ -1494,6 +1494,208 @@ describe('AutomationEngine', () => {
       'last prompt should be consultation (## Question), not directive (## Your Response)');
   });
 
+  // ---------- Consultation YES/NO response handling tests ----------
+
+  /**
+   * Helper: drive engine through first cycle and into consultation waiting state.
+   * Returns the engine in 'waiting-consultation' state, ready for YES/NO response.
+   */
+  async function driveToConsultationWaiting(
+    engineInst: AutomationEngine,
+    busInst: EventBus,
+    timerInst: ManualTimer,
+  ): Promise<void> {
+    // Complete first cycle to get engine to idle
+    timerInst.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(busInst, 'orchestrator', clearOutput());
+    timerInst.advance(1000); timerInst.advance(500); timerInst.advance(50);
+    await emitOutput(busInst, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timerInst.advance(1000);
+    // Engine is now idle
+
+    // Let stagnation fire (stagnationDelay=200 in test config)
+    timerInst.advance(200);
+    // Now in clearing-orchestrator (consultation mode)
+
+    // Complete clear
+    await emitOutput(busInst, 'orchestrator', clearOutput());
+    timerInst.advance(1000); // poll fires
+    timerInst.advance(500);  // settling delay -> onConsultationClearComplete
+
+    // Consultation prompt sent, delayed Enter
+    timerInst.advance(50); // baseDelay -> Enter sent -> waiting-consultation
+  }
+
+  it('consultation YES: orchestrator says YES -> engine starts normal directive cycle', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200, consultationWaitDelay: 300 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    const cycleEvents: Array<{ cycle: number; action: string }> = [];
+    bus.on('automation:cycle-complete', (cycle: number, action: string) => {
+      cycleEvents.push({ cycle, action });
+    });
+    engine.start();
+
+    await driveToConsultationWaiting(engine, bus, timer);
+    assert.equal(engine.state, 'waiting-consultation', 'should be waiting for consultation response');
+
+    // Orchestrator responds YES
+    await emitOutput(bus, 'orchestrator', directiveOutput('YES'));
+    timer.advance(1000); // response poll fires, finds YES directive
+
+    // YES should trigger normal directive cycle: idle -> onWorkerIdle -> capturing-worker -> clearing-orchestrator
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'YES response should trigger normal directive cycle (clearing-orchestrator)');
+
+    // Complete the directive cycle to verify it works end-to-end
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo done'));
+    timer.advance(1000);
+
+    assert.equal(engine.state, 'idle', 'should return to idle after directive cycle completes');
+    assert.equal(cycleEvents.length, 1, 'should have completed one additional cycle after YES');
+  });
+
+  it('consultation NO: orchestrator says NO -> engine waits then re-checks', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200, consultationWaitDelay: 300 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    await driveToConsultationWaiting(engine, bus, timer);
+    assert.equal(engine.state, 'waiting-consultation', 'should be waiting for consultation response');
+
+    // Orchestrator responds NO
+    await emitOutput(bus, 'orchestrator', directiveOutput('NO'));
+    timer.advance(1000); // response poll fires, finds NO directive
+
+    // NO should transition to consultation-wait
+    assert.equal(engine.state, 'consultation-wait',
+      'NO response should transition to consultation-wait state');
+
+    // After consultationWaitDelay (300ms), engine re-checks and re-enters consultation
+    timer.advance(300); // consultation wait timer fires
+
+    // Engine should re-enter consultation flow (clearing-orchestrator in consultation mode)
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'should re-enter clearing-orchestrator for re-consultation after NO wait');
+  });
+
+  it('consultation NO then completion marker during wait: fast path kicks in', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200, consultationWaitDelay: 300 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    await driveToConsultationWaiting(engine, bus, timer);
+    assert.equal(engine.state, 'waiting-consultation');
+
+    // Orchestrator responds NO
+    await emitOutput(bus, 'orchestrator', directiveOutput('NO'));
+    timer.advance(1000); // response poll fires
+
+    assert.equal(engine.state, 'consultation-wait', 'should be in consultation-wait');
+
+    // Worker emits completion marker during consultation-wait
+    await emitOutput(bus, 'worker', completionOutput('task actually done'));
+    timer.advance(50);  // debounce
+    timer.advance(100); // idle fires -> onPromptComplete -> completion detected
+
+    // Completion marker should cancel consultation-wait and start normal cycle
+    assert.notEqual(engine.state, 'consultation-wait',
+      'completion marker should exit consultation-wait');
+    // Engine should be in clearing-orchestrator (normal cycle, not consultation)
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'completion marker during NO wait should trigger normal cycle');
+
+    // Verify it's a directive prompt (not consultation)
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500);
+
+    const lastPromptWrite = writes
+      .filter(w => w.name === 'orchestrator' && (w.data.includes('## Question') || w.data.includes('## Your Response')))
+      .pop();
+    assert.ok(lastPromptWrite?.data.includes('## Your Response'),
+      'after completion during NO wait, should send directive prompt (not consultation)');
+  });
+
+  it('consultation NO-NO-YES: multiple re-checks before YES', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200, consultationWaitDelay: 300 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    await driveToConsultationWaiting(engine, bus, timer);
+    assert.equal(engine.state, 'waiting-consultation');
+
+    // First NO
+    await emitOutput(bus, 'orchestrator', directiveOutput('NO'));
+    timer.advance(1000); // response poll fires
+    assert.equal(engine.state, 'consultation-wait', 'first NO -> consultation-wait');
+
+    // Wait expires -> re-consultation
+    timer.advance(300);
+    assert.equal(engine.state, 'clearing-orchestrator', 'should re-enter consultation clearing');
+
+    // Complete re-consultation clear + prompt
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    assert.equal(engine.state, 'waiting-consultation', 'should be waiting for second consultation');
+
+    // Second NO
+    await emitOutput(bus, 'orchestrator', directiveOutput('NO'));
+    timer.advance(1000);
+    assert.equal(engine.state, 'consultation-wait', 'second NO -> consultation-wait');
+
+    // Wait expires -> re-consultation again
+    timer.advance(300);
+    assert.equal(engine.state, 'clearing-orchestrator', 'should re-enter consultation clearing again');
+
+    // Complete re-consultation clear + prompt
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    assert.equal(engine.state, 'waiting-consultation', 'should be waiting for third consultation');
+
+    // Third time: YES
+    await emitOutput(bus, 'orchestrator', directiveOutput('YES'));
+    timer.advance(1000);
+
+    // YES should trigger normal directive cycle
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'YES after two NOs should trigger normal directive cycle');
+  });
+
+  it('consultation unparseable response triggers retry, second failure escalates', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200, consultationWaitDelay: 300 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    const escalations: string[] = [];
+    bus.on('automation:escalation', (reason: string) => {
+      escalations.push(reason);
+    });
+    engine.start();
+
+    await driveToConsultationWaiting(engine, bus, timer);
+    assert.equal(engine.state, 'waiting-consultation');
+
+    // Orchestrator responds with unparseable text
+    await emitOutput(bus, 'orchestrator', directiveOutput('I think the worker might be done'));
+    timer.advance(1000); // response poll fires
+
+    // Engine should retry with clarifying prompt
+    const retryWrites = writes.filter(
+      w => w.name === 'orchestrator' && w.data.includes('YES or NO')
+    );
+    assert.ok(retryWrites.length >= 1, 'should send clarifying retry prompt asking for YES or NO');
+
+    // After retry prompt, Enter is sent
+    timer.advance(50); // delayed Enter
+    assert.equal(engine.state, 'waiting-consultation', 'should be waiting for retry response');
+
+    // Second unparseable response -> escalation
+    await emitOutput(bus, 'orchestrator', directiveOutput('Well it depends on the context'));
+    timer.advance(1000);
+
+    assert.equal(engine.state, 'paused', 'should be paused after double consultation parse failure');
+    assert.ok(escalations.length >= 1, 'should emit escalation after double failure');
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------
