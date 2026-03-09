@@ -123,6 +123,81 @@ export class TerminalEmulator {
     return lines.join('\n');
   }
 
+  /**
+   * Return diagnostic information about the buffer state.
+   * Used for debugging garbled screen content from Ink's cursor-based rendering.
+   */
+  getBufferDiagnostics(): {
+    bufferLength: number;
+    baseY: number;
+    viewportY: number;
+    cursorX: number;
+    cursorY: number;
+    rows: number;
+    cols: number;
+    scrollbackLines: number;
+    viewportLines: string[];
+    scrollbackTail: string[];
+  } {
+    const buffer = this.terminal.buffer.active;
+    const scrollbackEnd = buffer.baseY;
+    const viewportStart = buffer.length - this.terminal.rows;
+
+    // Get viewport lines with row numbers
+    const viewportLines: string[] = [];
+    for (let y = Math.max(0, viewportStart); y < buffer.length; y++) {
+      const line = buffer.getLine(y);
+      const text = line ? line.translateToString(true) : '';
+      viewportLines.push(`[row ${y}] ${text}`);
+    }
+
+    // Get last 10 scrollback lines
+    const scrollbackTail: string[] = [];
+    const scrollbackStart = Math.max(0, scrollbackEnd - 10);
+    for (let y = scrollbackStart; y < scrollbackEnd; y++) {
+      const line = buffer.getLine(y);
+      const text = line ? line.translateToString(true) : '';
+      scrollbackTail.push(`[row ${y}] ${text}`);
+    }
+
+    return {
+      bufferLength: buffer.length,
+      baseY: buffer.baseY,
+      viewportY: buffer.viewportY,
+      cursorX: buffer.cursorX,
+      cursorY: buffer.cursorY,
+      rows: this.terminal.rows,
+      cols: this.terminal.cols,
+      scrollbackLines: scrollbackEnd,
+      viewportLines,
+      scrollbackTail,
+    };
+  }
+
+  /**
+   * Extract scrollback content only (lines that have scrolled off the viewport).
+   * Scrollback content is "committed" by Ink — it won't be overwritten by cursor
+   * positioning, so it's clean unlike the viewport which may be garbled.
+   */
+  getScrollbackText(): string {
+    const buffer = this.terminal.buffer.active;
+    const scrollbackEnd = buffer.baseY;
+    if (scrollbackEnd === 0) return '';
+
+    const lines: string[] = [];
+    for (let y = 0; y < scrollbackEnd; y++) {
+      const line = buffer.getLine(y);
+      lines.push(line ? line.translateToString(true) : '');
+    }
+
+    // Trim trailing empty lines
+    while (lines.length > 0 && lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+
+    return lines.join('\n');
+  }
+
   /** Scroll the viewport by N pages (negative = up, positive = down). */
   scrollPages(count: number): void {
     this.terminal.scrollPages(count);

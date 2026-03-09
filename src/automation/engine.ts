@@ -360,7 +360,20 @@ export class AutomationEngine {
 
     // Capture worker screen text
     if (this.workerMonitor) {
-      this.workerScreenText = stripSpinners(this.workerMonitor.emulator.getScreenText());
+      const rawScreen = this.workerMonitor.emulator.getScreenText();
+      this.workerScreenText = stripSpinners(rawScreen);
+
+      // Debug: dump buffer diagnostics to understand garbled screen content
+      const diag = this.workerMonitor.emulator.getBufferDiagnostics();
+      debugLog(`[onWorkerIdle] BUFFER DIAG: bufLen=${diag.bufferLength} baseY=${diag.baseY} viewportY=${diag.viewportY} cursor=(${diag.cursorX},${diag.cursorY}) dims=${diag.cols}x${diag.rows} scrollback=${diag.scrollbackLines}`);
+      debugLog(`[onWorkerIdle] SCROLLBACK TAIL (last ${diag.scrollbackTail.length} lines):\n${diag.scrollbackTail.join('\n')}`);
+      debugLog(`[onWorkerIdle] VIEWPORT (${diag.viewportLines.length} lines):\n${diag.viewportLines.join('\n')}`);
+      debugLog(`[onWorkerIdle] RAW getScreenText (${rawScreen.length} chars):\n${rawScreen}`);
+      debugLog(`[onWorkerIdle] AFTER stripSpinners (${this.workerScreenText.length} chars):\n${this.workerScreenText}`);
+
+      // Log scrollback text — Ink doesn't touch scrollback, so it's clean
+      const scrollback = this.workerMonitor.emulator.getScrollbackText();
+      debugLog(`[onWorkerIdle] SCROLLBACK TEXT (${scrollback.length} chars, last 2000):\n${scrollback.slice(-2000)}`);
     }
 
     // Reset clearing buffer before sending /clear
@@ -392,6 +405,8 @@ export class AutomationEngine {
       actionLog: this.actionLog.getRecent(),
       cycleNumber: this.cycleNumber,
     });
+
+    debugLog(`[onClearComplete] PROMPT BEING SENT (${prompt.length} chars):\n${prompt}`);
 
     // Send prompt text to orchestrator (without Enter).
     // The Enter keystroke is sent after a short delay so the TUI (Ink raw mode)
@@ -735,7 +750,20 @@ export class AutomationEngine {
 
     // Capture worker screen text for the consultation prompt (with spinner stripping)
     if (this.workerMonitor) {
-      this.workerScreenText = stripSpinners(this.workerMonitor.emulator.getScreenText());
+      const rawScreen = this.workerMonitor.emulator.getScreenText();
+      this.workerScreenText = stripSpinners(rawScreen);
+
+      // Debug: dump buffer diagnostics for consultation capture
+      const diag = this.workerMonitor.emulator.getBufferDiagnostics();
+      debugLog(`[onWorkerStagnation] BUFFER DIAG: bufLen=${diag.bufferLength} baseY=${diag.baseY} viewportY=${diag.viewportY} cursor=(${diag.cursorX},${diag.cursorY}) dims=${diag.cols}x${diag.rows} scrollback=${diag.scrollbackLines}`);
+      debugLog(`[onWorkerStagnation] SCROLLBACK TAIL (last ${diag.scrollbackTail.length} lines):\n${diag.scrollbackTail.join('\n')}`);
+      debugLog(`[onWorkerStagnation] VIEWPORT (${diag.viewportLines.length} lines):\n${diag.viewportLines.join('\n')}`);
+      debugLog(`[onWorkerStagnation] RAW getScreenText (${rawScreen.length} chars):\n${rawScreen}`);
+      debugLog(`[onWorkerStagnation] AFTER stripSpinners (${this.workerScreenText.length} chars):\n${this.workerScreenText}`);
+
+      // Log scrollback text — clean content not affected by Ink's cursor rendering
+      const scrollback = this.workerMonitor.emulator.getScrollbackText();
+      debugLog(`[onWorkerStagnation] SCROLLBACK TEXT (${scrollback.length} chars, last 2000):\n${scrollback.slice(-2000)}`);
     }
 
     // Reset clearing buffer before sending /clear
@@ -766,6 +794,8 @@ export class AutomationEngine {
       cycleNumber: this.cycleNumber,
       idleDurationMs: this.idleDurationMs,
     });
+
+    debugLog(`[onConsultationClearComplete] CONSULTATION PROMPT BEING SENT (${prompt.length} chars):\n${prompt}`);
 
     // Send prompt text to orchestrator (without Enter)
     this.sessionManager.writeToSession(this.config.orchestratorSession, prompt);
