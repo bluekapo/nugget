@@ -1899,6 +1899,149 @@ describe('AutomationEngine', () => {
       'first NO of new sequence should go to consultation-wait (count was reset)');
   });
 
+  // ---------- Test: WAIT expiry idle prompt does NOT false-positive into new cycle ----------
+
+  it('WAIT expiry: idle prompt on worker screen does not false-positive into new cycle', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Step 1: First cycle triggers via deferred timer
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    assert.equal(engine.state, 'clearing-orchestrator');
+
+    // Step 2: Complete clear
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter -> waiting-response
+
+    assert.equal(engine.state, 'waiting-response');
+
+    // Step 3: Orchestrator responds with WAIT: 2
+    await emitOutput(bus, 'orchestrator', directiveOutput('WAIT: 2'));
+    timer.advance(1000); // response poll fires, finds WAIT directive
+
+    assert.equal(engine.state, 'waiting', 'should be in waiting state after WAIT directive');
+
+    // Step 4: Worker screen has bare idle prompt but NO completion marker
+    await emitOutput(bus, 'worker', markerlessOutput('still working...'));
+    timer.advance(50); // debounce so emulator processes it
+
+    // Step 5: Advance 2000ms to expire WAIT timer
+    timer.advance(2000);
+
+    // Step 6: Advance 1ms for the deferred setTimeout(0) check
+    timer.advance(1);
+
+    // Assert: engine should be idle (waiting for onPromptComplete), NOT clearing-orchestrator
+    // The bare idle prompt (❯) should NOT cause a false-positive new cycle
+    assert.equal(engine.state, 'idle',
+      'WAIT expiry with bare idle prompt (no completion marker) must NOT start new cycle — should stay idle');
+  });
+
+  // ---------- Test: WAIT expiry completion marker triggers new cycle ----------
+
+  it('WAIT expiry: completion marker on worker screen triggers new cycle', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Step 1: First cycle triggers via deferred timer
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    assert.equal(engine.state, 'clearing-orchestrator');
+
+    // Step 2: Complete clear
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter -> waiting-response
+
+    assert.equal(engine.state, 'waiting-response');
+
+    // Step 3: Orchestrator responds with WAIT: 2
+    await emitOutput(bus, 'orchestrator', directiveOutput('WAIT: 2'));
+    timer.advance(1000); // response poll fires, finds WAIT directive
+
+    assert.equal(engine.state, 'waiting', 'should be in waiting state after WAIT directive');
+
+    // Step 4: Worker screen has completion marker (genuine evidence worker finished)
+    await emitOutput(bus, 'worker', completionOutput('task done'));
+    timer.advance(50); // debounce so emulator processes it
+
+    // Step 5: Advance 2000ms to expire WAIT timer
+    timer.advance(2000);
+
+    // Step 6: Advance 1ms for the deferred setTimeout(0) check
+    timer.advance(1);
+
+    // Assert: engine should start a new cycle (completion marker is genuine)
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'WAIT expiry with completion marker on worker screen SHOULD start new cycle');
+  });
+
+  // ---------- Test: consecutive WAIT directives capped at maxConsecutiveWaits ----------
+
+  it('consecutive WAIT directives capped at maxConsecutiveWaits', async () => {
+    const waitCapConfig = { ...config, maxConsecutiveWaits: 3 };
+    engine = new AutomationEngine(waitCapConfig, mockSessionManager, bus);
+    const doneEvents: string[] = [];
+    bus.on('automation:done', (summary: string) => {
+      doneEvents.push(summary);
+    });
+
+    engine.start();
+
+    // Drive through 3 consecutive WAIT cycles.
+    // Each cycle: first-cycle trigger -> clear -> prompt -> WAIT:1 -> wait expires -> completion marker on screen triggers next cycle
+    for (let i = 0; i < 3; i++) {
+      if (i === 0) {
+        timer.advance(1); // deferred start
+      } else {
+        // Worker screen already has completion marker from previous cycle,
+        // so WAIT expiry deferred check already triggered onWorkerIdle
+        // Engine is already in clearing-orchestrator
+      }
+
+      assert.equal(engine.state, 'clearing-orchestrator',
+        `cycle ${i + 1}: should be clearing orchestrator`);
+
+      // Complete clear
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); // poll fires, finds "(no content)"
+      timer.advance(500);  // settling delay -> onClearComplete
+      timer.advance(50);   // delayed Enter -> waiting-response
+
+      assert.equal(engine.state, 'waiting-response',
+        `cycle ${i + 1}: should be waiting for response`);
+
+      // Orchestrator responds with WAIT: 1
+      await emitOutput(bus, 'orchestrator', directiveOutput('WAIT: 1'));
+      timer.advance(1000); // response poll fires, finds WAIT directive
+
+      if (i < 2) {
+        // First 2 WAITs should proceed normally
+        assert.equal(engine.state, 'waiting',
+          `WAIT ${i + 1}/3: should be in waiting state`);
+
+        // Put completion marker on worker screen so next cycle triggers after WAIT expires
+        await emitOutput(bus, 'worker', completionOutput(`cycle ${i + 1} done`));
+        timer.advance(50); // debounce
+
+        // Advance 1000ms to expire WAIT timer
+        timer.advance(1000);
+        // Advance 1ms for deferred check
+        timer.advance(1);
+      }
+    }
+
+    // After the 3rd consecutive WAIT, engine should emit automation:done and stop
+    assert.equal(engine.state, 'stopped',
+      'engine should stop after maxConsecutiveWaits (3) consecutive WAIT directives');
+    assert.ok(doneEvents.length >= 1,
+      'should emit automation:done when consecutive WAIT limit reached');
+    assert.ok(doneEvents[0].includes('consecutive WAIT'),
+      'done event should mention consecutive WAIT limit');
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------
