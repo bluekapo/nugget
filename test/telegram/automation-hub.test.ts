@@ -61,6 +61,8 @@ describe('AutomationHubRenderer', () => {
       engineFactory as any,
       bus,
     );
+    // Wire onRender to trigger hub's own render (simulates parent hub integration)
+    hub.onRender = async () => { await hub.render(); };
     return { hub, bus, mockEngine };
   }
 
