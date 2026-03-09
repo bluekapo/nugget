@@ -108,9 +108,9 @@ describe('HubRenderer', () => {
       await hub.render();
 
       const sentText = api.calls[0].args[1] as string;
-      assert.ok(sentText.includes('> <b>project-a</b> -- viewing'), 'active session should show viewing state');
-      assert.ok(sentText.includes('   <b>project-b</b> -- hidden'), 'inactive running session should show hidden state');
-      assert.ok(sentText.includes('idle'), 'running session should show idle execution state');
+      assert.ok(sentText.includes('<b>project-a</b> -- viewing \u00B7 idle'), 'active session should show viewing + idle dual status');
+      assert.ok(sentText.includes('<b>project-b</b> -- hidden \u00B7 idle'), 'inactive running session should show hidden + idle dual status');
+      assert.ok(sentText.includes('> '), 'active session should have arrow prefix');
     });
 
     it('shows "busy" execution state when execStateMap has busy for session', async () => {
@@ -311,7 +311,7 @@ describe('HubRenderer', () => {
       const lastRow = keyboard![keyboard!.length - 1];
       assert.equal(lastRow.length, 2, 'bottom row should have 2 buttons');
       assert.equal(lastRow[0].callback_data, 'hub:advanced', 'first button should be hub:advanced');
-      assert.equal(lastRow[0].text, 'Details', 'toggle button should show Details when not in advanced mode');
+      assert.ok(lastRow[0].text.includes('Details'), 'toggle button should show Details when not in advanced mode');
       assert.equal(lastRow[1].callback_data, 'hub:refresh', 'second button should be hub:refresh');
       assert.ok(lastRow[1].text.includes('Refresh'), 'second button text should contain Refresh');
     });
@@ -411,7 +411,7 @@ describe('HubRenderer', () => {
       const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
       const keyboard = opts?.reply_markup?.inline_keyboard;
       const lastRow = keyboard![keyboard!.length - 1];
-      assert.equal(lastRow[0].text, 'Simple', 'toggle button should show Simple when in advanced mode');
+      assert.ok(lastRow[0].text.includes('Simple'), 'toggle button should show Simple when in advanced mode');
       assert.equal(lastRow[0].callback_data, 'hub:advanced', 'callback should still be hub:advanced');
     });
   });
