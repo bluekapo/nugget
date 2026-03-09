@@ -74,7 +74,7 @@ function collectContinuation(firstLine: string, lines: string[], startIdx: numbe
   return parts.join(' ').replace(/\s{2,}/g, ' ');
 }
 
-/** Match single-line directives (SELECT, ENTER, WAIT). */
+/** Match single-line directives (SELECT, ENTER). WAIT is recognized but ignored (returns null). */
 function matchSingleLine(line: string): Directive | null {
   // SELECT: <N>
   const selMatch = line.match(/^SELECT:\s+(\d+)$/);
@@ -101,14 +101,9 @@ function matchSingleLine(line: string): Directive | null {
     return { type: 'NO' };
   }
 
-  // WAIT (bare) or WAIT: <seconds>
-  if (line === 'WAIT') {
-    return { type: 'WAIT' };
-  }
-  const waitMatch = line.match(/^WAIT:\s+(\d+)$/);
-  if (waitMatch) {
-    return { type: 'WAIT', delaySeconds: parseInt(waitMatch[1], 10) };
-  }
+  // WAIT (removed directive -- return null so it triggers normal retry/parse-failure flow)
+  if (line === 'WAIT') return null;
+  if (/^WAIT:\s+\d+$/.test(line)) return null;
 
   return null;
 }

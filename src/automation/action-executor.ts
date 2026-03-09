@@ -1,10 +1,8 @@
 import type { Directive } from './types.js';
-import { DEFAULT_WAIT_SECONDS } from './types.js';
 
 export interface ExecutionResult {
   executed: boolean;
   description: string;
-  waitSeconds?: number;
   escalateReason?: string;
   doneSummary?: string;
 }
@@ -28,11 +26,6 @@ export function executeDirective(
     case 'ENTER':
       writeFn('\r');
       return { executed: true, description: 'ENTER' };
-
-    case 'WAIT': {
-      const seconds = directive.delaySeconds ?? DEFAULT_WAIT_SECONDS;
-      return { executed: true, description: `WAIT: ${seconds}s`, waitSeconds: seconds };
-    }
 
     case 'ESCALATE':
       return {

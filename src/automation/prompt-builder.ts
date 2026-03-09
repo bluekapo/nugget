@@ -51,7 +51,6 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('- `COMMAND: <text>` -- Type text into the worker Claude Code\'s input prompt');
   lines.push('- `SELECT: <number>` -- Select a menu option in the worker terminal');
   lines.push('- `ENTER` -- Press Enter in the worker terminal');
-  lines.push('- `WAIT: <seconds>` -- Wait before checking again');
   lines.push('- `DONE: <summary>` -- Task is complete; summarize what was accomplished');
   lines.push('- `ESCALATE: <reason>` -- Stop and notify the human operator (ONLY for genuine blockers)');
   lines.push('');

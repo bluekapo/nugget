@@ -7,7 +7,7 @@
 
 // --- Directive Types ---
 
-export type DirectiveType = 'COMMAND' | 'SELECT' | 'ENTER' | 'WAIT' | 'ESCALATE' | 'DONE' | 'YES' | 'NO';
+export type DirectiveType = 'COMMAND' | 'SELECT' | 'ENTER' | 'ESCALATE' | 'DONE' | 'YES' | 'NO';
 
 export interface CommandDirective {
   type: 'COMMAND';
@@ -21,11 +21,6 @@ export interface SelectDirective {
 
 export interface EnterDirective {
   type: 'ENTER';
-}
-
-export interface WaitDirective {
-  type: 'WAIT';
-  delaySeconds?: number;
 }
 
 export interface EscalateDirective {
@@ -50,7 +45,6 @@ export type Directive =
   | CommandDirective
   | SelectDirective
   | EnterDirective
-  | WaitDirective
   | EscalateDirective
   | DoneDirective
   | YesDirective
@@ -83,4 +77,3 @@ export interface ConsultationPacket {
 
 // --- Constants ---
 
-export const DEFAULT_WAIT_SECONDS = 10;
