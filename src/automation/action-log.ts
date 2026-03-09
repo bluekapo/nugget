@@ -26,6 +26,11 @@ export class ActionLog {
     return this.entries.length;
   }
 
+  updateLastOutcome(outcome: string): void {
+    if (this.entries.length === 0) return;
+    this.entries[this.entries.length - 1].outcome = outcome;
+  }
+
   clear(): void {
     this.entries = [];
   }

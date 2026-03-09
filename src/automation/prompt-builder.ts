@@ -38,8 +38,8 @@ export function buildPrompt(ctx: ContextPacket): string {
   } else {
     for (let i = 0; i < actionCount; i++) {
       const entry = ctx.actionLog[i];
-      lines.push(`${i + 1}. Sent: ${entry.action}`);
-      lines.push(`   Result: ${entry.outcome}`);
+      lines.push(`${i + 1}. Sent: \`${entry.action}\``);
+      lines.push(`   Result: \`${entry.outcome}\``);
     }
   }
   lines.push('');
@@ -93,13 +93,16 @@ export function buildConsultationPrompt(ctx: ConsultationPacket): string {
   } else {
     for (let i = 0; i < actionCount; i++) {
       const entry = ctx.actionLog[i];
-      lines.push(`${i + 1}. Sent: ${entry.action}`);
-      lines.push(`   Result: ${entry.outcome}`);
+      lines.push(`${i + 1}. Sent: \`${entry.action}\``);
+      lines.push(`   Result: \`${entry.outcome}\``);
     }
   }
   lines.push('');
 
   lines.push('## Question');
+  if (ctx.idleDurationMs !== undefined) {
+    lines.push(`The worker has been idle for ${Math.round(ctx.idleDurationMs / 1000)} seconds.`);
+  }
   lines.push('The worker has stopped producing output. Based on the terminal state above, is the worker FINISHED with the task?');
   lines.push('');
   lines.push('Respond with exactly YES or NO. Nothing else.');

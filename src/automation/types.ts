@@ -78,6 +78,7 @@ export interface ConsultationPacket {
   workerScreen: string;
   actionLog: ActionEntry[];
   cycleNumber: number;
+  idleDurationMs?: number;
 }
 
 // --- Constants ---

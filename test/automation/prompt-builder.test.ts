@@ -36,12 +36,12 @@ describe('buildPrompt', () => {
     assert.ok(afterScreen !== -1, 'Expected ``` after screen text');
   });
 
-  it('output contains action log entries with "Sent:" and "Result:" labels', () => {
+  it('output contains action log entries with "Sent:" and "Result:" labels wrapped in backticks', () => {
     const prompt = buildPrompt(basePacket);
-    assert.ok(prompt.includes('Sent: COMMAND: npm test'), `Expected "Sent:" label in prompt`);
-    assert.ok(prompt.includes('Result: Tests executed successfully'), `Expected "Result:" label in prompt`);
-    assert.ok(prompt.includes('Sent: COMMAND: npm run lint'), `Expected second "Sent:" label in prompt`);
-    assert.ok(prompt.includes('Result: No lint errors found'), `Expected second "Result:" label in prompt`);
+    assert.ok(prompt.includes('Sent: `COMMAND: npm test`'), `Expected backtick-wrapped "Sent:" label in prompt`);
+    assert.ok(prompt.includes('Result: `Tests executed successfully`'), `Expected backtick-wrapped "Result:" label in prompt`);
+    assert.ok(prompt.includes('Sent: `COMMAND: npm run lint`'), `Expected second backtick-wrapped "Sent:" label in prompt`);
+    assert.ok(prompt.includes('Result: `No lint errors found`'), `Expected second backtick-wrapped "Result:" label in prompt`);
   });
 
   it('with empty action log shows "(no actions taken yet" message', () => {
@@ -152,10 +152,10 @@ describe('buildConsultationPrompt', () => {
     );
   });
 
-  it('output contains action log entries', () => {
+  it('output contains action log entries wrapped in backticks', () => {
     const prompt = buildConsultationPrompt(basePacket);
-    assert.ok(prompt.includes('Sent: COMMAND: npm test'), 'Expected action log entry');
-    assert.ok(prompt.includes('Result: Tests executed successfully'), 'Expected action log outcome');
+    assert.ok(prompt.includes('Sent: `COMMAND: npm test`'), 'Expected backtick-wrapped action log entry');
+    assert.ok(prompt.includes('Result: `Tests executed successfully`'), 'Expected backtick-wrapped action log outcome');
   });
 
   it('output instructs to respond with YES or NO only', () => {
@@ -163,6 +163,26 @@ describe('buildConsultationPrompt', () => {
     assert.ok(
       prompt.includes('YES') && prompt.includes('NO') && prompt.toLowerCase().includes('nothing else'),
       `Expected instruction to respond with YES or NO only:\n${prompt}`
+    );
+  });
+
+  it('output includes idle duration when idleDurationMs is provided', () => {
+    const packetWithDuration: ConsultationPacket = {
+      ...basePacket,
+      idleDurationMs: 15000,
+    };
+    const prompt = buildConsultationPrompt(packetWithDuration);
+    assert.ok(
+      prompt.includes('idle for 15 seconds'),
+      `Expected idle duration text in consultation prompt:\n${prompt}`
+    );
+  });
+
+  it('output does NOT include idle duration when idleDurationMs is not provided', () => {
+    const prompt = buildConsultationPrompt(basePacket);
+    assert.ok(
+      !prompt.includes('idle for'),
+      `Should NOT contain idle duration text when not provided:\n${prompt}`
     );
   });
 

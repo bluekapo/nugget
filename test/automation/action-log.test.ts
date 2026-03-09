@@ -95,4 +95,37 @@ describe('ActionLog', () => {
     const entries = log.getRecent();
     assert.deepEqual(entries, []);
   });
+
+  // ---------- updateLastOutcome tests ----------
+
+  it('updateLastOutcome() replaces the outcome of the most recent entry', () => {
+    const log = new ActionLog();
+    log.add('COMMAND: npm test', '(awaiting result)');
+    log.updateLastOutcome('Tests passed - 42 tests');
+
+    const entries = log.getRecent();
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].action, 'COMMAND: npm test');
+    assert.equal(entries[0].outcome, 'Tests passed - 42 tests');
+  });
+
+  it('updateLastOutcome() on empty log is a no-op (no crash)', () => {
+    const log = new ActionLog();
+    // Should not throw
+    log.updateLastOutcome('some outcome');
+    assert.equal(log.length, 0);
+  });
+
+  it('updateLastOutcome() only affects the last entry (previous entries unchanged)', () => {
+    const log = new ActionLog();
+    log.add('action-1', 'outcome-1');
+    log.add('action-2', 'outcome-2');
+    log.add('action-3', 'outcome-3');
+    log.updateLastOutcome('updated-outcome-3');
+
+    const entries = log.getRecent();
+    assert.equal(entries[0].outcome, 'outcome-1', 'first entry unchanged');
+    assert.equal(entries[1].outcome, 'outcome-2', 'second entry unchanged');
+    assert.equal(entries[2].outcome, 'updated-outcome-3', 'last entry updated');
+  });
 });
