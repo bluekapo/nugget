@@ -50,7 +50,6 @@ export function registerCommands(
   hubRenderer?: { render(opts?: { forceNew?: boolean }): Promise<void> },
   ephemeralTracker?: EphemeralTracker,
   settingsStore?: SettingsStore,
-  automationHub?: { render(opts?: { forceNew?: boolean }): Promise<void> },
 ): void {
   // /start - Welcome message and quick start guide
   bot.command('start', async (ctx) => {
@@ -124,22 +123,6 @@ export function registerCommands(
       await ctx.reply('Hub renderer not available.');
     }
 
-    try { await ctx.deleteMessage(); } catch { /* ignore */ }
-  });
-
-  // /automate - Automation hub for session automation
-  bot.command('automate', async (ctx) => {
-    logInfo('/automate command received');
-    if (automationHub) {
-      try {
-        await automationHub.render({ forceNew: true });
-      } catch (err) {
-        logError('/automate render failed:', err);
-        await ctx.reply('Failed to render automation hub.');
-      }
-    } else {
-      await ctx.reply('Automation hub not available.');
-    }
     try { await ctx.deleteMessage(); } catch { /* ignore */ }
   });
 

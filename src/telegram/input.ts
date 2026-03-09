@@ -10,7 +10,7 @@ import type { CommandAllowlist } from '../security/allowlist.js';
 export class TelegramInputHandler {
   /** Commands registered with the bot that grammY should handle. */
   private static readonly BOT_COMMANDS = new Set([
-    'start', 'help', 'hub', 'controls', 'settings', 'automate',
+    'start', 'help', 'hub', 'controls', 'settings',
   ]);
 
   constructor(

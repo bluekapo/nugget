@@ -174,6 +174,10 @@ async function startPrimary(
     bus,
   );
 
+  // 11d. Wire automationHub into HubRenderer for integrated display
+  hubRenderer.setAutomationHub(automationHub);
+  automationHub.onRender = () => hubRenderer.render();
+
   // 12. Create SessionRouter with MessageTracker (onHubUpdate triggers hub re-render)
   const router = new SessionRouter(
     outputSink, bus, () => hubRenderer.render(), messageTracker,
@@ -285,7 +289,7 @@ async function startPrimary(
   // 16. Register Telegram commands and handlers (must be before bot.start)
   let shutdownFn: ((signal: string) => Promise<void>) | null = null;
   const ephemeralTracker = new EphemeralTracker(bot.api, config.ownerId);
-  registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore, automationHub);
+  registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore);
   bot.command('controls', async (ctx) => {
     const result = await ctx.reply('Session controls:', { reply_markup: buildControlsKeyboard(true, settingsStore.get('enter_confirmation')) });
     await ephemeralTracker.track((result as { message_id: number }).message_id);
@@ -654,6 +658,10 @@ async function becomeNewPrimary(
       bus,
     );
 
+    // Wire automationHub into HubRenderer for integrated display
+    hubRenderer.setAutomationHub(promotedAutomationHub);
+    promotedAutomationHub.onRender = () => hubRenderer.render();
+
     const router = new SessionRouter(
       outputSink, bus, () => hubRenderer.render(), messageTracker,
       () => capture.resetBaseline(),
@@ -712,7 +720,7 @@ async function becomeNewPrimary(
 
     let promotedShutdownFn: ((signal: string) => Promise<void>) | null = null;
     const ephemeralTracker = new EphemeralTracker(bot.api, config.ownerId);
-    registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore, promotedAutomationHub);
+    registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore);
     bot.command('controls', async (ctx) => {
       const result = await ctx.reply('Session controls:', { reply_markup: buildControlsKeyboard(true, settingsStore.get('enter_confirmation')) });
       await ephemeralTracker.track((result as { message_id: number }).message_id);
