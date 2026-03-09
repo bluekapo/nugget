@@ -106,6 +106,10 @@ export interface EngineConfig {
   /** Consultation wait delay in ms -- how long to wait after NO response before re-checking.
    *  Default: 60000 (60s). */
   consultationWaitDelay?: number;
+  /** Maximum consecutive WAIT directives before forcing completion.
+   *  Prevents infinite WAIT loops when orchestrator keeps saying WAIT.
+   *  Default: 5. */
+  maxConsecutiveWaits?: number;
   /** Optional callback to trigger a PTY redraw on the orchestrator session.
    *  Used to flush stuck IPC output when the remote TUI goes idle after rendering. */
   requestOrchestratorRedraw?: () => void;
@@ -151,6 +155,8 @@ export class AutomationEngine {
   private idleEnteredAt = 0;
   private idleDurationMs = 0;
   private readonly maxConsultationRetries = 3;
+  private consecutiveWaits = 0;
+  private readonly maxConsecutiveWaits: number;
 
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
@@ -175,6 +181,7 @@ export class AutomationEngine {
     this.maxCycles = config.maxCycles ?? 100;
     this.stagnationDelay = config.stagnationDelay ?? 10000;
     this.consultationWaitDelay = config.consultationWaitDelay ?? 60000;
+    this.maxConsecutiveWaits = config.maxConsecutiveWaits ?? 5;
   }
 
   get state(): EngineState {
@@ -185,6 +192,9 @@ export class AutomationEngine {
     if (this._state !== 'stopped') return;
 
     debugLog(`[start] worker="${this.config.workerSession}" orchestrator="${this.config.orchestratorSession}"`);
+
+    // Reset consecutive WAIT counter
+    this.consecutiveWaits = 0;
 
     // Create dedicated monitors for each session
     this.workerMonitor = this.createMonitor();
@@ -502,6 +512,11 @@ export class AutomationEngine {
     // Explicit null guard for TypeScript narrowing (all null paths returned above)
     if (!directive) return;
 
+    // Reset consecutive WAIT counter when a non-WAIT directive is received
+    if (directive.type !== 'WAIT') {
+      this.consecutiveWaits = 0;
+    }
+
     // Handle based on directive type
     if (directive.type === 'SELECT') {
       // SELECT uses async arrow-down sequence with delays
@@ -530,6 +545,13 @@ export class AutomationEngine {
     }
 
     if (directive.type === 'WAIT') {
+      this.consecutiveWaits++;
+      if (this.consecutiveWaits >= this.maxConsecutiveWaits) {
+        this.actionLog.add('WAIT_LIMIT', `${this.consecutiveWaits} consecutive WAITs — forcing completion`);
+        this.bus.emit('automation:done', `Automation stopped: ${this.consecutiveWaits} consecutive WAIT directives (orchestrator appears stuck)`);
+        this.stop();
+        return;
+      }
       this.actionLog.add(result.description, `waiting ${result.waitSeconds}s`);
       this.setState('waiting');
       const waitMs = (result.waitSeconds ?? 10) * 1000;
@@ -542,20 +564,22 @@ export class AutomationEngine {
           this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
         }
         // Check if worker already finished during WAIT: capture screen and look
-        // for idle prompt (❯) or completion marker. If found, start next cycle
-        // immediately instead of waiting for a future onPromptComplete that may
-        // never fire (worker is already idle, no new output coming).
+        // for completion marker only. If found, start next cycle immediately
+        // instead of waiting for a future onPromptComplete that may never fire
+        // (worker is already idle, no new output coming).
+        // NOTE: We do NOT check for the bare idle prompt (❯) here because
+        // Claude Code TUI always shows ❯ at the bottom of the screen even while
+        // the worker is actively working. Checking it would always false-positive
+        // into a new cycle, creating an infinite WAIT loop. Only the completion
+        // marker (✻ Crunched for Xm Ys) is reliable evidence the worker finished.
         this.timer.setTimeout(() => {
           if (this._state !== 'idle') return;
           if (!this.workerMonitor) return;
           const screen = this.workerMonitor.emulator.getScreenText();
-          const hasIdlePrompt = screen.split('\n').some(
-            line => /^\u276F\s*$/.test(line)
-          );
           const hasCompletionMarker = screen.split('\n').some(
             line => /\u273B .+ for (?:\d+m )?\d+s/.test(line)
           );
-          if (hasIdlePrompt || hasCompletionMarker) {
+          if (hasCompletionMarker) {
             this.onWorkerIdle();
           }
         }, 0);
