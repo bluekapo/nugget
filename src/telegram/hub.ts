@@ -1,5 +1,6 @@
 import type { SessionManager } from '../session/manager.js';
 import type { HubStore } from '../db/hub-store.js';
+import type { AutomationHubRenderer } from './automation-hub.js';
 import { logError } from '../logging/logger.js';
 
 /**
@@ -13,9 +14,15 @@ export class HubRenderer {
   private hubMessageId: number | null = null;
   private advancedMode = false;
   private execStateMap: Map<string, 'busy' | 'idle'> = new Map();
+  private automationHub: AutomationHubRenderer | null = null;
 
   /** Sequential promise chain to serialize render() calls and prevent duplicate sendMessage. */
   private renderQueue: Promise<void> = Promise.resolve();
+
+  /** Set the automation hub reference (set after construction due to init ordering). */
+  setAutomationHub(hub: AutomationHubRenderer): void {
+    this.automationHub = hub;
+  }
 
   /** Update the execution state for a session (busy = processing, idle = waiting for input). */
   setExecState(sessionName: string, state: 'busy' | 'idle'): void {
@@ -93,8 +100,8 @@ export class HubRenderer {
       }
 
       const activeSession = this.getActiveSession();
-      const text = buildText(sessions, activeSession, this.advancedMode, this.execStateMap);
-      const keyboard = buildKeyboard(sessions, activeSession, this.advancedMode);
+      const text = buildText(sessions, activeSession, this.advancedMode, this.execStateMap, this.automationHub);
+      const keyboard = buildKeyboard(sessions, activeSession, this.advancedMode, this.automationHub);
 
       if (this.hubMessageId === null) {
         // Send new message
@@ -154,6 +161,7 @@ function buildText(
   activeSession: string | null,
   advanced = false,
   execStateMap: Map<string, 'busy' | 'idle'> = new Map(),
+  automationHub?: AutomationHubRenderer | null,
 ): string {
   if (sessions.length === 0) {
     return [
@@ -166,14 +174,32 @@ function buildText(
 
   const header = `<b>Sessions Hub</b>  (${sessions.length} session${sessions.length !== 1 ? 's' : ''})`;
 
+  const activeAuto = automationHub?.activeAutomationInfo ?? null;
+
   const lines = sessions.map((s) => {
     const isViewing = s.name === activeSession;
     const prefix = isViewing ? '> ' : '   ';
     const viewState = isViewing ? 'viewing' : 'hidden';
-    const execState = (s.status === 'running' || s.status === 'remote')
-      ? (execStateMap.get(s.name) ?? 'idle')
-      : s.status;
-    let line = `${prefix}<b>${s.name}</b> -- ${viewState} \u00B7 ${execState}`;
+
+    // Determine emoji status indicator
+    let emoji: string;
+    if (activeAuto && activeAuto.workerSession === s.name) {
+      // Worker in active automation -- robot + engine state abbreviation
+      emoji = `\uD83E\uDD16 ${activeAuto.engine.state}`;
+    } else if (activeAuto && activeAuto.orchestratorSession === s.name) {
+      // Orchestrator in active automation
+      emoji = '\uD83C\uDFAF';
+    } else if (s.status === 'remote') {
+      emoji = '\uD83C\uDF10';
+    } else if (s.status === 'stopped') {
+      emoji = '\uD83D\uDD34';
+    } else {
+      // Running session -- check exec state
+      const execState = execStateMap.get(s.name) ?? 'idle';
+      emoji = execState === 'busy' ? '\uD83D\uDFE0' : '\uD83D\uDFE2';
+    }
+
+    let line = `${prefix}${emoji} <b>${s.name}</b> -- ${viewState}`;
     if (advanced) {
       const pid = s.pid != null ? String(s.pid) : '?';
       let since = '?';
@@ -193,7 +219,34 @@ function buildText(
     return line;
   });
 
-  return `${header}\n\n${lines.join('\n')}`;
+  let result = `${header}\n\n${lines.join('\n')}`;
+
+  // Append automation status section if applicable
+  if (activeAuto) {
+    const autoLines = [
+      '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500',
+      `\uD83E\uDD16 Automation: ${activeAuto.engine.state} | Cycles: ${activeAuto.cycleCount}`,
+      `Worker: ${activeAuto.workerSession} \u2192 Orch: ${activeAuto.orchestratorSession}`,
+      `Task: ${activeAuto.taskDescription}`,
+    ];
+    if (activeAuto.lastAction) {
+      autoLines.push(`Last: ${activeAuto.lastAction}`);
+    }
+    result += '\n\n' + autoLines.join('\n');
+  } else if (automationHub?.pendingCreationInfo) {
+    const pending = automationHub.pendingCreationInfo;
+    const stepLabels: Record<string, string> = {
+      'select-worker': 'Select worker session',
+      'select-orchestrator': `Worker: ${pending.workerSession ?? '?'} \u2014 Select orchestrator`,
+      'enter-task': `Worker: ${pending.workerSession ?? '?'} \u2192 Orch: ${pending.orchestratorSession ?? '?'} \u2014 Enter task`,
+    };
+    result += '\n\n' + [
+      '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500',
+      `\uD83E\uDD16 Setup: ${stepLabels[pending.step] ?? pending.step}`,
+    ].join('\n');
+  }
+
+  return result;
 }
 
 /** Build inline keyboard with switch/disconnect buttons per session. */
@@ -201,8 +254,12 @@ function buildKeyboard(
   sessions: Array<{ name: string; status: string }>,
   activeSession: string | null,
   advanced = false,
+  automationHub?: AutomationHubRenderer | null,
 ): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
   const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
+
+  const activeAuto = automationHub?.activeAutomationInfo ?? null;
+  const pendingCreation = automationHub?.pendingCreationInfo ?? null;
 
   for (const s of sessions) {
     const row: Array<{ text: string; callback_data: string }> = [];
@@ -232,6 +289,42 @@ function buildKeyboard(
     { text: advanced ? '\uD83D\uDCCB Simple' : '\uD83D\uDCCA Details', callback_data: 'hub:advanced' },
     { text: '\uD83D\uDD04 Refresh', callback_data: 'hub:refresh' },
   ]);
+
+  // Automation control rows
+  if (activeAuto) {
+    const engineState = activeAuto.engine.state;
+    if (engineState === 'paused') {
+      keyboard.push([
+        { text: '\u25B6\uFE0F Resume', callback_data: 'auto:resume' },
+        { text: '\uD83D\uDED1 Stop', callback_data: 'auto:stop' },
+      ]);
+    } else {
+      keyboard.push([
+        { text: '\u23F8 Pause', callback_data: 'auto:pause' },
+        { text: '\uD83D\uDED1 Stop', callback_data: 'auto:stop' },
+      ]);
+    }
+  } else if (pendingCreation) {
+    // Show creation flow buttons
+    if (pendingCreation.step === 'select-worker') {
+      for (const s of sessions) {
+        keyboard.push([{ text: `\uD83D\uDD27 ${s.name}`, callback_data: `auto:w:${s.name}` }]);
+      }
+      keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
+    } else if (pendingCreation.step === 'select-orchestrator') {
+      for (const s of sessions) {
+        if (s.name !== pendingCreation.workerSession) {
+          keyboard.push([{ text: `\uD83C\uDFAF ${s.name}`, callback_data: `auto:o:${s.name}` }]);
+        }
+      }
+      keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
+    } else if (pendingCreation.step === 'enter-task') {
+      keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
+    }
+  } else if (automationHub) {
+    // Idle: show Automate button
+    keyboard.push([{ text: '\uD83E\uDD16 Automate', callback_data: 'auto:new' }]);
+  }
 
   return { inline_keyboard: keyboard };
 }

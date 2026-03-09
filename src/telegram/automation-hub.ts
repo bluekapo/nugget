@@ -40,6 +40,19 @@ export class AutomationHubRenderer {
   private doneHandler: ((summary: string) => void) | null = null;
   private errorHandler: ((error: string) => void) | null = null;
 
+  /** Optional callback invoked when automation state changes and a re-render is needed. */
+  onRender: (() => void | Promise<void>) | null = null;
+
+  /** Public getter for the active automation info (read-only access for hub display). */
+  get activeAutomationInfo(): ActiveAutomation | null {
+    return this.activeAutomation;
+  }
+
+  /** Public getter for the pending creation info (read-only access for hub display). */
+  get pendingCreationInfo(): PendingCreation | null {
+    return this.pendingCreation;
+  }
+
   constructor(
     private readonly api: {
       sendMessage(chatId: number, text: string, opts?: unknown): Promise<{ message_id: number }>;
@@ -109,13 +122,13 @@ export class AutomationHubRenderer {
   async handleCallback(data: string): Promise<string> {
     if (data === 'auto:new') {
       this.pendingCreation = { step: 'select-worker' };
-      await this.render();
+      await this.onRender?.();
       return 'Select a worker session';
     }
 
     if (data === 'auto:cancel') {
       this.pendingCreation = null;
-      await this.render();
+      await this.onRender?.();
       return 'Creation cancelled';
     }
 
@@ -125,14 +138,14 @@ export class AutomationHubRenderer {
       if (!sessions.includes(sessionName)) {
         // Stale session -- reset to idle
         this.pendingCreation = null;
-        await this.render();
+        await this.onRender?.();
         return 'Session not found';
       }
       this.pendingCreation = {
         step: 'select-orchestrator',
         workerSession: sessionName,
       };
-      await this.render();
+      await this.onRender?.();
       return 'Select an orchestrator session';
     }
 
@@ -143,19 +156,19 @@ export class AutomationHubRenderer {
         step: 'enter-task',
         orchestratorSession: sessionName,
       };
-      await this.render();
+      await this.onRender?.();
       return 'Enter your task description';
     }
 
     if (data === 'auto:pause' && this.activeAutomation) {
       this.activeAutomation.engine.pause();
-      await this.render();
+      await this.onRender?.();
       return 'Automation paused';
     }
 
     if (data === 'auto:resume' && this.activeAutomation) {
       this.activeAutomation.engine.resume();
-      await this.render();
+      await this.onRender?.();
       return 'Automation resumed';
     }
 
@@ -167,12 +180,12 @@ export class AutomationHubRenderer {
       }
       this.activeAutomation.engine.stop();
       this.activeAutomation = null;
-      await this.render();
+      await this.onRender?.();
       return 'Automation stopped';
     }
 
     if (data === 'auto:refresh') {
-      await this.render();
+      await this.onRender?.();
       return 'Refreshed';
     }
 
@@ -204,13 +217,13 @@ export class AutomationHubRenderer {
       lastAction: null,
     };
 
-    // Subscribe to bus events
+    // Subscribe to bus events -- trigger hub re-render via onRender callback
     this.stateChangeHandler = (_state: string) => {
-      this.render();
+      this.onRender?.();
     };
     this.cycleCompleteHandler = (cycleNumber: number, action: string) => {
       this.updateCycleInfo(cycleNumber, action);
-      this.render();
+      this.onRender?.();
     };
     this.escalationHandler = (reason: string) => {
       // Send standalone notification so user gets a notification sound
@@ -220,7 +233,7 @@ export class AutomationHubRenderer {
           inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
         },
       }).catch(() => {});
-      this.render();
+      this.onRender?.();
     };
 
     this.doneHandler = (summary: string) => {
@@ -231,7 +244,7 @@ export class AutomationHubRenderer {
         },
       }).catch(() => {});
       this.activeAutomation = null;
-      this.render();
+      this.onRender?.();
     };
 
     this.errorHandler = (error: string) => {
@@ -243,7 +256,7 @@ export class AutomationHubRenderer {
         },
       }).catch(() => {});
       // Also re-render hub to show stopped state
-      this.render();
+      this.onRender?.();
     };
 
     this.bus.on('automation:state-change', this.stateChangeHandler);
@@ -254,7 +267,7 @@ export class AutomationHubRenderer {
 
     this.pendingCreation = null;
     engine.start();
-    await this.render();
+    await this.onRender?.();
   }
 
   /** Update cycle count and last action for the active automation. */
