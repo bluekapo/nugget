@@ -39,6 +39,20 @@ function stripAnsi(raw: string): string {
     .replace(/\r(?!\n)/g, '');                      // Bare CR (without LF) — cursor to start of line
 }
 
+/** Strip Claude Code spinner lines and blank whitespace-only lines from screen text. */
+function stripSpinners(text: string): string {
+  return text
+    .split('\n')
+    .filter(line => {
+      // Strip lines matching Claude Code spinner patterns: "  · Catapulting..."
+      if (/^\s*[·.]\s+\w+.*\.{3}\s*$/.test(line)) return false;
+      // Strip lines that are just whitespace
+      if (/^\s*$/.test(line)) return false;
+      return true;
+    })
+    .join('\n');
+}
+
 /** Check if the buffer contains a ● line at column 0 (proof the orchestrator responded).
  *  Requires ● at start of line — echoed worker screen content is indented, so
  *  indented ● lines (from prompt echo) won't match. */
@@ -127,6 +141,10 @@ export class AutomationEngine {
   private stagnationTimer: unknown = null;
   private consultationMode = false;
   private consultationWaitTimer: unknown = null;
+  private consultationRetryCount = 0;
+  private idleEnteredAt = 0;
+  private idleDurationMs = 0;
+  private readonly maxConsultationRetries = 3;
 
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
@@ -308,8 +326,9 @@ export class AutomationEngine {
       this.cancelStagnationTimer();
     }
 
-    // Start stagnation timer when entering idle
+    // Start stagnation timer when entering idle, record timestamp
     if (newState === 'idle' && oldState !== 'idle') {
+      this.idleEnteredAt = this.timer.now();
       this.startStagnationTimer();
     }
 
@@ -332,12 +351,16 @@ export class AutomationEngine {
 
     // Normal directive cycle (not consultation)
     this.consultationMode = false;
+    this.consultationRetryCount = 0;
 
     this.setState('capturing-worker');
 
+    // Retroactively update previous cycle's outcome with actual screen content
+    this.actionLog.updateLastOutcome(this.workerScreenText.slice(-200));
+
     // Capture worker screen text
     if (this.workerMonitor) {
-      this.workerScreenText = this.workerMonitor.emulator.getScreenText();
+      this.workerScreenText = stripSpinners(this.workerMonitor.emulator.getScreenText());
     }
 
     // Reset clearing buffer before sending /clear
@@ -508,7 +531,7 @@ export class AutomationEngine {
     }
 
     // COMMAND or ENTER -- log and complete cycle
-    this.actionLog.add(result.description, this.workerScreenText.slice(0, 200));
+    this.actionLog.add(result.description, '(awaiting result)');
     this.bus.emit('automation:cycle-complete', this.cycleNumber, result.description);
 
     // Reset worker monitor for next cycle and re-enter idle
@@ -542,7 +565,7 @@ export class AutomationEngine {
 
         // Log and complete cycle
         const description = `SELECT: ${option}`;
-        this.actionLog.add(description, this.workerScreenText.slice(0, 200));
+        this.actionLog.add(description, '(awaiting result)');
         this.bus.emit('automation:cycle-complete', this.cycleNumber, description);
 
         // Reset worker monitor for next cycle
@@ -564,7 +587,7 @@ export class AutomationEngine {
       // SELECT: 1 -- no arrow-downs, just Enter
       this.sessionManager.writeToSession(this.config.workerSession, '\r');
       const description = `SELECT: ${option}`;
-      this.actionLog.add(description, this.workerScreenText.slice(0, 200));
+      this.actionLog.add(description, '(awaiting result)');
       this.bus.emit('automation:cycle-complete', this.cycleNumber, description);
       if (this.workerMonitor) {
         this.workerMonitor.capture.resetBaseline();
@@ -707,9 +730,12 @@ export class AutomationEngine {
 
     this.setState('consulting-orchestrator');
 
-    // Capture worker screen text for the consultation prompt
+    // Calculate idle duration for consultation context
+    this.idleDurationMs = this.timer.now() - this.idleEnteredAt;
+
+    // Capture worker screen text for the consultation prompt (with spinner stripping)
     if (this.workerMonitor) {
-      this.workerScreenText = this.workerMonitor.emulator.getScreenText();
+      this.workerScreenText = stripSpinners(this.workerMonitor.emulator.getScreenText());
     }
 
     // Reset clearing buffer before sending /clear
@@ -738,6 +764,7 @@ export class AutomationEngine {
       workerScreen: this.workerScreenText,
       actionLog: this.actionLog.getRecent(),
       cycleNumber: this.cycleNumber,
+      idleDurationMs: this.idleDurationMs,
     });
 
     // Send prompt text to orchestrator (without Enter)
@@ -776,6 +803,7 @@ export class AutomationEngine {
       debugLog(`[onConsultationResponse] YES — triggering normal cycle via onWorkerIdle`);
       // Orchestrator confirms worker is done — start a normal directive cycle
       this.consultationMode = false;
+      this.consultationRetryCount = 0;
       this.retryAttempted = false;
       this.setState('idle');
       this.onWorkerIdle();
@@ -783,7 +811,20 @@ export class AutomationEngine {
     }
 
     if (directive && directive.type === 'NO') {
-      debugLog(`[onConsultationResponse] NO — waiting ${this.consultationWaitDelay}ms then re-checking`);
+      this.consultationRetryCount++;
+      debugLog(`[onConsultationResponse] NO #${this.consultationRetryCount} — waiting ${this.consultationWaitDelay}ms then re-checking`);
+
+      // After maxConsultationRetries consecutive NOs, force a normal directive cycle
+      if (this.consultationRetryCount >= this.maxConsultationRetries) {
+        debugLog(`[onConsultationResponse] ${this.consultationRetryCount} consecutive NOs — forcing normal directive cycle`);
+        this.consultationRetryCount = 0;
+        this.consultationMode = false;
+        this.retryAttempted = false;
+        this.setState('idle');
+        this.onWorkerIdle();
+        return;
+      }
+
       this.setState('consultation-wait');
 
       // Re-arm worker completion detection during wait so a completion

@@ -1743,6 +1743,162 @@ describe('AutomationEngine', () => {
       'prompt should be consultation (## Question), not directive (## Your Response)');
   });
 
+  // ---------- Test: spinner lines stripped from workerScreenText ----------
+
+  it('spinner lines stripped from workerScreenText before prompt', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Worker emits output containing Claude Code spinner lines
+    const spinnerOutput = 'real output line\r\n  \u00b7 Catapulting...\r\n   \r\nmore real output\r\n\u273B Crunched for 1m 22s\r\n';
+    await emitOutput(bus, 'worker', spinnerOutput);
+    timer.advance(50);  // debounce
+    timer.advance(100); // idle -> onPromptComplete
+
+    // Complete clear and get prompt
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    // Check the prompt sent to orchestrator does NOT contain spinner lines
+    const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('## Task'));
+    assert.ok(promptWrite, 'should send prompt to orchestrator');
+    assert.ok(!promptWrite!.data.includes('Catapulting...'),
+      'prompt should NOT contain spinner lines');
+    assert.ok(promptWrite!.data.includes('real output line'),
+      'prompt should still contain real output lines');
+  });
+
+  // ---------- Test: action outcome logged as "(awaiting result)" then updated retroactively ----------
+
+  it('action outcome logged as "(awaiting result)" then updated in next cycle prompt', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Cycle 1: first cycle
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: npm test'));
+    timer.advance(1000);
+    // Engine is now idle, cycle 1 complete
+
+    // Worker processes the command and produces output
+    await emitOutput(bus, 'worker', completionOutput('Tests passed: 42/42'));
+    timer.advance(50);  // debounce
+    timer.advance(100); // idle -> onPromptComplete -> onWorkerIdle (cycle 2 starts)
+
+    // Complete cycle 2 clear and check prompt
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    // The prompt for cycle 2 should contain the action log from cycle 1.
+    // The outcome should have been retroactively updated (not "(awaiting result)")
+    const promptWrites = writes.filter(w => w.name === 'orchestrator' && w.data.includes('## Task'));
+    const lastPrompt = promptWrites[promptWrites.length - 1];
+    assert.ok(lastPrompt, 'should have sent a prompt for cycle 2');
+    assert.ok(!lastPrompt.data.includes('(awaiting result)'),
+      'cycle 2 prompt should NOT show "(awaiting result)" - it should be retroactively updated');
+  });
+
+  // ---------- Test: 3 consecutive NO responses force normal cycle ----------
+
+  it('3 consecutive NO responses force normal cycle instead of infinite loop', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200, consultationWaitDelay: 300 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Drive to first consultation
+    await driveToConsultationWaiting(engine, bus, timer);
+    assert.equal(engine.state, 'waiting-consultation');
+
+    // NO #1
+    await emitOutput(bus, 'orchestrator', directiveOutput('NO'));
+    timer.advance(1000);
+    assert.equal(engine.state, 'consultation-wait', 'first NO -> consultation-wait');
+
+    // Wait expires -> re-consultation
+    timer.advance(300);
+    assert.equal(engine.state, 'clearing-orchestrator');
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    assert.equal(engine.state, 'waiting-consultation');
+
+    // NO #2
+    await emitOutput(bus, 'orchestrator', directiveOutput('NO'));
+    timer.advance(1000);
+    assert.equal(engine.state, 'consultation-wait', 'second NO -> consultation-wait');
+
+    // Wait expires -> re-consultation
+    timer.advance(300);
+    assert.equal(engine.state, 'clearing-orchestrator');
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    assert.equal(engine.state, 'waiting-consultation');
+
+    // NO #3 -- should force normal cycle, not go to consultation-wait
+    await emitOutput(bus, 'orchestrator', directiveOutput('NO'));
+    timer.advance(1000);
+
+    // After 3 NOs, engine should force a normal directive cycle (clearing-orchestrator, NOT consultation-wait)
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'after 3 consecutive NOs, engine should force normal directive cycle');
+  });
+
+  // ---------- Test: consultation retry count resets on YES ----------
+
+  it('consultation retry count resets on YES (next stagnation starts from 0)', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200, consultationWaitDelay: 300 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Drive to first consultation
+    await driveToConsultationWaiting(engine, bus, timer);
+    assert.equal(engine.state, 'waiting-consultation');
+
+    // NO #1
+    await emitOutput(bus, 'orchestrator', directiveOutput('NO'));
+    timer.advance(1000);
+    assert.equal(engine.state, 'consultation-wait');
+    timer.advance(300);
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    // NO #2
+    await emitOutput(bus, 'orchestrator', directiveOutput('NO'));
+    timer.advance(1000);
+    assert.equal(engine.state, 'consultation-wait');
+    timer.advance(300);
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    // YES (after 2 NOs) -- should reset count
+    await emitOutput(bus, 'orchestrator', directiveOutput('YES'));
+    timer.advance(1000);
+
+    // YES triggers normal directive cycle
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'YES should trigger normal directive cycle');
+
+    // Complete the normal cycle
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test2'));
+    timer.advance(1000);
+    // Engine is now idle
+
+    // Second stagnation -> consultation
+    timer.advance(200);
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    // Now we can do 3 NOs again (proves counter was reset)
+    // NO #1 (of new sequence)
+    await emitOutput(bus, 'orchestrator', directiveOutput('NO'));
+    timer.advance(1000);
+    assert.equal(engine.state, 'consultation-wait',
+      'first NO of new sequence should go to consultation-wait (count was reset)');
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------
