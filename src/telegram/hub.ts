@@ -163,6 +163,50 @@ function buildText(
   execStateMap: Map<string, 'busy' | 'idle'> = new Map(),
   automationHub?: AutomationHubRenderer | null,
 ): string {
+  // When automation is active or pending, replace entire view with automation hub content
+  const activeAuto = automationHub?.activeAutomationInfo ?? null;
+  const pendingCreation = automationHub?.pendingCreationInfo ?? null;
+
+  if (activeAuto) {
+    const autoLines = [
+      '<b>Automation Hub</b>',
+      '',
+      `Worker: <b>${activeAuto.workerSession}</b> -> Orchestrator: <b>${activeAuto.orchestratorSession}</b>`,
+      `Task: ${activeAuto.taskDescription}`,
+      '',
+      `Status: ${activeAuto.engine.state} | Cycles: ${activeAuto.cycleCount}`,
+    ];
+    if (activeAuto.lastAction) {
+      autoLines.push(`Last: ${activeAuto.lastAction}`);
+    }
+    return autoLines.join('\n');
+  }
+
+  if (pendingCreation) {
+    const stepTexts: Record<string, string[]> = {
+      'select-worker': [
+        '<b>Automation Hub</b>',
+        '',
+        'Select worker session:',
+      ],
+      'select-orchestrator': [
+        '<b>Automation Hub</b>',
+        '',
+        `Worker: <b>${pendingCreation.workerSession}</b>`,
+        'Select orchestrator session:',
+      ],
+      'enter-task': [
+        '<b>Automation Hub</b>',
+        '',
+        `Worker: <b>${pendingCreation.workerSession}</b>`,
+        `Orchestrator: <b>${pendingCreation.orchestratorSession}</b>`,
+        '',
+        'Type your task description below.',
+      ],
+    };
+    return (stepTexts[pendingCreation.step] ?? ['<b>Automation Hub</b>']).join('\n');
+  }
+
   if (sessions.length === 0) {
     return [
       '<b>Sessions Hub</b>',
@@ -174,32 +218,30 @@ function buildText(
 
   const header = `<b>Sessions Hub</b>  (${sessions.length} session${sessions.length !== 1 ? 's' : ''})`;
 
-  const activeAuto = automationHub?.activeAutomationInfo ?? null;
-
   const lines = sessions.map((s) => {
     const isViewing = s.name === activeSession;
     const prefix = isViewing ? '> ' : '   ';
     const viewState = isViewing ? 'viewing' : 'hidden';
 
-    // Determine emoji status indicator
+    // Determine emoji status indicator and execution state text
     let emoji: string;
-    if (activeAuto && activeAuto.workerSession === s.name) {
-      // Worker in active automation -- robot + engine state abbreviation
-      emoji = `\uD83E\uDD16 ${activeAuto.engine.state}`;
-    } else if (activeAuto && activeAuto.orchestratorSession === s.name) {
-      // Orchestrator in active automation
-      emoji = '\uD83C\uDFAF';
-    } else if (s.status === 'remote') {
+    let execState: string;
+    if (s.status === 'remote') {
       emoji = '\uD83C\uDF10';
+      execState = execStateMap.get(s.name) ?? 'idle';
     } else if (s.status === 'stopped') {
       emoji = '\uD83D\uDD34';
-    } else {
-      // Running session -- check exec state
-      const execState = execStateMap.get(s.name) ?? 'idle';
+      execState = s.status;
+    } else if (s.status === 'running') {
+      execState = execStateMap.get(s.name) ?? 'idle';
       emoji = execState === 'busy' ? '\uD83D\uDFE0' : '\uD83D\uDFE2';
+    } else {
+      // Non-running status (starting, etc)
+      emoji = '\u26AA';
+      execState = s.status;
     }
 
-    let line = `${prefix}${emoji} <b>${s.name}</b> -- ${viewState}`;
+    let line = `${prefix}${emoji} <b>${s.name}</b> -- ${viewState} \u00B7 ${execState}`;
     if (advanced) {
       const pid = s.pid != null ? String(s.pid) : '?';
       let since = '?';
@@ -219,34 +261,7 @@ function buildText(
     return line;
   });
 
-  let result = `${header}\n\n${lines.join('\n')}`;
-
-  // Append automation status section if applicable
-  if (activeAuto) {
-    const autoLines = [
-      '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500',
-      `\uD83E\uDD16 Automation: ${activeAuto.engine.state} | Cycles: ${activeAuto.cycleCount}`,
-      `Worker: ${activeAuto.workerSession} \u2192 Orch: ${activeAuto.orchestratorSession}`,
-      `Task: ${activeAuto.taskDescription}`,
-    ];
-    if (activeAuto.lastAction) {
-      autoLines.push(`Last: ${activeAuto.lastAction}`);
-    }
-    result += '\n\n' + autoLines.join('\n');
-  } else if (automationHub?.pendingCreationInfo) {
-    const pending = automationHub.pendingCreationInfo;
-    const stepLabels: Record<string, string> = {
-      'select-worker': 'Select worker session',
-      'select-orchestrator': `Worker: ${pending.workerSession ?? '?'} \u2014 Select orchestrator`,
-      'enter-task': `Worker: ${pending.workerSession ?? '?'} \u2192 Orch: ${pending.orchestratorSession ?? '?'} \u2014 Enter task`,
-    };
-    result += '\n\n' + [
-      '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500',
-      `\uD83E\uDD16 Setup: ${stepLabels[pending.step] ?? pending.step}`,
-    ].join('\n');
-  }
-
-  return result;
+  return `${header}\n\n${lines.join('\n')}`;
 }
 
 /** Build inline keyboard with switch/disconnect buttons per session. */
@@ -261,6 +276,46 @@ function buildKeyboard(
   const activeAuto = automationHub?.activeAutomationInfo ?? null;
   const pendingCreation = automationHub?.pendingCreationInfo ?? null;
 
+  // When automation is active or pending, return ONLY automation buttons (no session rows)
+  if (activeAuto) {
+    const engineState = activeAuto.engine.state;
+    if (engineState === 'paused') {
+      keyboard.push([
+        { text: '\u25B6\uFE0F Resume', callback_data: 'auto:resume' },
+        { text: '\uD83D\uDED1 Stop', callback_data: 'auto:stop' },
+      ]);
+    } else {
+      keyboard.push([
+        { text: '\u23F8 Pause', callback_data: 'auto:pause' },
+        { text: '\uD83D\uDED1 Stop', callback_data: 'auto:stop' },
+      ]);
+    }
+    keyboard.push([
+      { text: '\uD83D\uDD04 Refresh', callback_data: 'hub:refresh' },
+    ]);
+    return { inline_keyboard: keyboard };
+  }
+
+  if (pendingCreation) {
+    if (pendingCreation.step === 'select-worker') {
+      for (const s of sessions) {
+        keyboard.push([{ text: `\uD83D\uDD27 ${s.name}`, callback_data: `auto:w:${s.name}` }]);
+      }
+      keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
+    } else if (pendingCreation.step === 'select-orchestrator') {
+      for (const s of sessions) {
+        if (s.name !== pendingCreation.workerSession) {
+          keyboard.push([{ text: `\uD83C\uDFAF ${s.name}`, callback_data: `auto:o:${s.name}` }]);
+        }
+      }
+      keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
+    } else if (pendingCreation.step === 'enter-task') {
+      keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
+    }
+    return { inline_keyboard: keyboard };
+  }
+
+  // Session rows (only when no automation is active/pending)
   for (const s of sessions) {
     const row: Array<{ text: string; callback_data: string }> = [];
 
@@ -290,39 +345,8 @@ function buildKeyboard(
     { text: '\uD83D\uDD04 Refresh', callback_data: 'hub:refresh' },
   ]);
 
-  // Automation control rows
-  if (activeAuto) {
-    const engineState = activeAuto.engine.state;
-    if (engineState === 'paused') {
-      keyboard.push([
-        { text: '\u25B6\uFE0F Resume', callback_data: 'auto:resume' },
-        { text: '\uD83D\uDED1 Stop', callback_data: 'auto:stop' },
-      ]);
-    } else {
-      keyboard.push([
-        { text: '\u23F8 Pause', callback_data: 'auto:pause' },
-        { text: '\uD83D\uDED1 Stop', callback_data: 'auto:stop' },
-      ]);
-    }
-  } else if (pendingCreation) {
-    // Show creation flow buttons
-    if (pendingCreation.step === 'select-worker') {
-      for (const s of sessions) {
-        keyboard.push([{ text: `\uD83D\uDD27 ${s.name}`, callback_data: `auto:w:${s.name}` }]);
-      }
-      keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
-    } else if (pendingCreation.step === 'select-orchestrator') {
-      for (const s of sessions) {
-        if (s.name !== pendingCreation.workerSession) {
-          keyboard.push([{ text: `\uD83C\uDFAF ${s.name}`, callback_data: `auto:o:${s.name}` }]);
-        }
-      }
-      keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
-    } else if (pendingCreation.step === 'enter-task') {
-      keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
-    }
-  } else if (automationHub) {
-    // Idle: show Automate button
+  // Idle automation: show Automate button
+  if (automationHub) {
     keyboard.push([{ text: '\uD83E\uDD16 Automate', callback_data: 'auto:new' }]);
   }
 
