@@ -47,30 +47,6 @@ describe('executeDirective', () => {
     assert.strictEqual(result.description, 'ENTER');
   });
 
-  it('WAIT with delaySeconds returns waitSeconds and does NOT write', () => {
-    const writes: string[] = [];
-    const writeFn = (data: string) => { writes.push(data); };
-
-    const result = executeDirective({ type: 'WAIT', delaySeconds: 30 }, writeFn);
-
-    assert.deepStrictEqual(writes, []);
-    assert.strictEqual(result.executed, true);
-    assert.strictEqual(result.description, 'WAIT: 30s');
-    assert.strictEqual(result.waitSeconds, 30);
-  });
-
-  it('WAIT without delaySeconds uses DEFAULT_WAIT_SECONDS (10)', () => {
-    const writes: string[] = [];
-    const writeFn = (data: string) => { writes.push(data); };
-
-    const result = executeDirective({ type: 'WAIT' }, writeFn);
-
-    assert.deepStrictEqual(writes, []);
-    assert.strictEqual(result.executed, true);
-    assert.strictEqual(result.description, 'WAIT: 10s');
-    assert.strictEqual(result.waitSeconds, 10);
-  });
-
   it('ESCALATE returns escalateReason, sets executed=false, does NOT write', () => {
     const writes: string[] = [];
     const writeFn = (data: string) => { writes.push(data); };

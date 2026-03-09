@@ -37,15 +37,15 @@ describe('parseDirective', () => {
     });
   });
 
-  describe('WAIT directive', () => {
-    it('returns WAIT without delaySeconds when bare WAIT', () => {
+  describe('WAIT directive (removed -- returns null)', () => {
+    it('returns null for bare WAIT (graceful no-op)', () => {
       const result = parseDirective('processing\n● WAIT\nstill going');
-      assert.deepStrictEqual(result, { type: 'WAIT' });
+      assert.strictEqual(result, null);
     });
 
-    it('returns WAIT with delaySeconds when WAIT: N given', () => {
+    it('returns null for WAIT: N (graceful no-op)', () => {
       const result = parseDirective('processing\n● WAIT: 30\nstill going');
-      assert.deepStrictEqual(result, { type: 'WAIT', delaySeconds: 30 });
+      assert.strictEqual(result, null);
     });
   });
 
@@ -118,9 +118,9 @@ describe('parseDirective', () => {
       assert.deepStrictEqual(result, { type: 'SELECT', option: 2 });
     });
 
-    it('strips ● prefix from WAIT directive', () => {
+    it('returns null for ● WAIT: 10 (removed directive)', () => {
       const result = parseDirective('● WAIT: 10');
-      assert.deepStrictEqual(result, { type: 'WAIT', delaySeconds: 10 });
+      assert.strictEqual(result, null);
     });
 
     it('strips ● prefix from ENTER directive', () => {
