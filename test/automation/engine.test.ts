@@ -1697,6 +1697,52 @@ describe('AutomationEngine', () => {
     assert.ok(escalations.length >= 1, 'should emit escalation after double failure');
   });
 
+  it('consultation NO wait timer: idle prompt on worker screen does not false-positive into normal cycle', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200, consultationWaitDelay: 300 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    await driveToConsultationWaiting(engine, bus, timer);
+    assert.equal(engine.state, 'waiting-consultation', 'should be waiting for consultation response');
+
+    // Orchestrator responds NO
+    await emitOutput(bus, 'orchestrator', directiveOutput('NO'));
+    timer.advance(1000); // response poll fires, finds NO directive
+
+    assert.equal(engine.state, 'consultation-wait',
+      'NO response should transition to consultation-wait');
+
+    // Simulate Claude Code TUI showing bare idle prompt on worker screen
+    // (this is always present in Claude Code TUI even when worker is busy)
+    await emitOutput(bus, 'worker', '\u276F \r\n');
+    await flush();
+
+    // Advance past consultationWaitDelay — timer fires
+    timer.advance(300);
+
+    // BUG: Before fix, engine would see hasIdlePrompt=true and start normal cycle
+    // FIXED: Engine should re-enter consultation (clearing-orchestrator) not normal cycle
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'idle prompt on worker screen should NOT cause false-positive normal cycle; should re-consult');
+
+    // Complete the re-consultation clear + prompt and verify it's a consultation prompt
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires
+    timer.advance(500);  // settling delay -> onConsultationClearComplete
+    timer.advance(50);   // baseDelay -> Enter sent -> waiting-consultation
+
+    assert.equal(engine.state, 'waiting-consultation',
+      'should be waiting for re-consultation response');
+
+    // Verify the prompt sent is a consultation prompt (## Question), not directive (## Your Response)
+    const lastPromptWrite = writes
+      .filter(w => w.name === 'orchestrator' && (w.data.includes('## Question') || w.data.includes('## Your Response')))
+      .pop();
+    assert.ok(lastPromptWrite, 'should have sent a prompt to orchestrator');
+    assert.ok(lastPromptWrite?.data.includes('## Question'),
+      'prompt should be consultation (## Question), not directive (## Your Response)');
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------
