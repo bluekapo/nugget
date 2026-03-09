@@ -806,17 +806,18 @@ export class AutomationEngine {
         if (this._state !== 'consultation-wait') return;
 
         debugLog(`[consultation-wait] timer expired — re-checking worker stagnation`);
-        // Check if worker produced a completion marker during the wait
+        // Check if worker produced a completion marker during the wait.
+        // NOTE: We only check for the completion marker (✻ Crunched for Xm Ys),
+        // NOT the idle prompt (❯). The idle prompt is always visible in Claude Code
+        // TUI even while the worker is actively working, so checking it would
+        // always false-positive into a normal cycle, treating NO as YES.
         if (this.workerMonitor) {
           const screen = this.workerMonitor.emulator.getScreenText();
-          const hasIdlePrompt = screen.split('\n').some(
-            line => /^\u276F\s*$/.test(line)
-          );
           const hasMarker = screen.split('\n').some(
             line => /\u273B .+ for (?:\d+m )?\d+s/.test(line)
           );
-          if (hasIdlePrompt || hasMarker) {
-            debugLog(`[consultation-wait] worker idle detected during wait — starting normal cycle`);
+          if (hasMarker) {
+            debugLog(`[consultation-wait] completion marker detected during wait — starting normal cycle`);
             this.consultationMode = false;
             this.retryAttempted = false;
             this.setState('idle');
