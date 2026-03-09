@@ -364,15 +364,14 @@ export class AutomationEngine {
 
     this.setState('capturing-worker');
 
-    // Retroactively update previous cycle's outcome with actual screen content
-    this.actionLog.updateLastOutcome(this.workerScreenText.slice(-200));
-
-    // Capture worker screen text
+    // Capture worker screen text FIRST — this shows the result of the previous command.
+    // Must happen before updateLastOutcome so we use the fresh screen, not the stale
+    // one from the previous cycle's capture (which was taken before that command was sent).
     if (this.workerMonitor) {
       const rawScreen = this.workerMonitor.emulator.getScreenText();
       this.workerScreenText = stripSpinners(rawScreen);
 
-      // Debug: dump buffer diagnostics to understand garbled screen content
+      // Debug: dump buffer diagnostics
       const diag = this.workerMonitor.emulator.getBufferDiagnostics();
       debugLog(`[onWorkerIdle] BUFFER DIAG: bufLen=${diag.bufferLength} baseY=${diag.baseY} viewportY=${diag.viewportY} cursor=(${diag.cursorX},${diag.cursorY}) dims=${diag.cols}x${diag.rows} scrollback=${diag.scrollbackLines}`);
       debugLog(`[onWorkerIdle] SCROLLBACK TAIL (last ${diag.scrollbackTail.length} lines):\n${diag.scrollbackTail.join('\n')}`);
@@ -383,6 +382,16 @@ export class AutomationEngine {
       // Log scrollback text — Ink doesn't touch scrollback, so it's clean
       const scrollback = this.workerMonitor.emulator.getScrollbackText();
       debugLog(`[onWorkerIdle] SCROLLBACK TEXT (${scrollback.length} chars, last 2000):\n${scrollback.slice(-2000)}`);
+    }
+
+    // NOW retroactively update previous cycle's outcome with the fresh screen content.
+    // Use scrollback + viewport for a fuller picture of the worker's response.
+    if (this.workerMonitor) {
+      const scrollback = this.workerMonitor.emulator.getScrollbackText();
+      const fullText = scrollback ? scrollback + '\n' + this.workerScreenText : this.workerScreenText;
+      this.actionLog.updateLastOutcome(fullText.slice(-1000));
+    } else {
+      this.actionLog.updateLastOutcome(this.workerScreenText.slice(-1000));
     }
 
     // Reset clearing buffer before sending /clear
