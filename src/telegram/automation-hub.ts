@@ -236,8 +236,8 @@ export class AutomationHubRenderer {
       this.onRender?.();
     };
 
-    this.doneHandler = (summary: string) => {
-      this.api.sendMessage(this.chatId, `\u2705 Automation complete: ${summary}`, {
+    this.doneHandler = (_summary: string) => {
+      this.api.sendMessage(this.chatId, '\u2705 Automation complete', {
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
