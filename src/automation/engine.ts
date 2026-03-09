@@ -109,6 +109,12 @@ export interface EngineConfig {
   /** Optional callback to trigger a PTY redraw on the orchestrator session.
    *  Used to flush stuck IPC output when the remote TUI goes idle after rendering. */
   requestOrchestratorRedraw?: () => void;
+  /** PTY dimensions for the monitoring emulators.
+   *  MUST match the actual PTY dimensions so cursor positioning from Ink's TUI
+   *  renders correctly. Mismatch causes garbled screen captures.
+   *  Default: 120 cols, 40 rows. */
+  ptyCols?: number;
+  ptyRows?: number;
 }
 
 interface SessionMonitor {
@@ -307,7 +313,10 @@ export class AutomationEngine {
   }
 
   private createMonitor(): SessionMonitor {
-    const emulator = new TerminalEmulator(120, 40);
+    const cols = this.config.ptyCols ?? 120;
+    const rows = this.config.ptyRows ?? 40;
+    debugLog(`[createMonitor] creating emulator with dims=${cols}x${rows}`);
+    const emulator = new TerminalEmulator(cols, rows);
     const capture = new ScreenCapture(emulator, () => {}, {
       timer: this.timer,
       baseDelay: this.baseDelay,

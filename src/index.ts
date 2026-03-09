@@ -156,6 +156,8 @@ async function startPrimary(
         {
           ...engineConfig,
           maxCycles: settingsStore.getNumber('cycle_limit', 100),
+          ptyCols,
+          ptyRows,
           requestOrchestratorRedraw: () => {
             const bridge = router.getRemoteBridge(engineConfig.orchestratorSession);
             if (bridge) {
@@ -635,6 +637,8 @@ async function becomeNewPrimary(
           {
             ...engineConfig,
             maxCycles: settingsStore.getNumber('cycle_limit', 100),
+            ptyCols,
+            ptyRows,
             requestOrchestratorRedraw: () => {
               const bridge = router.getRemoteBridge(engineConfig.orchestratorSession);
               if (bridge) {
