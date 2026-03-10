@@ -252,6 +252,46 @@ describe('buildConsultationPrompt', () => {
     );
   });
 
+  it('output contains How to Determine guidance section', () => {
+    const prompt = buildConsultationPrompt(basePacket);
+    assert.ok(
+      prompt.includes('How to Determine'),
+      `Expected "How to Determine" header in consultation prompt:\n${prompt}`
+    );
+  });
+
+  it('guidance mentions idle prompt indicator', () => {
+    const prompt = buildConsultationPrompt(basePacket);
+    assert.ok(
+      prompt.includes('idle prompt') || prompt.includes('ready for input'),
+      `Expected idle prompt indicator guidance in consultation prompt:\n${prompt}`
+    );
+  });
+
+  it('guidance mentions timing/completion line indicator', () => {
+    const prompt = buildConsultationPrompt(basePacket);
+    assert.ok(
+      prompt.includes('Cooked') || prompt.includes('Brewed'),
+      `Expected timing line indicator guidance in consultation prompt:\n${prompt}`
+    );
+  });
+
+  it('guidance mentions follow-up suggestions indicator', () => {
+    const prompt = buildConsultationPrompt(basePacket);
+    assert.ok(
+      prompt.includes('Follow-up suggestions') || prompt.includes('follow-up suggestions'),
+      `Expected follow-up suggestions indicator guidance in consultation prompt:\n${prompt}`
+    );
+  });
+
+  it('guidance says NO only when actively processing', () => {
+    const prompt = buildConsultationPrompt(basePacket);
+    assert.ok(
+      prompt.includes('actively processing') || prompt.includes('spinner'),
+      `Expected guidance about answering NO only when actively processing:\n${prompt}`
+    );
+  });
+
   it('output does NOT contain directive instructions (COMMAND, SELECT, etc.)', () => {
     const prompt = buildConsultationPrompt(basePacket);
     // Should NOT have the directive instruction block
