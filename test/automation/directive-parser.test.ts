@@ -432,4 +432,113 @@ describe('parseDirectiveWithContext', () => {
     assert.strictEqual(result.directive, null);
     assert.strictEqual(result.context, 'project uses React');
   });
+
+  describe('single-bullet CONTEXT + directive (relaxed parsing)', () => {
+    it('single ● with CONTEXT + COMMAND returns both', () => {
+      const text = '● CONTEXT: info\nCOMMAND: npm test';
+      const result = parseDirectiveWithContext(text);
+      assert.deepStrictEqual(result.directive, { type: 'COMMAND', command: 'npm test' });
+      assert.strictEqual(result.context, 'info');
+    });
+
+    it('single ● with CONTEXT + ESCALATE returns both', () => {
+      const text = '● CONTEXT: info\nESCALATE: task done';
+      const result = parseDirectiveWithContext(text);
+      assert.deepStrictEqual(result.directive, { type: 'ESCALATE', reason: 'task done' });
+      assert.strictEqual(result.context, 'info');
+    });
+
+    it('single ● with CONTEXT + DONE returns both', () => {
+      const text = '● CONTEXT: info\nDONE: all good';
+      const result = parseDirectiveWithContext(text);
+      assert.deepStrictEqual(result.directive, { type: 'DONE', summary: 'all good' });
+      assert.strictEqual(result.context, 'info');
+    });
+
+    it('single ● with CONTEXT + CLEAR returns both', () => {
+      const text = '● CONTEXT: info\nCLEAR';
+      const result = parseDirectiveWithContext(text);
+      assert.deepStrictEqual(result.directive, { type: 'CLEAR' });
+      assert.strictEqual(result.context, 'info');
+    });
+
+    it('single ● with CONTEXT + ENTER returns both', () => {
+      const text = '● CONTEXT: info\nENTER';
+      const result = parseDirectiveWithContext(text);
+      assert.deepStrictEqual(result.directive, { type: 'ENTER' });
+      assert.strictEqual(result.context, 'info');
+    });
+
+    it('single ● with CONTEXT + RESET returns both', () => {
+      const text = '● CONTEXT: info\nRESET';
+      const result = parseDirectiveWithContext(text);
+      assert.deepStrictEqual(result.directive, { type: 'RESET' });
+      assert.strictEqual(result.context, 'info');
+    });
+
+    it('two-● response still works (regression check)', () => {
+      const text = '● CONTEXT: info\n● COMMAND: npm test';
+      const result = parseDirectiveWithContext(text);
+      assert.deepStrictEqual(result.directive, { type: 'COMMAND', command: 'npm test' });
+      assert.strictEqual(result.context, 'info');
+    });
+
+    it('bare COMMAND without any ● still returns null from parseDirective (safety)', () => {
+      const result = parseDirective('COMMAND: npm test');
+      assert.strictEqual(result, null);
+    });
+  });
+
+  describe('collectContinuation stops at directive keywords', () => {
+    it('CONTEXT text does not swallow COMMAND: line', () => {
+      const text = '● CONTEXT: first\nCOMMAND: npm test';
+      const context = parseContextBlock(text);
+      assert.strictEqual(context, 'first');
+    });
+
+    it('CONTEXT text does not swallow ESCALATE: line', () => {
+      const text = '● CONTEXT: first\nESCALATE: reason';
+      const context = parseContextBlock(text);
+      assert.strictEqual(context, 'first');
+    });
+
+    it('CONTEXT text does not swallow DONE: line', () => {
+      const text = '● CONTEXT: first\nDONE: summary';
+      const context = parseContextBlock(text);
+      assert.strictEqual(context, 'first');
+    });
+
+    it('CONTEXT text does not swallow CLEAR line', () => {
+      const text = '● CONTEXT: first\nCLEAR';
+      const context = parseContextBlock(text);
+      assert.strictEqual(context, 'first');
+    });
+
+    it('CONTEXT text does not swallow ENTER line', () => {
+      const text = '● CONTEXT: first\nENTER';
+      const context = parseContextBlock(text);
+      assert.strictEqual(context, 'first');
+    });
+
+    it('CONTEXT text does not swallow RESET line', () => {
+      const text = '● CONTEXT: first\nRESET';
+      const context = parseContextBlock(text);
+      assert.strictEqual(context, 'first');
+    });
+  });
+
+  describe('single-bullet CONTEXT + multi-line COMMAND', () => {
+    it('collects wrapped COMMAND after CONTEXT without ●', () => {
+      const text = [
+        '● CONTEXT: project info here',
+        'COMMAND: npm run build && npm test',
+        '  --coverage --filter=auth',
+      ].join('\n');
+      const result = parseDirectiveWithContext(text);
+      assert.strictEqual(result.context, 'project info here');
+      assert.ok(result.directive);
+      assert.strictEqual(result.directive!.type, 'COMMAND');
+      assert.strictEqual((result.directive as any).command, 'npm run build && npm test --coverage --filter=auth');
+    });
+  });
 });
