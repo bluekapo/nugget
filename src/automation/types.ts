@@ -74,6 +74,12 @@ export interface ActionEntry {
   timestamp: number;
 }
 
+export interface CompressedActionLog {
+  summary: string | null;  // null when entry count <= recentCount
+  recent: ActionEntry[];   // most recent entries in full detail
+  totalCount: number;      // total entries ever recorded
+}
+
 export interface ContextPacket {
   taskDescription: string;
   workerScreen: string;
