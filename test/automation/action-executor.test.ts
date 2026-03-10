@@ -70,4 +70,26 @@ describe('executeDirective', () => {
     assert.strictEqual(result.description, 'DONE: All tests pass');
     assert.strictEqual(result.doneSummary, 'All tests pass');
   });
+
+  it('CLEAR returns executed=false with description, does NOT write', () => {
+    const writes: string[] = [];
+    const writeFn = (data: string) => { writes.push(data); };
+
+    const result = executeDirective({ type: 'CLEAR' }, writeFn);
+
+    assert.deepStrictEqual(writes, [], 'CLEAR should NOT call writeFn');
+    assert.strictEqual(result.executed, false);
+    assert.strictEqual(result.description, 'CLEAR');
+  });
+
+  it('RESET returns executed=false with description, does NOT write', () => {
+    const writes: string[] = [];
+    const writeFn = (data: string) => { writes.push(data); };
+
+    const result = executeDirective({ type: 'RESET' }, writeFn);
+
+    assert.deepStrictEqual(writes, [], 'RESET should NOT call writeFn');
+    assert.strictEqual(result.executed, false);
+    assert.strictEqual(result.description, 'RESET');
+  });
 });
