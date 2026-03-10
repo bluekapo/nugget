@@ -163,25 +163,10 @@ function buildText(
   execStateMap: Map<string, 'busy' | 'idle'> = new Map(),
   automationHub?: AutomationHubRenderer | null,
 ): string {
-  // When automation is active or pending, replace entire view with automation hub content
   const activeAuto = automationHub?.activeAutomationInfo ?? null;
   const pendingCreation = automationHub?.pendingCreationInfo ?? null;
 
-  if (activeAuto) {
-    const autoLines = [
-      '<b>Automation Hub</b>',
-      '',
-      `Worker: <b>${activeAuto.workerSession}</b> -> Orchestrator: <b>${activeAuto.orchestratorSession}</b>`,
-      `Task: ${activeAuto.taskDescription}`,
-      '',
-      `Status: ${activeAuto.engine.state} | Cycles: ${activeAuto.cycleCount}`,
-    ];
-    if (activeAuto.lastAction) {
-      autoLines.push(`Last: ${activeAuto.lastAction}`);
-    }
-    return autoLines.join('\n');
-  }
-
+  // Pending creation flow still replaces the hub (user is actively configuring)
   if (pendingCreation) {
     const stepTexts: Record<string, string[]> = {
       'select-worker': [
@@ -219,12 +204,16 @@ function buildText(
   }
 
   if (sessions.length === 0) {
-    return [
+    const emptyLines = [
       '<b>Sessions Hub</b>',
       '',
       'No sessions connected.',
       'Start a session with: npm run dev -- session-name',
-    ].join('\n');
+    ];
+    if (activeAuto) {
+      emptyLines.push('', '\uD83E\uDD16 1 automation in progress');
+    }
+    return emptyLines.join('\n');
   }
 
   const header = `<b>Sessions Hub</b>  (${sessions.length} session${sessions.length !== 1 ? 's' : ''})`;
@@ -272,7 +261,11 @@ function buildText(
     return line;
   });
 
-  return `${header}\n\n${lines.join('\n')}`;
+  let result = `${header}\n\n${lines.join('\n')}`;
+  if (activeAuto) {
+    result += '\n\n\uD83E\uDD16 1 automation in progress';
+  }
+  return result;
 }
 
 /** Build inline keyboard with switch/disconnect buttons per session. */
@@ -287,26 +280,7 @@ function buildKeyboard(
   const activeAuto = automationHub?.activeAutomationInfo ?? null;
   const pendingCreation = automationHub?.pendingCreationInfo ?? null;
 
-  // When automation is active or pending, return ONLY automation buttons (no session rows)
-  if (activeAuto) {
-    const engineState = activeAuto.engine.state;
-    if (engineState === 'paused') {
-      keyboard.push([
-        { text: '\u25B6\uFE0F Resume', callback_data: 'auto:resume' },
-        { text: '\uD83D\uDED1 Stop', callback_data: 'auto:stop' },
-      ]);
-    } else {
-      keyboard.push([
-        { text: '\u23F8 Pause', callback_data: 'auto:pause' },
-        { text: '\uD83D\uDED1 Stop', callback_data: 'auto:stop' },
-      ]);
-    }
-    keyboard.push([
-      { text: '\uD83D\uDD04 Refresh', callback_data: 'hub:refresh' },
-    ]);
-    return { inline_keyboard: keyboard };
-  }
-
+  // Pending creation flow still replaces the keyboard (user is actively configuring)
   if (pendingCreation) {
     if (pendingCreation.step === 'select-worker') {
       for (const s of sessions) {
@@ -362,8 +336,10 @@ function buildKeyboard(
     { text: '\uD83D\uDD04 Refresh', callback_data: 'hub:refresh' },
   ]);
 
-  // Idle automation: show Automate button
-  if (automationHub) {
+  // Automation button: show status link when active, or new automation button when idle
+  if (activeAuto) {
+    keyboard.push([{ text: '\uD83E\uDD16 Automations (1)', callback_data: 'hub:automations' }]);
+  } else if (automationHub) {
     keyboard.push([{ text: '\uD83E\uDD16 Automate', callback_data: 'auto:new' }]);
   }
 

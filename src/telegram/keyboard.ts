@@ -115,7 +115,7 @@ export function registerCallbackHandlers(
   toggleAdvanced?: () => Promise<void>,
   onShutdown?: () => Promise<void>,
   deleteHub?: () => Promise<void>,
-  automationHub?: { handleCallback(data: string): Promise<string>; render(): Promise<void> },
+  automationHub?: { handleCallback(data: string): Promise<string>; render(opts?: { forceNew?: boolean }): Promise<void> },
   settingsStore?: SettingsStore,
 ): void {
   // Enter confirmation: double-press state
@@ -256,6 +256,14 @@ export function registerCallbackHandlers(
     bot.callbackQuery('hub:advanced', async (ctx) => {
       await toggleAdvanced();
       await ctx.answerCallbackQuery();
+    });
+  }
+
+  // Hub: open automation hub as separate message
+  if (automationHub) {
+    bot.callbackQuery('hub:automations', async (ctx) => {
+      await automationHub.render({ forceNew: true });
+      await ctx.answerCallbackQuery({ text: 'Automation hub opened' });
     });
   }
 

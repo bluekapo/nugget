@@ -661,6 +661,129 @@ describe('HubRenderer', () => {
     });
   });
 
+  describe('active automation', () => {
+    function createMockAutomationHub(active: boolean) {
+      return {
+        get activeAutomationInfo() {
+          if (!active) return null;
+          return {
+            engine: { state: 'executing' },
+            workerSession: 'worker-1',
+            orchestratorSession: 'orch-1',
+            taskDescription: 'Fix bugs',
+            cycleCount: 5,
+            lastAction: 'COMMAND: npm test',
+          };
+        },
+        get pendingCreationInfo() { return null; },
+      };
+    }
+
+    it('buildText shows normal session list with automation status line when active', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      hub.setAutomationHub(createMockAutomationHub(true) as any);
+
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(sentText.includes('<b>Sessions Hub</b>'), 'should show Sessions Hub header, not Automation Hub');
+      assert.ok(sentText.includes('<b>worker-1</b>'), 'should show worker session in list');
+      assert.ok(sentText.includes('<b>orch-1</b>'), 'should show orchestrator session in list');
+      assert.ok(sentText.includes('\uD83E\uDD16 1 automation in progress'), 'should show automation status line');
+      assert.ok(!sentText.includes('Automation Hub'), 'should NOT show Automation Hub header');
+    });
+
+    it('buildText shows automation status even with no sessions', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => null);
+      hub.setAutomationHub(createMockAutomationHub(true) as any);
+
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(sentText.includes('No sessions connected.'), 'should show empty state');
+      assert.ok(sentText.includes('\uD83E\uDD16 1 automation in progress'), 'should show automation status');
+    });
+
+    it('buildKeyboard shows normal session buttons with Automations button when active', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      hub.setAutomationHub(createMockAutomationHub(true) as any);
+
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'should have inline keyboard');
+
+      const allBtns: Array<{ text: string; callback_data: string }> = [];
+      for (const row of keyboard as any[][]) {
+        for (const btn of row) {
+          if (btn.callback_data) allBtns.push(btn);
+        }
+      }
+
+      // Should have normal hub buttons
+      assert.ok(allBtns.some(b => b.callback_data === 'hub:switch:orch-1'), 'should have switch button for non-active session');
+      assert.ok(allBtns.some(b => b.callback_data === 'hub:disconnect:worker-1'), 'should have disconnect button');
+      assert.ok(allBtns.some(b => b.callback_data === 'hub:advanced'), 'should have details toggle');
+      assert.ok(allBtns.some(b => b.callback_data === 'hub:refresh'), 'should have refresh button');
+
+      // Should have Automations button instead of Automate
+      const autoBtn = allBtns.find(b => b.callback_data === 'hub:automations');
+      assert.ok(autoBtn, 'should have Automations button');
+      assert.ok(autoBtn!.text.includes('Automations (1)'), 'button text should show count');
+      assert.ok(!allBtns.some(b => b.callback_data === 'auto:new'), 'should NOT have Automate button when active');
+    });
+
+    it('buildKeyboard shows Automate button when no automation active', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'session-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'session-1');
+      hub.setAutomationHub(createMockAutomationHub(false) as any);
+
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      const allBtns: Array<{ text: string; callback_data: string }> = [];
+      for (const row of keyboard as any[][]) {
+        for (const btn of row) {
+          if (btn.callback_data) allBtns.push(btn);
+        }
+      }
+
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:new'), 'should have Automate button when idle');
+      assert.ok(!allBtns.some(b => b.callback_data === 'hub:automations'), 'should NOT have Automations button when idle');
+    });
+
+    it('buildText does not show automation status line when no automation active', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'session-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'session-1');
+      hub.setAutomationHub(createMockAutomationHub(false) as any);
+
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(!sentText.includes('automation in progress'), 'should not show status when no automation');
+    });
+  });
+
   describe('error helpers', () => {
     it('isNotModifiedError detects "not modified" in message', () => {
       assert.equal(isNotModifiedError(new Error('message is not modified')), true);
