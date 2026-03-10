@@ -1785,6 +1785,243 @@ describe('AutomationEngine', () => {
       'first NO of new sequence should go to consultation-wait (count was reset)');
   });
 
+  // ========== CLEAR directive flow ==========
+
+  describe('CLEAR directive flow', () => {
+    it('sends /clear to worker session on CLEAR directive', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // Advance to waiting-response (first cycle via deferred timer)
+      timer.advance(1); // idle -> onWorkerIdle -> clearing-orchestrator
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50); // poll + settle + Enter
+
+      assert.equal(engine.state, 'waiting-response');
+
+      // Orchestrator responds with CLEAR directive
+      await emitOutput(bus, 'orchestrator', directiveOutput('CLEAR'));
+      timer.advance(1000); // response poll fires, finds CLEAR
+
+      // Engine should have written /clear to the worker session
+      const workerClear = writes.find(w => w.name === 'worker' && w.data.includes('/clear'));
+      assert.ok(workerClear, 'engine should send /clear to worker session on CLEAR directive');
+    });
+
+    it('polls worker for (no content) and completes CLEAR', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      const cycleEvents: Array<{ cycle: number; action: string }> = [];
+      bus.on('automation:cycle-complete', (cycle, action) => {
+        cycleEvents.push({ cycle, action });
+      });
+
+      engine.start();
+
+      // Advance to waiting-response
+      timer.advance(1);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+
+      // Orchestrator responds with CLEAR
+      await emitOutput(bus, 'orchestrator', directiveOutput('CLEAR'));
+      timer.advance(1000); // response poll -> finds CLEAR -> engine sends /clear to worker
+
+      assert.equal(engine.state, 'clearing-worker', 'should be in clearing-worker state');
+
+      // Simulate worker responding with (no content) after /clear
+      await emitOutput(bus, 'worker', clearOutput());
+      timer.advance(1000); // worker clear poll fires, finds "(no content)"
+
+      // Engine should return to idle
+      assert.equal(engine.state, 'idle', 'engine should return to idle after worker clear completes');
+
+      // Verify cycle-complete was emitted
+      assert.ok(cycleEvents.length >= 1, 'should emit automation:cycle-complete');
+    });
+
+    it('CLEAR with CONTEXT: block accumulates context before clearing', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // Advance to waiting-response
+      timer.advance(1);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+
+      // Orchestrator responds with CONTEXT + CLEAR
+      await emitOutput(bus, 'orchestrator', '● CONTEXT: important note\r\n● CLEAR\r\n\u273B Crunched for 5s\r\n');
+      timer.advance(1000); // response poll -> finds CLEAR
+
+      // Engine should be clearing worker (CLEAR was processed)
+      assert.equal(engine.state, 'clearing-worker', 'should be in clearing-worker state');
+
+      // Simulate worker clear complete
+      await emitOutput(bus, 'worker', clearOutput());
+      timer.advance(1000);
+
+      // Now trigger another cycle to verify context was accumulated
+      // Worker completes (triggers new cycle)
+      await emitOutput(bus, 'worker', completionOutput('after clear'));
+      timer.advance(50); timer.advance(100);
+
+      // Orchestrator clears for the new cycle
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+
+      // Verify the prompt includes the persistent context
+      const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('important note'));
+      assert.ok(promptWrite, 'prompt should include accumulated context "important note"');
+    });
+  });
+
+  // ========== RESET directive flow ==========
+
+  describe('RESET directive flow', () => {
+    it('sends /clear to orchestrator session on RESET directive', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // Advance to waiting-response
+      timer.advance(1);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+
+      // Record writes before RESET
+      const writeCountBefore = writes.length;
+
+      // Orchestrator responds with RESET
+      await emitOutput(bus, 'orchestrator', directiveOutput('RESET'));
+      timer.advance(1000); // response poll -> finds RESET
+
+      // Engine should have written /clear to orchestrator session
+      const orchClearWrites = writes.slice(writeCountBefore).filter(
+        w => w.name === 'orchestrator' && w.data.includes('/clear')
+      );
+      assert.ok(orchClearWrites.length >= 1, 'engine should send /clear to orchestrator on RESET');
+      assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator after RESET');
+    });
+
+    it('after RESET clear completes, re-sends full prompt with persistent context', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // Cycle 1: COMMAND + CONTEXT to accumulate context
+      timer.advance(1);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', '● CONTEXT: project uses React\r\n● COMMAND: npm test\r\n\u273B Crunched for 5s\r\n');
+      timer.advance(1000);
+
+      // Cycle 2: RESET
+      await emitOutput(bus, 'worker', completionOutput('tests passed'));
+      timer.advance(50); timer.advance(100);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('RESET'));
+      timer.advance(1000); // response poll -> RESET
+
+      assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator');
+
+      // Orchestrator clears after RESET
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+
+      // Engine should have re-sent a full prompt that includes persistent context
+      const promptWrites = writes.filter(w => w.name === 'orchestrator' && w.data.includes('Persistent Context'));
+      assert.ok(promptWrites.length >= 1, 'RESET re-sent prompt should include Persistent Context section');
+
+      // Check the context was preserved
+      const contextWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('project uses React'));
+      assert.ok(contextWrite, 'RESET re-sent prompt should include accumulated context "project uses React"');
+    });
+
+    it('RESET preserves action log in re-sent prompt', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // Cycle 1: COMMAND
+      timer.advance(1);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: npm test'));
+      timer.advance(1000);
+
+      // Cycle 2: RESET
+      await emitOutput(bus, 'worker', completionOutput('tests passed'));
+      timer.advance(50); timer.advance(100);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('RESET'));
+      timer.advance(1000);
+
+      // Orchestrator clears after RESET
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+
+      // Verify the prompt includes action log entries
+      const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('COMMAND: npm test'));
+      assert.ok(promptWrite, 'RESET re-sent prompt should include action log from before RESET');
+    });
+
+    it('CONTEXT: block with RESET is included in the re-sent prompt', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // Cycle 1: get to waiting-response
+      timer.advance(1);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+
+      // Orchestrator responds with CONTEXT + RESET
+      await emitOutput(bus, 'orchestrator', '● CONTEXT: post-reset note\r\n● RESET\r\n\u273B Crunched for 5s\r\n');
+      timer.advance(1000);
+
+      assert.equal(engine.state, 'clearing-orchestrator', 'should be clearing orchestrator');
+
+      // Orchestrator clears after RESET
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+
+      // Verify the re-sent prompt includes the context from the RESET cycle
+      const contextWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('post-reset note'));
+      assert.ok(contextWrite, 'RESET re-sent prompt should include context "post-reset note" from same cycle');
+    });
+  });
+
+  // ========== CONTEXT accumulation ==========
+
+  describe('CONTEXT accumulation', () => {
+    it('context from multiple cycles accumulates', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // Cycle 1: COMMAND + CONTEXT "note 1"
+      timer.advance(1);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', '● CONTEXT: note 1\r\n● COMMAND: echo hello\r\n\u273B Crunched for 5s\r\n');
+      timer.advance(1000);
+
+      // Cycle 2: COMMAND + CONTEXT "note 2"
+      await emitOutput(bus, 'worker', completionOutput('hello'));
+      timer.advance(50); timer.advance(100);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', '● CONTEXT: note 2\r\n● COMMAND: echo world\r\n\u273B Crunched for 5s\r\n');
+      timer.advance(1000);
+
+      // Cycle 3: just a COMMAND (no new context)
+      await emitOutput(bus, 'worker', completionOutput('world'));
+      timer.advance(50); timer.advance(100);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+
+      // Verify the cycle 3 prompt includes both accumulated context strings
+      const promptWrites = writes.filter(w => w.name === 'orchestrator' && w.data.includes('note 1') && w.data.includes('note 2'));
+      assert.ok(promptWrites.length >= 1, 'cycle 3 prompt should include both "note 1" and "note 2" from prior cycles');
+    });
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------
