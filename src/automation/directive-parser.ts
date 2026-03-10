@@ -172,7 +172,7 @@ export function parseContextBlock(text: string): string | null {
 function parseDirectiveRelaxed(text: string): Directive | null {
   const lines = text.split('\n');
 
-  for (let i = 0; i < lines.length; i++) {
+  for (let i = lines.length - 1; i >= 0; i--) {
     const trimmed = lines[i].trim();
     if (!trimmed) continue;
 
