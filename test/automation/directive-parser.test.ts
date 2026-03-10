@@ -563,4 +563,168 @@ describe('parseDirectiveWithContext', () => {
       assert.strictEqual((result.directive as any).command, 'npm run build && npm test --coverage --filter=auth');
     });
   });
+
+  describe('mid-line directive keywords (terminal wrapping)', () => {
+    it('finds COMMAND: mid-line after CONTEXT continuation text', () => {
+      // Simulates TUI wrapping: CONTEXT text ends, then padding, then COMMAND on same line
+      const text = [
+        '● CONTEXT: This is a backend project using TypeScript',
+        '  communication.                                                                  COMMAND: What is the project structure',
+      ].join('\n');
+      const result = parseDirectiveWithContext(text);
+      assert.ok(result.directive, 'should find mid-line COMMAND');
+      assert.strictEqual(result.directive!.type, 'COMMAND');
+      assert.strictEqual((result.directive as any).command, 'What is the project structure');
+      assert.ok(result.context, 'should find CONTEXT');
+      // CONTEXT should NOT include the COMMAND text
+      assert.ok(!(result.context as string).includes('COMMAND'), 'context should not contain COMMAND keyword');
+    });
+
+    it('prefers actual mid-line COMMAND over prompt-echo example', () => {
+      // Full scenario: echoed prompt with example directives + actual response with mid-line COMMAND
+      const text = [
+        'Example CONTEXT modifier (attach to any directive):',
+        'CONTEXT: Worker is using Next.js App Router',
+        'COMMAND: Fix the routing issue',
+        '',
+        '● CONTEXT: This is a backend-antibot project using TypeScript Fastify 5 with C++',
+        '  native modules for bot/DDoS protection. Testing orchestrator-worker',
+        '  communication.                                                                  COMMAND: What is the current project structure under src/routes/',
+        '  and how many route files exist',
+      ].join('\n');
+      const result = parseDirectiveWithContext(text);
+      assert.ok(result.directive, 'should find directive');
+      assert.strictEqual(result.directive!.type, 'COMMAND');
+      // Must find the actual command, NOT the example "Fix the routing issue"
+      assert.ok(
+        (result.directive as any).command.includes('project structure'),
+        `expected actual command but got: ${(result.directive as any).command}`
+      );
+      assert.ok(result.context);
+      assert.ok((result.context as string).includes('backend-antibot'));
+    });
+
+    it('collectContinuation stops before mid-line COMMAND keyword', () => {
+      const text = [
+        '● CONTEXT: project info',
+        '  more info                                COMMAND: do something',
+      ].join('\n');
+      const context = parseContextBlock(text);
+      assert.ok(context, 'should find context');
+      assert.ok(!context!.includes('COMMAND'), 'context should not swallow COMMAND keyword');
+    });
+
+    it('handles ESCALATE: mid-line after CONTEXT text', () => {
+      const text = [
+        '● CONTEXT: info about the project',
+        '  details here.                                                                   ESCALATE: Cannot access the database',
+      ].join('\n');
+      const result = parseDirectiveWithContext(text);
+      assert.ok(result.directive, 'should find mid-line ESCALATE');
+      assert.strictEqual(result.directive!.type, 'ESCALATE');
+      assert.strictEqual((result.directive as any).reason, 'Cannot access the database');
+    });
+
+    it('handles DONE: mid-line after CONTEXT text', () => {
+      const text = [
+        '● CONTEXT: project state saved',
+        '  final notes.                                                                    DONE: Task completed successfully',
+      ].join('\n');
+      const result = parseDirectiveWithContext(text);
+      assert.ok(result.directive, 'should find mid-line DONE');
+      assert.strictEqual(result.directive!.type, 'DONE');
+      assert.strictEqual((result.directive as any).summary, 'Task completed successfully');
+    });
+
+    it('handles entire response on one line (no newlines)', () => {
+      // Edge case: raw PTY buffer has no newlines between CONTEXT and COMMAND
+      const text = '● CONTEXT: project info                                                         COMMAND: npm test';
+      const result = parseDirectiveWithContext(text);
+      assert.ok(result.directive, 'should find COMMAND on same line as ● CONTEXT');
+      assert.strictEqual(result.directive!.type, 'COMMAND');
+      assert.strictEqual((result.directive as any).command, 'npm test');
+    });
+  });
+
+  describe('completion marker boundary', () => {
+    it('COMMAND continuation stops at ✻ completion marker', () => {
+      const text = [
+        '● CONTEXT: info',
+        'COMMAND: /gsd:quick Fix the bug',
+        '  with continuation text.',
+        '✻ Crunched for 2m 14s',
+        '',
+        '────────────────────────────────',
+        '❯ ',
+      ].join('\n');
+      const result = parseDirectiveWithContext(text);
+      assert.ok(result.directive);
+      assert.strictEqual(result.directive!.type, 'COMMAND');
+      const cmd = (result.directive as any).command;
+      assert.ok(!cmd.includes('Crunched'), `command should not include completion marker, got: ${cmd}`);
+      assert.strictEqual(cmd, '/gsd:quick Fix the bug with continuation text.');
+    });
+
+    it('CONTEXT continuation stops at ✻ completion marker', () => {
+      const text = [
+        '● CONTEXT: project info',
+        '  more context.',
+        '✻ Brewed for 30s',
+      ].join('\n');
+      const context = parseContextBlock(text);
+      assert.ok(context);
+      assert.ok(!context!.includes('Brewed'), 'context should not include completion marker');
+      assert.strictEqual(context, 'project info more context.');
+    });
+  });
+
+  describe('multi-repaint buffer (Ink TUI streaming)', () => {
+    it('parseContextBlock finds LAST ● CONTEXT (complete render, not partial)', () => {
+      const text = [
+        // Render 1 (partial)
+        '● CONTEXT: Key files for',
+        '',
+        // Render 2 (more text)
+        '● CONTEXT: Key files for automation hub refactor: (1) HubRenderer at',
+        '  src/telegram/renderers/hub.ts',
+        '',
+        // Render 3 (final, complete)
+        '● CONTEXT: Key files for automation hub refactor: (1) HubRenderer at',
+        '  src/telegram/renderers/hub.ts - lines 34-42 check for active automation.',
+        '  sub-section accessible via button.',
+      ].join('\n');
+      const context = parseContextBlock(text);
+      assert.ok(context);
+      assert.ok(context!.includes('sub-section accessible via button'), `expected full context, got: ${context}`);
+    });
+
+    it('full multi-repaint scenario: finds both directive and complete context', () => {
+      const text = [
+        // Echo examples
+        'COMMAND: Fix the bug',
+        'CONTEXT: Worker uses React',
+        '',
+        // Partial repaint
+        '● CONTEXT: Key files for',
+        '',
+        // Final repaint (complete)
+        '● CONTEXT: Key files for automation hub refactor.',
+        '  sub-section accessible via button.',
+        '  COMMAND: /gsd:quick Fix the bug with the automation hub',
+        '   so that hub always renders normally.',
+        '✻ Crunched for 2m 14s',
+        '',
+        '────────────────────────────────',
+        '❯ ',
+      ].join('\n');
+      const result = parseDirectiveWithContext(text);
+      assert.ok(result.directive);
+      assert.strictEqual(result.directive!.type, 'COMMAND');
+      const cmd = (result.directive as any).command;
+      assert.ok(cmd.includes('automation hub'), `expected full command, got: ${cmd}`);
+      assert.ok(!cmd.includes('Crunched'), `command should not include completion marker, got: ${cmd}`);
+      assert.ok(result.context);
+      assert.ok(result.context!.includes('sub-section'), `expected complete context, got: ${result.context}`);
+    });
+  });
 });

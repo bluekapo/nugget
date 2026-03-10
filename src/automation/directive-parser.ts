@@ -8,6 +8,36 @@ import type { Directive, ParseResult } from './types.js';
 const DIRECTIVE_KEYWORD_RE = /^(COMMAND|ESCALATE|DONE|SELECT|CONTEXT):\s|^(ENTER|CLEAR|RESET|YES|NO)$/;
 
 /**
+ * Split lines where terminal wrapping placed a directive keyword mid-line.
+ *
+ * Claude Code TUI (Ink) wraps long text at terminal column width. When CONTEXT
+ * and COMMAND are rendered under a single ● bullet, the COMMAND keyword can end
+ * up mid-line after padding spaces:
+ *   "communication.                    COMMAND: What is the project structure"
+ *
+ * This function splits such lines so each directive keyword starts its own line,
+ * enabling the existing start-of-line matchers to find them.
+ */
+function splitMidLineDirectives(text: string): string {
+  // Lookahead: split at 2+ whitespace chars followed by a directive keyword.
+  // The lookahead keeps the keyword attached to the right-hand part.
+  const midLineRe = /\s{2,}(?=(?:COMMAND|ESCALATE|DONE|SELECT|CONTEXT):\s)/;
+
+  return text.split('\n').flatMap(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return [line];
+
+    const match = trimmed.match(midLineRe);
+    if (match && match.index && match.index > 0) {
+      const before = trimmed.substring(0, match.index);
+      const after = trimmed.substring(match.index).trim();
+      return [before, after];
+    }
+    return [line];
+  }).join('\n');
+}
+
+/**
  * Parse a directive from orchestrator output text.
  *
  * Only matches lines with the ● prefix (Claude Code assistant responses).
@@ -62,7 +92,8 @@ export function parseDirective(text: string): Directive | null {
 
 /**
  * Collect indented continuation lines below a directive line.
- * Stops at empty lines, new bullets (●), prompts (❯), or separator lines (───).
+ * Stops at empty lines, new bullets (●), completion markers (✻), prompts (❯),
+ * separator lines (───), or directive keywords.
  */
 function collectContinuation(firstLine: string, lines: string[], startIdx: number): string {
   const parts = [firstLine];
@@ -71,8 +102,9 @@ function collectContinuation(firstLine: string, lines: string[], startIdx: numbe
     const raw = lines[j];
     const contTrimmed = raw.trim();
 
-    // Stop at empty lines, new bullets, prompts, separator lines, or directive keywords
-    if (!contTrimmed || /^[●❯]/.test(contTrimmed) || /^─{3,}/.test(contTrimmed)) break;
+    // Stop at empty lines, new bullets, prompts, separator lines, directive keywords,
+    // or completion markers (✻ Crunched/Brewed/Forged for Xm Ys)
+    if (!contTrimmed || /^[●❯✻]/.test(contTrimmed) || /^─{3,}/.test(contTrimmed)) break;
     if (DIRECTIVE_KEYWORD_RE.test(contTrimmed)) break;
 
     parts.push(contTrimmed);
@@ -133,14 +165,16 @@ function matchSingleLine(line: string): Directive | null {
  * (e.g., the orchestrator response has both a COMMAND: line and a CONTEXT: line).
  * parseDirective does NOT match CONTEXT: -- this is a separate extraction.
  *
- * Scans for a line matching `● CONTEXT:` with the ● prefix.
+ * Scans BACKWARD for the LAST line matching `● CONTEXT:` with the ● prefix.
+ * This handles Ink TUI multi-repaint buffers where earlier repaints contain
+ * partial context text — the last repaint has the complete context.
  * Collects indented continuation lines below it (same pattern as directives).
  * Returns the joined context string, or null if no CONTEXT: block found.
  */
 export function parseContextBlock(text: string): string | null {
-  const lines = text.split('\n');
+  const lines = splitMidLineDirectives(text).split('\n');
 
-  for (let i = 0; i < lines.length; i++) {
+  for (let i = lines.length - 1; i >= 0; i--) {
     const trimmed = lines[i].trim();
     if (!trimmed) continue;
 
@@ -221,15 +255,20 @@ function parseDirectiveRelaxed(text: string): Directive | null {
  * TUI rendering both CONTEXT and COMMAND under a single ● bullet.
  */
 export function parseDirectiveWithContext(text: string): ParseResult {
-  const directive = parseDirective(text);
-  const context = parseContextBlock(text);
+  // Normalize mid-line directive keywords caused by terminal wrapping before
+  // any parsing. This ensures COMMAND:/ESCALATE:/DONE: start their own lines
+  // even when the TUI wrapped them after CONTEXT continuation text.
+  const normalized = splitMidLineDirectives(text);
+
+  const directive = parseDirective(normalized);
+  const context = parseContextBlock(normalized);
 
   // Fallback: if no ●-prefixed directive found but we DO have a ● CONTEXT block,
   // look for a relaxed (non-●) directive. This handles Claude Code TUI rendering
   // both CONTEXT and COMMAND under a single ● bullet.
   if (!directive && context !== null) {
     return {
-      directive: parseDirectiveRelaxed(text),
+      directive: parseDirectiveRelaxed(normalized),
       context,
     };
   }
