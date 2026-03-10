@@ -203,6 +203,17 @@ function buildText(
         '',
         'Type your task description below.',
       ],
+      'confirm-task': [
+        '<b>Automation Hub</b>',
+        '',
+        `Worker: <b>${pendingCreation.workerSession}</b>`,
+        `Orchestrator: <b>${pendingCreation.orchestratorSession}</b>`,
+        '',
+        'Task:',
+        `<i>${pendingCreation.taskDescription}</i>`,
+        '',
+        'Review and confirm to start.',
+      ],
     };
     return (stepTexts[pendingCreation.step] ?? ['<b>Automation Hub</b>']).join('\n');
   }
@@ -311,6 +322,12 @@ function buildKeyboard(
       keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
     } else if (pendingCreation.step === 'enter-task') {
       keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
+    } else if (pendingCreation.step === 'confirm-task') {
+      keyboard.push([{ text: '\u2705 Confirm', callback_data: 'auto:confirm' }]);
+      keyboard.push([
+        { text: '\u270F\uFE0F Edit', callback_data: 'auto:edit' },
+        { text: '\u274C Cancel', callback_data: 'auto:cancel' },
+      ]);
     }
     return { inline_keyboard: keyboard };
   }
