@@ -1,4 +1,35 @@
-import type { ContextPacket, ConsultationPacket } from './types.js';
+import type { ContextPacket, ConsultationPacket, CompressedActionLog } from './types.js';
+
+/** Render the action log section (shared between buildPrompt and buildConsultationPrompt). */
+function renderActionLog(lines: string[], actionLog: CompressedActionLog, cycleNumber: number): void {
+  const { summary, recent, totalCount } = actionLog;
+
+  // Header format differs based on whether there's a summary
+  if (summary !== null) {
+    lines.push(`## Action Log (${totalCount} total actions, showing last ${recent.length}, cycle ${cycleNumber})`);
+  } else {
+    lines.push(`## Action Log (${recent.length} actions taken, cycle ${cycleNumber})`);
+  }
+
+  if (recent.length === 0 && summary === null) {
+    lines.push('(no actions taken yet -- this is the first cycle)');
+  } else {
+    // Render summary blockquote if present
+    if (summary !== null) {
+      lines.push(`> ${summary}`);
+      lines.push('');
+    }
+
+    // Numbering starts from offset when summary exists
+    const startNum = summary !== null ? totalCount - recent.length + 1 : 1;
+    for (let i = 0; i < recent.length; i++) {
+      const entry = recent[i];
+      lines.push(`${startNum + i}. Sent: \`${entry.action}\``);
+      lines.push(`   Result: \`${entry.outcome}\``);
+    }
+  }
+  lines.push('');
+}
 
 export function buildPrompt(ctx: ContextPacket): string {
   const lines: string[] = [];
@@ -38,20 +69,8 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('```');
   lines.push('');
 
-  // Action log section
-  const actionCount = ctx.actionLog.length;
-  lines.push(`## Action Log (${actionCount} actions taken, cycle ${ctx.cycleNumber})`);
-
-  if (actionCount === 0) {
-    lines.push('(no actions taken yet -- this is the first cycle)');
-  } else {
-    for (let i = 0; i < actionCount; i++) {
-      const entry = ctx.actionLog[i];
-      lines.push(`${i + 1}. Sent: \`${entry.action}\``);
-      lines.push(`   Result: \`${entry.outcome}\``);
-    }
-  }
-  lines.push('');
+  // Action log section (compressed format)
+  renderActionLog(lines, ctx.actionLog, ctx.cycleNumber);
 
   // Directive instructions with example
   lines.push('## Your Response (ONLY one line, nothing else)');
@@ -100,19 +119,8 @@ export function buildConsultationPrompt(ctx: ConsultationPacket): string {
   lines.push('```');
   lines.push('');
 
-  const actionCount = ctx.actionLog.length;
-  lines.push(`## Action Log (${actionCount} actions taken, cycle ${ctx.cycleNumber})`);
-
-  if (actionCount === 0) {
-    lines.push('(no actions taken yet -- this is the first cycle)');
-  } else {
-    for (let i = 0; i < actionCount; i++) {
-      const entry = ctx.actionLog[i];
-      lines.push(`${i + 1}. Sent: \`${entry.action}\``);
-      lines.push(`   Result: \`${entry.outcome}\``);
-    }
-  }
-  lines.push('');
+  // Action log section (compressed format)
+  renderActionLog(lines, ctx.actionLog, ctx.cycleNumber);
 
   lines.push('## Question');
   if (ctx.idleDurationMs !== undefined) {

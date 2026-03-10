@@ -83,7 +83,7 @@ export interface CompressedActionLog {
 export interface ContextPacket {
   taskDescription: string;
   workerScreen: string;
-  actionLog: ActionEntry[];
+  actionLog: CompressedActionLog;
   cycleNumber: number;
   persistentContext?: string[];
 }
@@ -93,7 +93,7 @@ export interface ContextPacket {
 export interface ConsultationPacket {
   taskDescription: string;
   workerScreen: string;
-  actionLog: ActionEntry[];
+  actionLog: CompressedActionLog;
   cycleNumber: number;
   idleDurationMs?: number;
 }

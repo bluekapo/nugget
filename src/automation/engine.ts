@@ -434,7 +434,7 @@ export class AutomationEngine {
     const prompt = buildPrompt({
       taskDescription: this.config.taskDescription,
       workerScreen: this.workerScreenText,
-      actionLog: this.actionLog.getRecent(),
+      actionLog: this.actionLog.getCompressed(),
       cycleNumber: this.cycleNumber,
       persistentContext: this.persistentContext,
     });
@@ -848,7 +848,7 @@ export class AutomationEngine {
     const prompt = buildConsultationPrompt({
       taskDescription: this.config.taskDescription,
       workerScreen: this.workerScreenText,
-      actionLog: this.actionLog.getRecent(),
+      actionLog: this.actionLog.getCompressed(),
       cycleNumber: this.cycleNumber,
       idleDurationMs: this.idleDurationMs,
     });

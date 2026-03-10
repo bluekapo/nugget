@@ -7,10 +7,14 @@ describe('buildPrompt', () => {
   const basePacket: ContextPacket = {
     taskDescription: 'Run the test suite and fix any failures',
     workerScreen: '$ npm test\n\nAll 42 tests passed.',
-    actionLog: [
-      { action: 'COMMAND: npm test', outcome: 'Tests executed successfully', timestamp: 1700000000000 },
-      { action: 'COMMAND: npm run lint', outcome: 'No lint errors found', timestamp: 1700000010000 },
-    ],
+    actionLog: {
+      summary: null,
+      recent: [
+        { action: 'COMMAND: npm test', outcome: 'Tests executed successfully', timestamp: 1700000000000 },
+        { action: 'COMMAND: npm run lint', outcome: 'No lint errors found', timestamp: 1700000010000 },
+      ],
+      totalCount: 2,
+    },
     cycleNumber: 3,
   };
 
@@ -48,7 +52,7 @@ describe('buildPrompt', () => {
     const emptyPacket: ContextPacket = {
       taskDescription: 'Do something',
       workerScreen: '$ _',
-      actionLog: [],
+      actionLog: { summary: null, recent: [], totalCount: 0 },
       cycleNumber: 1,
     };
     const prompt = buildPrompt(emptyPacket);
@@ -175,10 +179,14 @@ describe('buildConsultationPrompt', () => {
   const basePacket: ConsultationPacket = {
     taskDescription: 'Run the test suite and fix any failures',
     workerScreen: '$ npm test\n\nAll 42 tests passed.',
-    actionLog: [
-      { action: 'COMMAND: npm test', outcome: 'Tests executed successfully', timestamp: 1700000000000 },
-      { action: 'COMMAND: npm run lint', outcome: 'No lint errors found', timestamp: 1700000010000 },
-    ],
+    actionLog: {
+      summary: null,
+      recent: [
+        { action: 'COMMAND: npm test', outcome: 'Tests executed successfully', timestamp: 1700000000000 },
+        { action: 'COMMAND: npm run lint', outcome: 'No lint errors found', timestamp: 1700000010000 },
+      ],
+      totalCount: 2,
+    },
     cycleNumber: 3,
   };
 
@@ -267,5 +275,116 @@ describe('buildConsultationPrompt', () => {
       !prompt.includes('DONE: <'),
       `Consultation prompt should NOT contain DONE directive format:\n${prompt}`
     );
+  });
+});
+
+describe('compressed action log rendering', () => {
+  it('buildPrompt with summary=null renders entries same as before (no summary paragraph)', () => {
+    const packet: ContextPacket = {
+      taskDescription: 'Test task',
+      workerScreen: 'screen',
+      actionLog: {
+        summary: null,
+        recent: [
+          { action: 'COMMAND: npm test', outcome: 'passed', timestamp: 1700000000000 },
+        ],
+        totalCount: 1,
+      },
+      cycleNumber: 2,
+    };
+    const prompt = buildPrompt(packet);
+    // Should NOT contain a blockquote summary
+    assert.ok(!prompt.includes('> Summary'), 'Should not contain summary blockquote when summary is null');
+    // Should contain the entry
+    assert.ok(prompt.includes('Sent: `COMMAND: npm test`'), 'Should contain action entry');
+  });
+
+  it('buildPrompt with summary string renders summary paragraph BEFORE recent entries', () => {
+    const packet: ContextPacket = {
+      taskDescription: 'Test task',
+      workerScreen: 'screen',
+      actionLog: {
+        summary: 'Summary of actions 1-40 (40 actions): 35 COMMANDs, 3 CLEARs, 2 RESETs. Outcomes: 30 successful, 5 failed, 5 pending.',
+        recent: [
+          { action: 'COMMAND: npm test', outcome: 'passed', timestamp: 1700000000000 },
+          { action: 'COMMAND: npm build', outcome: 'built', timestamp: 1700000010000 },
+        ],
+        totalCount: 42,
+      },
+      cycleNumber: 43,
+    };
+    const prompt = buildPrompt(packet);
+    // Summary should appear as blockquote
+    assert.ok(prompt.includes('> Summary of actions 1-40'),
+      `Expected summary as blockquote in prompt:\n${prompt}`);
+    // Summary should come before recent entries
+    const summaryIdx = prompt.indexOf('> Summary of actions');
+    const entryIdx = prompt.indexOf('Sent: `COMMAND: npm test`');
+    assert.ok(summaryIdx < entryIdx, 'Summary should appear before recent entries');
+  });
+
+  it('buildPrompt action log header shows total count when summary exists', () => {
+    const packet: ContextPacket = {
+      taskDescription: 'Test task',
+      workerScreen: 'screen',
+      actionLog: {
+        summary: 'Summary of actions 1-40 (40 actions): 40 COMMANDs. Outcomes: 40 successful, 0 failed, 0 pending.',
+        recent: [
+          { action: 'COMMAND: final', outcome: 'done', timestamp: 1700000000000 },
+        ],
+        totalCount: 41,
+      },
+      cycleNumber: 42,
+    };
+    const prompt = buildPrompt(packet);
+    // Header should include total count format
+    assert.ok(
+      prompt.includes('41 total') && prompt.includes('showing last 1') && prompt.includes('cycle 42'),
+      `Expected total count header format in prompt:\n${prompt}`
+    );
+  });
+
+  it('buildPrompt recent entries are numbered from offset when summary exists', () => {
+    const packet: ContextPacket = {
+      taskDescription: 'Test task',
+      workerScreen: 'screen',
+      actionLog: {
+        summary: 'Summary of old entries',
+        recent: [
+          { action: 'COMMAND: action-41', outcome: 'done', timestamp: 1700000000000 },
+          { action: 'COMMAND: action-42', outcome: 'done', timestamp: 1700000010000 },
+        ],
+        totalCount: 42,
+      },
+      cycleNumber: 43,
+    };
+    const prompt = buildPrompt(packet);
+    // Entry numbering should start from totalCount - recent.length + 1 = 41
+    assert.ok(prompt.includes('41. Sent: `COMMAND: action-41`'),
+      `Expected entry numbered 41 in prompt:\n${prompt}`);
+    assert.ok(prompt.includes('42. Sent: `COMMAND: action-42`'),
+      `Expected entry numbered 42 in prompt:\n${prompt}`);
+  });
+
+  it('buildConsultationPrompt renders compressed format identically', () => {
+    const packet: ConsultationPacket = {
+      taskDescription: 'Test task',
+      workerScreen: 'screen',
+      actionLog: {
+        summary: 'Summary of actions 1-30 (30 actions): 30 COMMANDs. Outcomes: 25 successful, 5 failed, 0 pending.',
+        recent: [
+          { action: 'COMMAND: check', outcome: 'ok', timestamp: 1700000000000 },
+        ],
+        totalCount: 31,
+      },
+      cycleNumber: 32,
+    };
+    const prompt = buildConsultationPrompt(packet);
+    // Should have summary blockquote
+    assert.ok(prompt.includes('> Summary of actions 1-30'),
+      `Expected summary blockquote in consultation prompt:\n${prompt}`);
+    // Should have total count header
+    assert.ok(prompt.includes('31 total'),
+      `Expected total count in consultation prompt header:\n${prompt}`);
   });
 });
