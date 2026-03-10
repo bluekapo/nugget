@@ -22,6 +22,15 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('```');
   lines.push('');
 
+  // Persistent context section (only if context strings exist)
+  if (ctx.persistentContext && ctx.persistentContext.length > 0) {
+    lines.push('## Persistent Context (carried across cycles)');
+    for (const item of ctx.persistentContext) {
+      lines.push(`- ${item}`);
+    }
+    lines.push('');
+  }
+
   // Worker terminal output
   lines.push('## Current Worker Terminal Output');
   lines.push('```');
@@ -53,9 +62,16 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('- `ENTER` -- Press Enter in the worker terminal');
   lines.push('- `DONE: <summary>` -- Task is complete; summarize what was accomplished');
   lines.push('- `ESCALATE: <reason>` -- Stop and notify the human operator (ONLY for genuine blockers)');
+  lines.push('- `CLEAR` -- Send /clear to the worker session (clears worker context)');
+  lines.push('- `RESET` -- Clear your own context and receive a fresh full prompt with accumulated context');
+  lines.push('- `CONTEXT: <text>` -- Attach persistent memory to any directive (appears in all future prompts, survives RESET)');
   lines.push('');
   lines.push('Example correct response (your ENTIRE output should look like this):');
   lines.push('COMMAND: Fix the bug in src/session/pty.ts where delete signals are not sent correctly');
+  lines.push('');
+  lines.push('Example CONTEXT modifier (attach to any directive):');
+  lines.push('CONTEXT: Worker is using Next.js App Router');
+  lines.push('COMMAND: Fix the routing issue');
   lines.push('');
   lines.push('Example WRONG responses (do NOT do this):');
   lines.push('- "Let me look at the code first. COMMAND: ..." (no commentary, just the directive)');
