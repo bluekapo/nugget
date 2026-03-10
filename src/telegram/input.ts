@@ -19,7 +19,7 @@ export class TelegramInputHandler {
     private allowlist: CommandAllowlist,
     private automationHub?: {
       isAwaitingTaskInput(): boolean;
-      completeCreation(text: string): Promise<void>;
+      submitTaskForReview(text: string): Promise<void>;
       render(): Promise<void>;
     },
   ) {}
@@ -42,7 +42,7 @@ export class TelegramInputHandler {
 
       // Intercept text input for automation hub task description
       if (this.automationHub?.isAwaitingTaskInput()) {
-        await this.automationHub.completeCreation(text);
+        await this.automationHub.submitTaskForReview(text);
         try { await ctx.deleteMessage(); } catch { /* ignore */ }
         return;
       }

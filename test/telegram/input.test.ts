@@ -234,13 +234,13 @@ describe('TelegramInputHandler', () => {
     assert.equal(nextCalled, true, 'should call next() for bot command');
   });
 
-  it('intercepts text when automationHub.isAwaitingTaskInput() returns true', async () => {
+  it('intercepts text when automationHub.isAwaitingTaskInput() returns true and calls submitTaskForReview', async () => {
     const sm = makeMockSessionManager();
     const al = makeMockAllowlist(true);
-    let completedWith = '';
+    let reviewedWith = '';
     const mockAutomationHub = {
       isAwaitingTaskInput() { return true; },
-      async completeCreation(text: string) { completedWith = text; },
+      async submitTaskForReview(text: string) { reviewedWith = text; },
       async render() {},
     };
     const handler = new TelegramInputHandler(sm as any, () => 'my-session', al as any, mockAutomationHub);
@@ -249,7 +249,7 @@ describe('TelegramInputHandler', () => {
     let nextCalled = false;
     await handler.handler()(ctx as any, async () => { nextCalled = true; });
 
-    assert.equal(completedWith, 'run all tests', 'should call completeCreation with the text');
+    assert.equal(reviewedWith, 'run all tests', 'should call submitTaskForReview with the text');
     assert.equal(sm.calls.length, 0, 'should NOT forward to PTY');
     assert.equal(ctx.deleteMessageCalled, true, 'should delete user message after interception');
     assert.equal(nextCalled, false, 'should not call next()');
@@ -259,10 +259,10 @@ describe('TelegramInputHandler', () => {
   it('does not intercept text when automationHub.isAwaitingTaskInput() returns false', async () => {
     const sm = makeMockSessionManager();
     const al = makeMockAllowlist(true);
-    let completeCalled = false;
+    let reviewCalled = false;
     const mockAutomationHub = {
       isAwaitingTaskInput() { return false; },
-      async completeCreation(_text: string) { completeCalled = true; },
+      async submitTaskForReview(_text: string) { reviewCalled = true; },
       async render() {},
     };
     const handler = new TelegramInputHandler(sm as any, () => 'my-session', al as any, mockAutomationHub);
@@ -270,7 +270,7 @@ describe('TelegramInputHandler', () => {
     const ctx = makeMockCtx('hello world');
     await handler.handler()(ctx as any, async () => {});
 
-    assert.equal(completeCalled, false, 'should NOT call completeCreation');
+    assert.equal(reviewCalled, false, 'should NOT call submitTaskForReview');
     assert.equal(sm.calls.length, 1, 'should forward to PTY normally');
     assert.equal(sm.calls[0].data, 'hello world');
   });
