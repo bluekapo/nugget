@@ -1,4 +1,4 @@
-import type { ContextPacket, ConsultationPacket, CompressedActionLog } from './types.js';
+import type { ContextPacket, ConsultationPacket, FollowUpPacket, CompressedActionLog } from './types.js';
 
 /** Render the action log section (shared between buildPrompt and buildConsultationPrompt). */
 function renderActionLog(lines: string[], actionLog: CompressedActionLog, cycleNumber: number): void {
@@ -96,6 +96,34 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('- "Let me look at the code first. COMMAND: ..." (no commentary, just the directive)');
   lines.push('- "ESCALATE: This setup feels wrong" (the setup is correct, do not escalate over it)');
   lines.push('- "ESCALATE: Task is complete" (use DONE for completion, not ESCALATE)');
+
+  return lines.join('\n');
+}
+
+export function buildFollowUpPrompt(ctx: FollowUpPacket): string {
+  const lines: string[] = [];
+
+  lines.push(`## Cycle ${ctx.cycleNumber}`);
+  lines.push('');
+
+  // Worker terminal output
+  lines.push('## Worker Terminal Output');
+  lines.push('```');
+  lines.push(ctx.workerScreen);
+  lines.push('```');
+  lines.push('');
+
+  // Last action
+  lines.push('## Last Action');
+  if (ctx.lastAction !== null) {
+    lines.push(`Sent: \`${ctx.lastAction.action}\``);
+    lines.push(`Result: \`${ctx.lastAction.outcome}\``);
+  } else {
+    lines.push('(first cycle after reset)');
+  }
+  lines.push('');
+
+  lines.push('Respond with a single directive line.');
 
   return lines.join('\n');
 }

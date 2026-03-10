@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPrompt, buildConsultationPrompt } from '../../src/automation/prompt-builder.js';
-import type { ContextPacket, ConsultationPacket } from '../../src/automation/types.js';
+import { buildPrompt, buildConsultationPrompt, buildFollowUpPrompt } from '../../src/automation/prompt-builder.js';
+import type { ContextPacket, ConsultationPacket, FollowUpPacket } from '../../src/automation/types.js';
 
 describe('buildPrompt', () => {
   const basePacket: ContextPacket = {
@@ -386,5 +386,128 @@ describe('compressed action log rendering', () => {
     // Should have total count header
     assert.ok(prompt.includes('31 total'),
       `Expected total count in consultation prompt header:\n${prompt}`);
+  });
+});
+
+describe('buildFollowUpPrompt', () => {
+  const baseFollowUp: FollowUpPacket = {
+    workerScreen: '$ npm test\n\nAll 42 tests passed.',
+    lastAction: { action: 'COMMAND: npm test', outcome: 'Tests passed', timestamp: 1700000000000 },
+    cycleNumber: 5,
+  };
+
+  it('contains worker terminal output in code block', () => {
+    const prompt = buildFollowUpPrompt(baseFollowUp);
+    assert.ok(
+      prompt.includes('## Worker Terminal Output'),
+      `Expected "## Worker Terminal Output" header in follow-up prompt:\n${prompt}`
+    );
+    assert.ok(
+      prompt.includes('$ npm test\n\nAll 42 tests passed.'),
+      `Expected worker screen text in follow-up prompt:\n${prompt}`
+    );
+    // Should be inside a code block
+    const screenIdx = prompt.indexOf('$ npm test');
+    const beforeScreen = prompt.lastIndexOf('```', screenIdx);
+    const afterScreen = prompt.indexOf('```', screenIdx);
+    assert.ok(beforeScreen !== -1, 'Expected ``` before screen text');
+    assert.ok(afterScreen !== -1, 'Expected ``` after screen text');
+  });
+
+  it('contains last action with action and outcome', () => {
+    const prompt = buildFollowUpPrompt(baseFollowUp);
+    assert.ok(
+      prompt.includes('## Last Action'),
+      `Expected "## Last Action" header in follow-up prompt:\n${prompt}`
+    );
+    assert.ok(
+      prompt.includes('COMMAND: npm test'),
+      `Expected last action text in follow-up prompt:\n${prompt}`
+    );
+    assert.ok(
+      prompt.includes('Tests passed'),
+      `Expected last action outcome in follow-up prompt:\n${prompt}`
+    );
+  });
+
+  it('with lastAction=null shows first cycle indicator', () => {
+    const packet: FollowUpPacket = {
+      workerScreen: 'screen',
+      lastAction: null,
+      cycleNumber: 2,
+    };
+    const prompt = buildFollowUpPrompt(packet);
+    assert.ok(
+      prompt.toLowerCase().includes('first cycle') || prompt.toLowerCase().includes('(first cycle'),
+      `Expected first cycle indicator when lastAction is null:\n${prompt}`
+    );
+  });
+
+  it('contains cycle number', () => {
+    const prompt = buildFollowUpPrompt(baseFollowUp);
+    assert.ok(
+      prompt.includes('5'),
+      `Expected cycle number 5 in follow-up prompt:\n${prompt}`
+    );
+    assert.ok(
+      prompt.includes('cycle 5') || prompt.includes('Cycle 5'),
+      `Expected cycle number in context like "cycle 5" or "Cycle 5":\n${prompt}`
+    );
+  });
+
+  it('does NOT contain role section', () => {
+    const prompt = buildFollowUpPrompt(baseFollowUp);
+    assert.ok(
+      !prompt.includes('## Your Role'),
+      `Follow-up prompt should NOT contain "## Your Role":\n${prompt}`
+    );
+  });
+
+  it('does NOT contain task description section', () => {
+    const prompt = buildFollowUpPrompt(baseFollowUp);
+    assert.ok(
+      !prompt.includes('## Task'),
+      `Follow-up prompt should NOT contain "## Task":\n${prompt}`
+    );
+  });
+
+  it('does NOT contain directive reference', () => {
+    const prompt = buildFollowUpPrompt(baseFollowUp);
+    assert.ok(
+      !prompt.includes('Available directives:'),
+      `Follow-up prompt should NOT contain "Available directives:":\n${prompt}`
+    );
+  });
+
+  it('does NOT contain persistent context section', () => {
+    const prompt = buildFollowUpPrompt(baseFollowUp);
+    assert.ok(
+      !prompt.includes('Persistent Context'),
+      `Follow-up prompt should NOT contain "Persistent Context":\n${prompt}`
+    );
+  });
+
+  it('includes reminder line about single directive', () => {
+    const prompt = buildFollowUpPrompt(baseFollowUp);
+    assert.ok(
+      prompt.includes('Respond with a single directive line.'),
+      `Expected reminder line "Respond with a single directive line." in follow-up prompt:\n${prompt}`
+    );
+  });
+
+  it('mama prompt (buildPrompt) still contains all PRM-02 sections', () => {
+    const mamaPacket: ContextPacket = {
+      taskDescription: 'Run the tests',
+      workerScreen: 'screen output',
+      actionLog: { summary: null, recent: [], totalCount: 0 },
+      cycleNumber: 1,
+    };
+    const prompt = buildPrompt(mamaPacket);
+    assert.ok(prompt.includes('## Your Role'), 'Mama prompt should contain "## Your Role"');
+    assert.ok(prompt.includes('## Task'), 'Mama prompt should contain "## Task"');
+    assert.ok(prompt.includes('Worker Terminal Output') || prompt.includes('Current Worker Terminal Output'),
+      'Mama prompt should contain worker terminal output section');
+    assert.ok(prompt.includes('Action Log'), 'Mama prompt should contain "Action Log"');
+    assert.ok(prompt.includes('Available directives:'), 'Mama prompt should contain "Available directives:"');
   });
 });

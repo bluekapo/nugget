@@ -88,6 +88,14 @@ export interface ContextPacket {
   persistentContext?: string[];
 }
 
+// --- Follow-Up Types ---
+
+export interface FollowUpPacket {
+  workerScreen: string;
+  lastAction: ActionEntry | null;
+  cycleNumber: number;
+}
+
 // --- Consultation Types ---
 
 export interface ConsultationPacket {
