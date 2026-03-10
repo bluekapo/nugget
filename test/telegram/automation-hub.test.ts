@@ -551,6 +551,173 @@ describe('AutomationHubRenderer', () => {
     });
   });
 
+  describe('confirm-task step', () => {
+    it('submitTaskForReview stores task text and transitions to confirm-task step', async () => {
+      const api = createMockApi();
+      const { hub } = createHub(api, { sessions: ['w', 'o'] });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      api.calls.length = 0;
+
+      await hub.submitTaskForReview('run all tests');
+
+      const pending = hub.pendingCreationInfo;
+      assert.ok(pending, 'should still have pending creation');
+      assert.equal(pending!.step, 'confirm-task', 'should be in confirm-task step');
+      assert.equal(pending!.taskDescription, 'run all tests', 'should store task description');
+    });
+
+    it('confirm-task buildText shows worker, orchestrator, task, and review prompt', async () => {
+      const api = createMockApi();
+      const { hub } = createHub(api, { sessions: ['w', 'o'] });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.submitTaskForReview('deploy the app');
+      api.calls.length = 0;
+
+      await hub.render();
+
+      const lastCall = api.calls[api.calls.length - 1];
+      const text = lastCall.args[lastCall.method === 'sendMessage' ? 1 : 2] as string;
+      assert.ok(text.includes('w'), 'should show worker name');
+      assert.ok(text.includes('o'), 'should show orchestrator name');
+      assert.ok(text.includes('deploy the app'), 'should show task description');
+      assert.ok(text.includes('Review and confirm'), 'should show review prompt');
+    });
+
+    it('confirm-task buildKeyboard shows Confirm, Edit, and Cancel buttons', async () => {
+      const api = createMockApi();
+      const { hub } = createHub(api, { sessions: ['w', 'o'] });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.submitTaskForReview('run tests');
+      api.calls.length = 0;
+
+      await hub.render();
+
+      const lastCall = api.calls[api.calls.length - 1];
+      const opts = lastCall.args[lastCall.method === 'sendMessage' ? 2 : 3] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'should have inline keyboard');
+      const allData = keyboard!.flat().map((b: any) => b.callback_data);
+      assert.ok(allData.includes('auto:confirm'), 'should have Confirm button');
+      assert.ok(allData.includes('auto:edit'), 'should have Edit button');
+      assert.ok(allData.includes('auto:cancel'), 'should have Cancel button');
+
+      // Check button labels
+      const allText = keyboard!.flat().map((b: any) => b.text);
+      assert.ok(allText.some((t: string) => t.includes('Confirm')), 'should have Confirm label');
+      assert.ok(allText.some((t: string) => t.includes('Edit')), 'should have Edit label');
+      assert.ok(allText.some((t: string) => t.includes('Cancel')), 'should have Cancel label');
+    });
+
+    it('handleCallback auto:confirm during confirm-task calls completeCreation and starts engine', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      let factoryCalledWith: unknown = null;
+      const mockEng = createMockEngine();
+      const factory = (config: unknown, _b: EventBus) => {
+        factoryCalledWith = config;
+        return mockEng;
+      };
+      const { hub } = createHub(api, { sessions: ['w', 'o'], engineFactory: factory as any, bus });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.submitTaskForReview('run all tests');
+      api.calls.length = 0;
+
+      const result = await hub.handleCallback('auto:confirm');
+
+      assert.equal(result, 'Automation started');
+      assert.ok(factoryCalledWith !== null, 'should call engineFactory');
+      const config = factoryCalledWith as any;
+      assert.equal(config.taskDescription, 'run all tests', 'should use stored task description');
+      assert.ok(mockEng.engineCalls.includes('start'), 'should start engine');
+      assert.equal(hub.pendingCreationInfo, null, 'pending creation should be cleared');
+      assert.ok(hub.activeAutomationInfo !== null, 'should have active automation');
+    });
+
+    it('handleCallback auto:edit during confirm-task transitions back to enter-task', async () => {
+      const api = createMockApi();
+      const { hub } = createHub(api, { sessions: ['w', 'o'] });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.submitTaskForReview('old task text');
+      api.calls.length = 0;
+
+      const result = await hub.handleCallback('auto:edit');
+
+      assert.equal(result, 'Edit your task description');
+      assert.equal(hub.isAwaitingTaskInput(), true, 'should be back in enter-task step');
+      const pending = hub.pendingCreationInfo;
+      assert.ok(pending, 'should still have pending creation');
+      assert.equal(pending!.step, 'enter-task');
+      assert.equal(pending!.taskDescription, undefined, 'taskDescription should be cleared');
+    });
+
+    it('handleCallback auto:cancel during confirm-task resets to idle', async () => {
+      const api = createMockApi();
+      const { hub } = createHub(api, { sessions: ['w', 'o'] });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.submitTaskForReview('some task');
+      api.calls.length = 0;
+
+      const result = await hub.handleCallback('auto:cancel');
+
+      assert.equal(result, 'Creation cancelled');
+      assert.equal(hub.pendingCreationInfo, null, 'should be cleared');
+      assert.equal(hub.isAwaitingTaskInput(), false, 'should not be awaiting input');
+    });
+
+    it('isAwaitingTaskInput returns false during confirm-task step', async () => {
+      const api = createMockApi();
+      const { hub } = createHub(api, { sessions: ['w', 'o'] });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      assert.equal(hub.isAwaitingTaskInput(), true, 'true during enter-task');
+
+      await hub.submitTaskForReview('my task');
+      assert.equal(hub.isAwaitingTaskInput(), false, 'false during confirm-task');
+    });
+
+    it('submitTaskForReview does nothing if not in enter-task step', async () => {
+      const api = createMockApi();
+      const { hub } = createHub(api, { sessions: ['w', 'o'] });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      // Currently in select-worker step
+      api.calls.length = 0;
+
+      await hub.submitTaskForReview('should be ignored');
+
+      const pending = hub.pendingCreationInfo;
+      assert.equal(pending!.step, 'select-worker', 'should still be in select-worker');
+    });
+  });
+
   describe('stale session handling', () => {
     it('handleCallback auto:w:<stale> where session no longer exists resets to idle with error', async () => {
       const api = createMockApi();

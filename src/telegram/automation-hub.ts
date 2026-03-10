@@ -14,9 +14,10 @@ import { isNotModifiedError, isMessageNotFoundError } from './hub.js';
 import { logError } from '../logging/logger.js';
 
 export interface PendingCreation {
-  step: 'select-worker' | 'select-orchestrator' | 'enter-task';
+  step: 'select-worker' | 'select-orchestrator' | 'enter-task' | 'confirm-task';
   workerSession?: string;
   orchestratorSession?: string;
+  taskDescription?: string;
 }
 
 export interface ActiveAutomation {
@@ -132,6 +133,27 @@ export class AutomationHubRenderer {
       return 'Creation cancelled';
     }
 
+    if (data === 'auto:confirm') {
+      if (this.pendingCreation?.step === 'confirm-task' && this.pendingCreation.taskDescription) {
+        await this.completeCreation(this.pendingCreation.taskDescription);
+        return 'Automation started';
+      }
+      return '';
+    }
+
+    if (data === 'auto:edit') {
+      if (this.pendingCreation?.step === 'confirm-task') {
+        this.pendingCreation = {
+          ...this.pendingCreation,
+          step: 'enter-task',
+          taskDescription: undefined,
+        };
+        await this.onRender?.();
+        return 'Edit your task description';
+      }
+      return '';
+    }
+
     if (data.startsWith('auto:w:')) {
       const sessionName = data.slice('auto:w:'.length);
       const sessions = this.getAllSessions();
@@ -197,7 +219,7 @@ export class AutomationHubRenderer {
    * bus events, starts engine, transitions to active automation state.
    */
   async completeCreation(taskDescription: string): Promise<void> {
-    if (!this.pendingCreation || this.pendingCreation.step !== 'enter-task') return;
+    if (!this.pendingCreation || (this.pendingCreation.step !== 'enter-task' && this.pendingCreation.step !== 'confirm-task')) return;
     if (!this.pendingCreation.workerSession || !this.pendingCreation.orchestratorSession) return;
 
     const config: EngineConfig = {
@@ -267,6 +289,16 @@ export class AutomationHubRenderer {
 
     this.pendingCreation = null;
     engine.start();
+    await this.onRender?.();
+  }
+
+  /**
+   * Intermediate step: store task description and transition to confirm-task
+   * so the user can review before starting the engine.
+   */
+  async submitTaskForReview(text: string): Promise<void> {
+    if (!this.pendingCreation || this.pendingCreation.step !== 'enter-task') return;
+    this.pendingCreation = { ...this.pendingCreation, step: 'confirm-task', taskDescription: text };
     await this.onRender?.();
   }
 
@@ -359,6 +391,19 @@ export class AutomationHubRenderer {
             '',
             'Type your task description below.',
           ].join('\n');
+
+        case 'confirm-task':
+          return [
+            '<b>Automation Hub</b>',
+            '',
+            `Worker: <b>${this.pendingCreation.workerSession}</b>`,
+            `Orchestrator: <b>${this.pendingCreation.orchestratorSession}</b>`,
+            '',
+            'Task:',
+            `<i>${this.pendingCreation.taskDescription}</i>`,
+            '',
+            'Review and confirm to start.',
+          ].join('\n');
       }
     }
 
@@ -415,6 +460,14 @@ export class AutomationHubRenderer {
 
         case 'enter-task':
           keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
+          break;
+
+        case 'confirm-task':
+          keyboard.push([{ text: '\u2705 Confirm', callback_data: 'auto:confirm' }]);
+          keyboard.push([
+            { text: '\u270F\uFE0F Edit', callback_data: 'auto:edit' },
+            { text: '\u274C Cancel', callback_data: 'auto:cancel' },
+          ]);
           break;
       }
 
