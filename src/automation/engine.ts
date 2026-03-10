@@ -739,8 +739,8 @@ export class AutomationEngine {
       // is too small for the prompt echo + response, and Ink redraws in-place
       // so scrollback doesn't accumulate. The raw buffer captures everything.
       const stripped = stripAnsi(this.responseBuffer);
-      const directive = parseDirective(stripped);
-      debugLog(`[response-poll] bufLen=${this.responseBuffer.length} strippedLen=${stripped.length} hasDirective=${!!directive} tail300=${JSON.stringify(stripped.slice(-300))}`);
+      const { directive, context: parsedContext } = parseDirectiveWithContext(stripped);
+      debugLog(`[response-poll] bufLen=${this.responseBuffer.length} strippedLen=${stripped.length} hasDirective=${!!directive} hasContext=${!!parsedContext} tail300=${JSON.stringify(stripped.slice(-300))}`);
 
       if (directive) {
         debugLog(`[response-poll] directive found: ${directive.type} => ${JSON.stringify(directive)}`);
