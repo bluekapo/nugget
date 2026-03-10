@@ -999,7 +999,7 @@ describe('AutomationEngine', () => {
 
     assert.equal(engine.state, 'prompting-orchestrator');
 
-    // Complete the full cycle to get back to clearing-orchestrator
+    // Complete the full cycle to get back to idle
     timer.advance(50); // delayed Enter -> waiting-response
 
     // Send directive response
@@ -1007,21 +1007,18 @@ describe('AutomationEngine', () => {
     timer.advance(1000); // response poll fires
 
     // Now engine is idle, trigger another cycle via worker output
+    // Cycle 2 uses follow-up prompt (no /clear)
     await emitOutput(bus, 'worker', completionOutput('echo hello output'));
     timer.advance(50);  // debounce
     timer.advance(100); // idle detection
 
-    assert.equal(engine.state, 'clearing-orchestrator',
-      'should be clearing orchestrator for second cycle');
-
-    // Emit a DIFFERENT clear response -- the buffer should only have this new data
-    // (buffer was reset before sending /clear)
-    await emitOutput(bus, 'orchestrator', clearOutput());
-    timer.advance(1000); // poll detects it
-    timer.advance(500);  // settling delay
-
+    // Cycle 2 uses follow-up path, so it goes to prompting-orchestrator directly (no clearing-orchestrator)
     assert.equal(engine.state, 'prompting-orchestrator',
-      'second cycle should also detect clear from fresh buffer');
+      'second cycle should use follow-up prompt (prompting-orchestrator directly)');
+
+    timer.advance(50); // baseDelay -> Enter -> waiting-response
+    assert.equal(engine.state, 'waiting-response',
+      'second cycle should transition to waiting-response after follow-up prompt');
   });
 
   // ---------- Test 25: ANSI escape codes in raw PTY data don't prevent "(no content)" detection ----------
@@ -1289,18 +1286,18 @@ describe('AutomationEngine', () => {
     timer.advance(50);  // debounce fires
     timer.advance(100); // idle fires -> onPromptComplete -> onWorkerIdle
 
-    // Engine should enter clearing-orchestrator via normal cycle (not consultation)
-    assert.equal(engine.state, 'clearing-orchestrator',
-      'completion marker should trigger normal cycle, not consultation');
+    // Cycle 2 uses follow-up prompt path (skips clearing-orchestrator)
+    assert.equal(engine.state, 'prompting-orchestrator',
+      'completion marker should trigger follow-up prompt cycle, not consultation');
 
-    // Complete clear and verify a directive prompt (not consultation prompt) was sent
-    await emitOutput(bus, 'orchestrator', clearOutput());
-    timer.advance(1000); timer.advance(500);
+    // After baseDelay, Enter is sent -> waiting-response
+    timer.advance(50);
+    assert.equal(engine.state, 'waiting-response',
+      'should transition to waiting-response after follow-up prompt');
 
-    // Check that the prompt sent is a directive prompt (contains "## Your Response")
-    // not a consultation prompt (which would contain "## Question")
-    const promptWrites = writes.filter(w => w.name === 'orchestrator' && w.data.includes('## Your Response'));
-    assert.ok(promptWrites.length > 0, 'should send directive prompt (not consultation prompt) on fast path');
+    // Check that a follow-up prompt was sent (contains "## Worker Terminal Output" not "## Question")
+    const followUpWrites = writes.filter(w => w.name === 'orchestrator' && w.data.includes('## Worker Terminal Output'));
+    assert.ok(followUpWrites.length > 0, 'should send follow-up prompt (not consultation prompt) on fast path');
   });
 
   it('stagnation timer resets on worker output', async () => {
@@ -1860,15 +1857,21 @@ describe('AutomationEngine', () => {
       timer.advance(1000);
 
       // Now trigger another cycle to verify context was accumulated
-      // Worker completes (triggers new cycle)
+      // Worker completes (triggers new cycle -- this is cycle 2, follow-up prompt)
       await emitOutput(bus, 'worker', completionOutput('after clear'));
       timer.advance(50); timer.advance(100);
+      timer.advance(50); // baseDelay -> Enter for follow-up prompt
 
-      // Orchestrator clears for the new cycle
+      // Cycle 2 sends follow-up prompt (no persistent context in follow-up)
+      // Respond with RESET to get a full mama prompt that shows accumulated context
+      await emitOutput(bus, 'orchestrator', directiveOutput('RESET'));
+      timer.advance(1000); // response poll fires -> RESET
+
+      // Complete RESET clear -> full prompt with persistent context
       await emitOutput(bus, 'orchestrator', clearOutput());
       timer.advance(1000); timer.advance(500); timer.advance(50);
 
-      // Verify the prompt includes the persistent context
+      // Verify the full mama prompt includes the persistent context
       const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('important note'));
       assert.ok(promptWrite, 'prompt should include accumulated context "important note"');
     });
@@ -1991,34 +1994,166 @@ describe('AutomationEngine', () => {
   // ========== CONTEXT accumulation ==========
 
   describe('CONTEXT accumulation', () => {
-    it('context from multiple cycles accumulates', async () => {
+    it('context from multiple cycles accumulates and appears in mama prompt after RESET', async () => {
       engine = new AutomationEngine(config, mockSessionManager, bus);
       engine.start();
 
-      // Cycle 1: COMMAND + CONTEXT "note 1"
+      // Cycle 1: COMMAND + CONTEXT "note 1" (full mama prompt with /clear)
       timer.advance(1);
       await emitOutput(bus, 'orchestrator', clearOutput());
       timer.advance(1000); timer.advance(500); timer.advance(50);
       await emitOutput(bus, 'orchestrator', '● CONTEXT: note 1\r\n● COMMAND: echo hello\r\n\u273B Crunched for 5s\r\n');
       timer.advance(1000);
 
-      // Cycle 2: COMMAND + CONTEXT "note 2"
+      // Cycle 2: COMMAND + CONTEXT "note 2" (follow-up prompt, no /clear)
       await emitOutput(bus, 'worker', completionOutput('hello'));
       timer.advance(50); timer.advance(100);
-      await emitOutput(bus, 'orchestrator', clearOutput());
-      timer.advance(1000); timer.advance(500); timer.advance(50);
+      timer.advance(50); // baseDelay -> Enter for follow-up prompt
       await emitOutput(bus, 'orchestrator', '● CONTEXT: note 2\r\n● COMMAND: echo world\r\n\u273B Crunched for 5s\r\n');
       timer.advance(1000);
 
-      // Cycle 3: just a COMMAND (no new context)
+      // Cycle 3: RESET to trigger full mama prompt that includes accumulated context
       await emitOutput(bus, 'worker', completionOutput('world'));
       timer.advance(50); timer.advance(100);
+      timer.advance(50); // baseDelay -> Enter for follow-up prompt
+      await emitOutput(bus, 'orchestrator', directiveOutput('RESET'));
+      timer.advance(1000); // response poll -> RESET
+
+      // Complete RESET clear -> full mama prompt
       await emitOutput(bus, 'orchestrator', clearOutput());
       timer.advance(1000); timer.advance(500); timer.advance(50);
 
-      // Verify the cycle 3 prompt includes both accumulated context strings
+      // Verify the mama prompt after RESET includes both accumulated context strings
       const promptWrites = writes.filter(w => w.name === 'orchestrator' && w.data.includes('note 1') && w.data.includes('note 2'));
-      assert.ok(promptWrites.length >= 1, 'cycle 3 prompt should include both "note 1" and "note 2" from prior cycles');
+      assert.ok(promptWrites.length >= 1, 'mama prompt after RESET should include both "note 1" and "note 2" from prior cycles');
+    });
+  });
+
+  // ========== Follow-up prompt flow ==========
+
+  describe('follow-up prompt flow', () => {
+    it('cycle 1 sends /clear then full mama prompt', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // Trigger first cycle via deferred timer
+      timer.advance(1);
+      assert.equal(engine.state, 'clearing-orchestrator',
+        'cycle 1 should send /clear (clearing-orchestrator)');
+
+      // Verify /clear was written
+      const clearWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('/clear'));
+      assert.ok(clearWrite, 'cycle 1 should send /clear to orchestrator');
+
+      // Complete clear
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+
+      // Verify full mama prompt was sent (contains ## Your Role)
+      const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('## Your Role'));
+      assert.ok(promptWrite, 'cycle 1 should send full mama prompt with "## Your Role"');
+    });
+
+    it('cycle 2 skips /clear and sends follow-up prompt', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // Complete cycle 1 (full mama prompt with /clear)
+      timer.advance(1);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+      timer.advance(1000);
+      assert.equal(engine.state, 'idle', 'should be idle after cycle 1');
+
+      // Record writes before cycle 2
+      const writesBeforeCycle2 = writes.length;
+
+      // Worker completes -> triggers cycle 2
+      await emitOutput(bus, 'worker', completionOutput('test output'));
+      timer.advance(50); timer.advance(100);
+
+      // Cycle 2 should NOT send /clear
+      const cycle2Writes = writes.slice(writesBeforeCycle2);
+      const clearWrite = cycle2Writes.find(w => w.name === 'orchestrator' && w.data.includes('/clear'));
+      assert.ok(!clearWrite, 'cycle 2 should NOT send /clear to orchestrator');
+
+      // Should be in prompting-orchestrator or waiting-response (skipped clearing-orchestrator)
+      // The engine sends follow-up prompt directly, then after baseDelay sends Enter
+      // Let the delayed Enter fire
+      timer.advance(50);
+
+      assert.equal(engine.state, 'waiting-response',
+        'cycle 2 should skip clearing and go to waiting-response');
+
+      // Verify follow-up prompt was sent (contains "## Worker Terminal Output" but NOT "## Your Role")
+      const followUpWrite = cycle2Writes.find(w => w.name === 'orchestrator' && w.data.includes('## Worker Terminal Output'));
+      assert.ok(followUpWrite, 'cycle 2 should send follow-up prompt with "## Worker Terminal Output"');
+      assert.ok(!followUpWrite!.data.includes('## Your Role'),
+        'cycle 2 follow-up prompt should NOT contain "## Your Role"');
+    });
+
+    it('after RESET, next cycle sends /clear + full mama prompt', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // Complete cycle 1 (full mama prompt with /clear)
+      timer.advance(1);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+      timer.advance(1000);
+
+      // Cycle 2 would use follow-up prompt but instead responds with RESET
+      await emitOutput(bus, 'worker', completionOutput('test output'));
+      timer.advance(50); timer.advance(100);
+      timer.advance(50); // delayed Enter for follow-up prompt
+
+      // Orchestrator responds with RESET
+      await emitOutput(bus, 'orchestrator', directiveOutput('RESET'));
+      timer.advance(1000); // response poll fires, finds RESET
+
+      assert.equal(engine.state, 'clearing-orchestrator',
+        'RESET should trigger clearing-orchestrator');
+
+      // Complete the RESET clear
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500);
+
+      // After RESET, should send full mama prompt (with "## Your Role")
+      const promptWrites = writes.filter(w => w.name === 'orchestrator' && w.data.includes('## Your Role'));
+      assert.ok(promptWrites.length >= 2,
+        'after RESET, should send full mama prompt again (at least 2 mama prompts total)');
+    });
+
+    it('follow-up prompt does not contain "## Your Role"', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // Complete cycle 1
+      timer.advance(1);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+      timer.advance(1000);
+
+      // Record writes before cycle 2
+      const writesBeforeCycle2 = writes.length;
+
+      // Trigger cycle 2
+      await emitOutput(bus, 'worker', completionOutput('test output'));
+      timer.advance(50); timer.advance(100);
+      timer.advance(50); // delayed Enter
+
+      // Get the follow-up prompt
+      const cycle2Writes = writes.slice(writesBeforeCycle2);
+      const followUpPromptWrites = cycle2Writes.filter(
+        w => w.name === 'orchestrator' && w.data.length > 50 && w.data !== '\r'
+      );
+      for (const w of followUpPromptWrites) {
+        assert.ok(!w.data.includes('## Your Role'),
+          `Follow-up prompt should not contain "## Your Role": ${w.data.slice(0, 200)}`);
+      }
     });
   });
 

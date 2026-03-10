@@ -19,7 +19,7 @@ import { ScreenCapture } from '../terminal/capture.js';
 import type { TimerProvider } from '../terminal/capture.js';
 import type { EventBus } from '../events/bus.js';
 import { parseDirective, parseDirectiveWithContext } from './directive-parser.js';
-import { buildPrompt, buildConsultationPrompt } from './prompt-builder.js';
+import { buildPrompt, buildConsultationPrompt, buildFollowUpPrompt } from './prompt-builder.js';
 import { executeDirective } from './action-executor.js';
 import { ActionLog } from './action-log.js';
 
@@ -152,6 +152,7 @@ export class AutomationEngine {
   private workerClearBuffer = '';
   private workerClearPollTimer: unknown = null;
   private resetMode = false;
+  private needsFullPrompt = true;
   private readonly maxConsultationRetries = 3;
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
@@ -295,6 +296,7 @@ export class AutomationEngine {
     this.responseBuffer = '';
     this.workerClearBuffer = '';
     this.resetMode = false;
+    this.needsFullPrompt = true;
 
     this.setState('stopped');
   }
@@ -402,6 +404,14 @@ export class AutomationEngine {
       this.actionLog.updateLastOutcome(this.workerScreenText.slice(-1000));
     }
 
+    // Follow-up prompt path: skip /clear and send short prompt directly
+    if (!this.needsFullPrompt) {
+      debugLog(`[onWorkerIdle] follow-up path (needsFullPrompt=false), skipping /clear`);
+      this.sendFollowUpPrompt();
+      return;
+    }
+
+    // Full prompt path: send /clear then mama prompt
     // Reset clearing buffer before sending /clear
     this.clearingBuffer = '';
 
@@ -444,6 +454,43 @@ export class AutomationEngine {
     // Send prompt text to orchestrator (without Enter).
     // The Enter keystroke is sent after a short delay so the TUI (Ink raw mode)
     // has time to process the multiline text before the submission signal arrives.
+    this.sessionManager.writeToSession(this.config.orchestratorSession, prompt);
+
+    this.timer.setTimeout(() => {
+      if (this._state !== 'prompting-orchestrator') return;
+
+      this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+
+      // Reset orchestrator monitor for clean screen reads
+      if (this.orchestratorMonitor) {
+        this.orchestratorMonitor.capture.resetBaseline();
+        this.orchestratorMonitor.capture.markInputSent();
+      }
+
+      this.responseBuffer = '';
+      this.lastResponseBufLen = 0;
+      this.needsFullPrompt = false;
+      this.setState('waiting-response');
+
+      // Poll orchestrator screen for a parseable directive
+      this.startResponsePolling();
+    }, this.baseDelay);
+  }
+
+  /** Send a short follow-up prompt directly (no /clear), used for cycles 2+. */
+  private sendFollowUpPrompt(): void {
+    this.setState('prompting-orchestrator');
+
+    this.cycleNumber++;
+    const recentActions = this.actionLog.getRecent(1);
+    const prompt = buildFollowUpPrompt({
+      workerScreen: this.workerScreenText,
+      lastAction: recentActions.length > 0 ? recentActions[0] : null,
+      cycleNumber: this.cycleNumber,
+    });
+
+    debugLog(`[sendFollowUpPrompt] FOLLOW-UP PROMPT (${prompt.length} chars):\n${prompt}`);
+
     this.sessionManager.writeToSession(this.config.orchestratorSession, prompt);
 
     this.timer.setTimeout(() => {
@@ -539,6 +586,7 @@ export class AutomationEngine {
       this.clearingBuffer = '';
       this.sessionManager.writeToSession(this.config.orchestratorSession, '/clear\r');
       this.resetMode = true;
+      this.needsFullPrompt = true;
       this.setState('clearing-orchestrator');
       this.startClearPolling();
       return;
@@ -798,8 +846,9 @@ export class AutomationEngine {
     debugLog(`[onWorkerStagnation] state=${this._state}`);
     if (this._state !== 'idle') return;
 
-    // Enter consultation mode
+    // Enter consultation mode -- re-arm full prompt since consultation clears orchestrator context
     this.consultationMode = true;
+    this.needsFullPrompt = true;
 
     this.setState('consulting-orchestrator');
 
