@@ -1529,4 +1529,331 @@ describe('InlineKeyboard', () => {
       assert.ok(!shutdownCalled, 'onShutdown should NOT be called when sessions remain');
     });
   });
+
+  describe('regression: all callback handlers are registered and reachable', () => {
+    function createRegistrationContext() {
+      const stringHandlers: Map<string, (ctx: any) => Promise<void>> = new Map();
+      const regexHandlers: Array<{ pattern: RegExp; handler: (ctx: any) => Promise<void> }> = [];
+      const onFilters: string[] = [];
+
+      const mockBot = {
+        callbackQuery(data: string | RegExp, handler: (ctx: any) => Promise<void>) {
+          if (typeof data === 'string') {
+            stringHandlers.set(data, handler);
+          } else if (data instanceof RegExp) {
+            regexHandlers.push({ pattern: data, handler });
+          }
+        },
+        on(filter: string, _handler: unknown) {
+          onFilters.push(filter);
+        },
+      };
+
+      const mockSm = {
+        writeToSession(_name: string, _data: string) {},
+        async stop(_name: string) {},
+      };
+
+      const mockRouter = {
+        switchTo(_name: string) {},
+        remove(_name: string) {},
+        isRemote(_name: string) { return false; },
+        removeRemote(_name: string) {},
+        getAll() { return []; },
+        getRemoteBridge(_name: string) { return undefined; },
+      };
+
+      return { stringHandlers, regexHandlers, onFilters, mockBot, mockSm, mockRouter };
+    }
+
+    it('registers a handler for every ACTION_BUTTONS entry', () => {
+      const { stringHandlers, mockBot, mockSm, mockRouter } = createRegistrationContext();
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'test-session',
+        mockRouter as any,
+      );
+
+      for (const [key, btn] of Object.entries(ACTION_BUTTONS)) {
+        assert.ok(
+          stringHandlers.has(btn.data),
+          `ACTION_BUTTONS.${key} (data="${btn.data}") should have a registered handler`,
+        );
+      }
+    });
+
+    it('registers action:delete and action:scroll-lock handlers', () => {
+      const { stringHandlers, mockBot, mockSm, mockRouter } = createRegistrationContext();
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'test-session',
+        mockRouter as any,
+      );
+
+      assert.ok(stringHandlers.has('action:delete'), 'action:delete handler should be registered');
+      assert.ok(stringHandlers.has('action:scroll-lock'), 'action:scroll-lock handler should be registered');
+    });
+
+    it('registers hub:switch and hub:disconnect regex handlers', () => {
+      const { regexHandlers, mockBot, mockSm, mockRouter } = createRegistrationContext();
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'test-session',
+        mockRouter as any,
+      );
+
+      assert.ok(
+        regexHandlers.some(h => h.pattern.test('hub:switch:session-a')),
+        'hub:switch regex handler should be registered',
+      );
+      assert.ok(
+        regexHandlers.some(h => h.pattern.test('hub:disconnect:session-a')),
+        'hub:disconnect regex handler should be registered',
+      );
+    });
+
+    it('registers catch-all callback_query:data handler', () => {
+      const { onFilters, mockBot, mockSm, mockRouter } = createRegistrationContext();
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'test-session',
+        mockRouter as any,
+      );
+
+      assert.ok(
+        onFilters.includes('callback_query:data'),
+        'catch-all callback_query:data handler should be registered',
+      );
+    });
+  });
+
+  describe('regression: scroll handler integration', () => {
+    it('action:scroll-up invokes scrollHandler.scrollUp()', async () => {
+      let scrollUpCalled = false;
+      let scrollDownCalled = false;
+      let toggleLockCalled = false;
+
+      const handlers: Map<string, (ctx: any) => Promise<void>> = new Map();
+      const mockBot = {
+        callbackQuery(data: string | RegExp, handler: (ctx: any) => Promise<void>) {
+          if (typeof data === 'string') {
+            handlers.set(data, handler);
+          }
+        },
+        on(_filter: string, _handler: unknown) {},
+      };
+
+      const mockSm = {
+        writeToSession(_name: string, _data: string) {},
+        async stop(_name: string) {},
+      };
+
+      const mockRouter = {
+        switchTo(_name: string) {},
+        remove(_name: string) {},
+        isRemote(_name: string) { return false; },
+        removeRemote(_name: string) {},
+        getAll() { return []; },
+        getRemoteBridge(_name: string) { return undefined; },
+      };
+
+      const scrollHandler = {
+        scrollUp() { scrollUpCalled = true; },
+        scrollDown() { scrollDownCalled = true; },
+        toggleLock() { toggleLockCalled = true; },
+        get scrollLocked() { return true; },
+      };
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'active-session',
+        mockRouter as any,
+        undefined, // refreshHub
+        scrollHandler,
+      );
+
+      const scrollUpHandler = handlers.get('action:scroll-up')!;
+      assert.ok(scrollUpHandler, 'action:scroll-up handler should exist');
+
+      const mockCtx = {
+        async answerCallbackQuery(_opts?: unknown) {},
+        async editMessageReplyMarkup(_markup: unknown) {},
+      };
+
+      await scrollUpHandler(mockCtx);
+      assert.ok(scrollUpCalled, 'scrollHandler.scrollUp() should have been called');
+      assert.ok(!scrollDownCalled, 'scrollDown should not be called');
+      assert.ok(!toggleLockCalled, 'toggleLock should not be called');
+    });
+
+    it('action:scroll-down invokes scrollHandler.scrollDown()', async () => {
+      let scrollDownCalled = false;
+
+      const handlers: Map<string, (ctx: any) => Promise<void>> = new Map();
+      const mockBot = {
+        callbackQuery(data: string | RegExp, handler: (ctx: any) => Promise<void>) {
+          if (typeof data === 'string') {
+            handlers.set(data, handler);
+          }
+        },
+        on(_filter: string, _handler: unknown) {},
+      };
+
+      const mockSm = {
+        writeToSession(_name: string, _data: string) {},
+        async stop(_name: string) {},
+      };
+
+      const mockRouter = {
+        switchTo(_name: string) {},
+        remove(_name: string) {},
+        isRemote(_name: string) { return false; },
+        removeRemote(_name: string) {},
+        getAll() { return []; },
+        getRemoteBridge(_name: string) { return undefined; },
+      };
+
+      const scrollHandler = {
+        scrollUp() {},
+        scrollDown() { scrollDownCalled = true; },
+        toggleLock() {},
+        get scrollLocked() { return false; },
+      };
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'active-session',
+        mockRouter as any,
+        undefined, // refreshHub
+        scrollHandler,
+      );
+
+      const scrollDownHandler = handlers.get('action:scroll-down')!;
+      assert.ok(scrollDownHandler, 'action:scroll-down handler should exist');
+
+      const mockCtx = {
+        async answerCallbackQuery(_opts?: unknown) {},
+        async editMessageReplyMarkup(_markup: unknown) {},
+      };
+
+      await scrollDownHandler(mockCtx);
+      assert.ok(scrollDownCalled, 'scrollHandler.scrollDown() should have been called');
+    });
+
+    it('action:scroll-lock invokes scrollHandler.toggleLock()', async () => {
+      let toggleLockCalled = false;
+
+      const handlers: Map<string, (ctx: any) => Promise<void>> = new Map();
+      const mockBot = {
+        callbackQuery(data: string | RegExp, handler: (ctx: any) => Promise<void>) {
+          if (typeof data === 'string') {
+            handlers.set(data, handler);
+          }
+        },
+        on(_filter: string, _handler: unknown) {},
+      };
+
+      const mockSm = {
+        writeToSession(_name: string, _data: string) {},
+        async stop(_name: string) {},
+      };
+
+      const mockRouter = {
+        switchTo(_name: string) {},
+        remove(_name: string) {},
+        isRemote(_name: string) { return false; },
+        removeRemote(_name: string) {},
+        getAll() { return []; },
+        getRemoteBridge(_name: string) { return undefined; },
+      };
+
+      const scrollHandler = {
+        scrollUp() {},
+        scrollDown() {},
+        toggleLock() { toggleLockCalled = true; },
+        get scrollLocked() { return true; },
+      };
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'active-session',
+        mockRouter as any,
+        undefined, // refreshHub
+        scrollHandler,
+      );
+
+      const scrollLockHandler = handlers.get('action:scroll-lock')!;
+      assert.ok(scrollLockHandler, 'action:scroll-lock handler should exist');
+
+      const mockCtx = {
+        async answerCallbackQuery(_opts?: unknown) {},
+        async editMessageReplyMarkup(_markup: unknown) {},
+      };
+
+      await scrollLockHandler(mockCtx);
+      assert.ok(toggleLockCalled, 'scrollHandler.toggleLock() should have been called');
+    });
+  });
+
+  describe('regression: hub:disconnect calls router.remove for local sessions', () => {
+    it('disconnect handler calls both sessionManager.stop and router.remove for local sessions', async () => {
+      const regexHandlers: Array<{ pattern: RegExp; handler: (ctx: any) => Promise<void> }> = [];
+      let stoppedName = '';
+      let removedName = '';
+
+      const mockBot = {
+        callbackQuery(data: string | RegExp, handler: (ctx: any) => Promise<void>) {
+          if (data instanceof RegExp) {
+            regexHandlers.push({ pattern: data, handler });
+          }
+        },
+        on(_filter: string, _handler: unknown) {},
+      };
+
+      const mockSm = {
+        writeToSession(_name: string, _data: string) {},
+        async stop(name: string) { stoppedName = name; },
+      };
+
+      const mockRouter = {
+        switchTo(_name: string) {},
+        remove(name: string) { removedName = name; },
+        isRemote(_name: string) { return false; },
+        removeRemote(_name: string) {},
+        getAll() { return ['other-session']; },
+        getRemoteBridge(_name: string) { return undefined; },
+      };
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'current',
+        mockRouter as any,
+      );
+
+      const handler = regexHandlers.find(h => h.pattern.test('hub:disconnect:test-session'));
+      assert.ok(handler, 'hub:disconnect handler should be registered');
+
+      const mockCtx = {
+        match: 'hub:disconnect:test-session'.match(/^hub:disconnect:(.+)$/),
+        async answerCallbackQuery(_opts?: unknown) {},
+      };
+
+      await handler.handler(mockCtx);
+
+      assert.equal(stoppedName, 'test-session', 'sessionManager.stop should be called with session name');
+      assert.equal(removedName, 'test-session', 'router.remove should be called immediately for local sessions');
+    });
+  });
 });
