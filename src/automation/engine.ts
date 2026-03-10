@@ -18,7 +18,7 @@ import { TerminalEmulator } from '../terminal/emulator.js';
 import { ScreenCapture } from '../terminal/capture.js';
 import type { TimerProvider } from '../terminal/capture.js';
 import type { EventBus } from '../events/bus.js';
-import { parseDirective } from './directive-parser.js';
+import { parseDirective, parseDirectiveWithContext } from './directive-parser.js';
 import { buildPrompt, buildConsultationPrompt } from './prompt-builder.js';
 import { executeDirective } from './action-executor.js';
 import { ActionLog } from './action-log.js';
@@ -147,6 +147,7 @@ export class AutomationEngine {
   private consultationRetryCount = 0;
   private idleEnteredAt = 0;
   private idleDurationMs = 0;
+  private persistentContext: string[] = [];
   private readonly maxConsultationRetries = 3;
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
@@ -416,6 +417,7 @@ export class AutomationEngine {
       workerScreen: this.workerScreenText,
       actionLog: this.actionLog.getRecent(),
       cycleNumber: this.cycleNumber,
+      persistentContext: this.persistentContext,
     });
 
     debugLog(`[onClearComplete] PROMPT BEING SENT (${prompt.length} chars):\n${prompt}`);
@@ -452,10 +454,16 @@ export class AutomationEngine {
 
     this.setState('executing');
 
-    // Parse directive from raw PTY buffer (emulator viewport is too small, Ink redraws in-place)
+    // Parse directive and context from raw PTY buffer (emulator viewport is too small, Ink redraws in-place)
     const stripped = stripAnsi(this.responseBuffer);
     debugLog(`[onResponseReady] bufLen=${this.responseBuffer.length} strippedLen=${stripped.length} tail300=${JSON.stringify(stripped.slice(-300))}`);
-    const directive = parseDirective(stripped);
+    const parseResult = parseDirectiveWithContext(stripped);
+    const directive = parseResult.directive;
+
+    // Accumulate persistent context if present (before handling directive)
+    if (parseResult.context !== null) {
+      this.persistentContext.push(parseResult.context);
+    }
 
     // SAF-02: Parse retry logic
     if (!directive && !this.retryAttempted) {

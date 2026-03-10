@@ -41,6 +41,12 @@ export function executeDirective(
         doneSummary: directive.summary,
       };
 
+    case 'CLEAR':
+      return { executed: false, description: 'CLEAR' };
+
+    case 'RESET':
+      return { executed: false, description: 'RESET' };
+
     case 'YES':
     case 'NO':
       throw new Error(`${directive.type} is a consultation response, not a worker action`);
