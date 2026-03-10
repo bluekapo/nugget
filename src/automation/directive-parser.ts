@@ -1,6 +1,13 @@
 import type { Directive, ParseResult } from './types.js';
 
 /**
+ * Regex matching directive keyword lines that should terminate continuation collection.
+ * Prevents CONTEXT continuation from swallowing COMMAND/ESCALATE/DONE/etc. text
+ * when rendered under a single ● bullet in Claude Code TUI.
+ */
+const DIRECTIVE_KEYWORD_RE = /^(COMMAND|ESCALATE|DONE|SELECT|CONTEXT):\s|^(ENTER|CLEAR|RESET|YES|NO)$/;
+
+/**
  * Parse a directive from orchestrator output text.
  *
  * Only matches lines with the ● prefix (Claude Code assistant responses).
@@ -64,8 +71,9 @@ function collectContinuation(firstLine: string, lines: string[], startIdx: numbe
     const raw = lines[j];
     const contTrimmed = raw.trim();
 
-    // Stop at empty lines, new bullets, prompts, or separator lines
+    // Stop at empty lines, new bullets, prompts, separator lines, or directive keywords
     if (!contTrimmed || /^[●❯]/.test(contTrimmed) || /^─{3,}/.test(contTrimmed)) break;
+    if (DIRECTIVE_KEYWORD_RE.test(contTrimmed)) break;
 
     parts.push(contTrimmed);
   }
@@ -151,12 +159,80 @@ export function parseContextBlock(text: string): string | null {
 }
 
 /**
+ * Relaxed directive parser for single-bullet responses.
+ *
+ * When Claude Code TUI renders both CONTEXT and a directive under a single ●,
+ * the directive line lacks its own ● prefix. This function scans non-● lines
+ * for directive patterns.
+ *
+ * IMPORTANT: Only called from parseDirectiveWithContext when a ● CONTEXT: block
+ * is confirmed to exist. This prevents false positives from bare directive text
+ * in prompt echoes.
+ */
+function parseDirectiveRelaxed(text: string): Directive | null {
+  const lines = text.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) continue;
+
+    // Skip lines with ● prefix (handled by parseDirective)
+    if (/^●/.test(trimmed)) continue;
+
+    // Skip separator lines and prompt lines
+    if (/^─{3,}/.test(trimmed)) continue;
+    if (/^❯/.test(trimmed)) continue;
+
+    // Try COMMAND: with continuation
+    const cmdMatch = trimmed.match(/^COMMAND:\s+(.+)$/);
+    if (cmdMatch) {
+      const command = collectContinuation(cmdMatch[1].trim(), lines, i);
+      return { type: 'COMMAND', command };
+    }
+
+    // Try ESCALATE: with continuation
+    const escMatch = trimmed.match(/^ESCALATE:\s+(.+)$/);
+    if (escMatch) {
+      const reason = collectContinuation(escMatch[1].trim(), lines, i);
+      return { type: 'ESCALATE', reason };
+    }
+
+    // Try DONE: with continuation
+    const doneMatch = trimmed.match(/^DONE:\s+(.+)$/);
+    if (doneMatch) {
+      const summary = collectContinuation(doneMatch[1].trim(), lines, i);
+      return { type: 'DONE', summary };
+    }
+
+    // Try single-line directives (ENTER, CLEAR, RESET, YES, NO, SELECT)
+    const directive = matchSingleLine(trimmed);
+    if (directive) return directive;
+  }
+
+  return null;
+}
+
+/**
  * Convenience function: parse both directive and context block from the same text.
  * Returns combined ParseResult with both directive and context (either may be null).
+ *
+ * When parseDirective returns null but a ● CONTEXT: block exists, falls back to
+ * parseDirectiveRelaxed to find directives on non-● lines. This handles Claude Code
+ * TUI rendering both CONTEXT and COMMAND under a single ● bullet.
  */
 export function parseDirectiveWithContext(text: string): ParseResult {
-  return {
-    directive: parseDirective(text),
-    context: parseContextBlock(text),
-  };
+  const directive = parseDirective(text);
+  const context = parseContextBlock(text);
+
+  // Fallback: if no ●-prefixed directive found but we DO have a ● CONTEXT block,
+  // look for a relaxed (non-●) directive. This handles Claude Code TUI rendering
+  // both CONTEXT and COMMAND under a single ● bullet.
+  if (!directive && context !== null) {
+    return {
+      directive: parseDirectiveRelaxed(text),
+      context,
+    };
+  }
+
+  return { directive, context };
 }
