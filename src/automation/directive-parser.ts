@@ -263,12 +263,15 @@ export function parseDirectiveWithContext(text: string): ParseResult {
   const directive = parseDirective(normalized);
   const context = parseContextBlock(normalized);
 
-  // Fallback: if no ●-prefixed directive found but we DO have a ● CONTEXT block,
-  // look for a relaxed (non-●) directive. This handles Claude Code TUI rendering
-  // both CONTEXT and COMMAND under a single ● bullet.
-  if (!directive && context !== null) {
+  // When a ● CONTEXT block exists, always try the relaxed parser and prefer its
+  // result. In follow-up cycles (no /clear), old ● COMMAND from previous cycles
+  // persists in Ink TUI repaints. parseDirective finds the stale directive, but
+  // the current cycle's directive sits on a non-● line under the CONTEXT bullet.
+  // The relaxed parser finds it correctly.
+  if (context !== null) {
+    const relaxedDirective = parseDirectiveRelaxed(normalized);
     return {
-      directive: parseDirectiveRelaxed(normalized),
+      directive: relaxedDirective ?? directive,
       context,
     };
   }

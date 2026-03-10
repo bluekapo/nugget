@@ -726,5 +726,44 @@ describe('parseDirectiveWithContext', () => {
       assert.ok(result.context);
       assert.ok(result.context!.includes('sub-section'), `expected complete context, got: ${result.context}`);
     });
+
+    it('stale buffer: prefers relaxed directive over stale ● COMMAND from previous cycle', () => {
+      // In follow-up cycles (no /clear), old ● COMMAND from cycle 1 persists in
+      // Ink TUI repaints. The current cycle's CONTEXT + COMMAND are under a single
+      // ● bullet, so COMMAND lacks its own ● prefix. The relaxed parser should
+      // find the current COMMAND, not the stale one.
+      const text = [
+        // Stale content from cycle 1 (still in Ink repaint buffer)
+        '● COMMAND: I need to understand the current automation system in this',
+        '  project. Please explore the codebase and give me a detailed summary.',
+        '',
+        '✻ Cogitated for 2m 6s',
+        '',
+        '────────────────────────────────',
+        '❯ ',
+        '',
+        // Current cycle 2 response: CONTEXT + COMMAND under single ● bullet
+        '● CONTEXT: This is a Telegram bot project. The hub is a Telegram message.',
+        '  COMMAND: Now let us proceed with the task. Use /gsd:quick to implement this',
+        '  improvement to the automation workflow.',
+        '',
+        '✻ Crunched for 1m 30s',
+        '',
+        '────────────────────────────────',
+        '❯ ',
+      ].join('\n');
+      const result = parseDirectiveWithContext(text);
+
+      // Should find the current cycle's COMMAND, not the stale one
+      assert.ok(result.directive, 'should find a directive');
+      assert.strictEqual(result.directive!.type, 'COMMAND');
+      const cmd = (result.directive as any).command;
+      assert.ok(cmd.includes('proceed with the task'), `expected current command, got: ${cmd}`);
+      assert.ok(!cmd.includes('understand the current automation'), `should not return stale command, got: ${cmd}`);
+
+      // Should find CONTEXT
+      assert.ok(result.context, 'should find context');
+      assert.ok(result.context!.includes('Telegram bot'), `expected context content, got: ${result.context}`);
+    });
   });
 });

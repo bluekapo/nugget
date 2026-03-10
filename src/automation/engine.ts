@@ -62,7 +62,7 @@ function hasOrchestratorResponse(text: string): boolean {
 
 /** Check if the buffer contains a ✻ completion marker at column 0 (not indented/echoed). */
 function hasCompletionMarker(text: string): boolean {
-  return text.split('\n').some(line => /^\u273B\s+(Crunched|Saut\u00e9ed|Mustered) for/.test(line));
+  return text.split('\n').some(line => /^\u273B\s+.+ for/.test(line));
 }
 
 const RETRY_PROMPT = 'Your previous response could not be parsed as a valid directive. '
