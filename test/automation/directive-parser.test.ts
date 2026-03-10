@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDirective } from '../../src/automation/directive-parser.js';
+import { parseDirective, parseContextBlock, parseDirectiveWithContext } from '../../src/automation/directive-parser.js';
 
 describe('parseDirective', () => {
   describe('COMMAND directive', () => {
@@ -256,6 +256,50 @@ describe('parseDirective', () => {
     });
   });
 
+  describe('CLEAR directive', () => {
+    it('returns CLEAR type from ● CLEAR', () => {
+      const result = parseDirective('● CLEAR');
+      assert.deepStrictEqual(result, { type: 'CLEAR' });
+    });
+
+    it('handles leading whitespace before ● CLEAR', () => {
+      const result = parseDirective('  ● CLEAR');
+      assert.deepStrictEqual(result, { type: 'CLEAR' });
+    });
+
+    it('returns null for bare CLEAR without ● prefix', () => {
+      const result = parseDirective('CLEAR');
+      assert.strictEqual(result, null);
+    });
+
+    it('returns null for CLEAR with parameters (exact match like ENTER)', () => {
+      const result = parseDirective('● CLEAR: extra');
+      assert.strictEqual(result, null);
+    });
+  });
+
+  describe('RESET directive', () => {
+    it('returns RESET type from ● RESET', () => {
+      const result = parseDirective('● RESET');
+      assert.deepStrictEqual(result, { type: 'RESET' });
+    });
+
+    it('handles leading whitespace before ● RESET', () => {
+      const result = parseDirective('  ● RESET');
+      assert.deepStrictEqual(result, { type: 'RESET' });
+    });
+
+    it('returns null for bare RESET without ● prefix', () => {
+      const result = parseDirective('RESET');
+      assert.strictEqual(result, null);
+    });
+
+    it('returns null for RESET with parameters (exact match like ENTER)', () => {
+      const result = parseDirective('● RESET: extra');
+      assert.strictEqual(result, null);
+    });
+  });
+
   describe('DONE directive', () => {
     it('extracts summary string from ● DONE: <text>', () => {
       const result = parseDirective('some output\n● DONE: All tests pass and feature works\n\n❯ ');
@@ -323,5 +367,69 @@ describe('parseDirective', () => {
       const result = parseDirective('NO');
       assert.strictEqual(result, null);
     });
+  });
+});
+
+describe('parseContextBlock', () => {
+  it('extracts single-line context from ● CONTEXT: line', () => {
+    const result = parseContextBlock('● CONTEXT: project uses React');
+    assert.strictEqual(result, 'project uses React');
+  });
+
+  it('extracts multi-line context with continuation lines', () => {
+    const text = [
+      '● CONTEXT: first line',
+      '  second line',
+      '  third line',
+    ].join('\n');
+    const result = parseContextBlock(text);
+    assert.strictEqual(result, 'first line second line third line');
+  });
+
+  it('returns null when no CONTEXT: block present', () => {
+    const result = parseContextBlock('● COMMAND: npm test');
+    assert.strictEqual(result, null);
+  });
+
+  it('returns null for bare CONTEXT: without ● prefix', () => {
+    const result = parseContextBlock('CONTEXT: project uses React');
+    assert.strictEqual(result, null);
+  });
+
+  it('context block coexists with directive in same text', () => {
+    const text = [
+      '● CONTEXT: Worker is using Next.js',
+      '● COMMAND: Fix the routing issue',
+    ].join('\n');
+    const context = parseContextBlock(text);
+    assert.strictEqual(context, 'Worker is using Next.js');
+    const directive = parseDirective(text);
+    assert.deepStrictEqual(directive, { type: 'COMMAND', command: 'Fix the routing issue' });
+  });
+});
+
+describe('parseDirectiveWithContext', () => {
+  it('text with both directive and context returns both', () => {
+    const text = [
+      '● CONTEXT: Worker is using Next.js',
+      '● COMMAND: Fix the routing issue',
+    ].join('\n');
+    const result = parseDirectiveWithContext(text);
+    assert.deepStrictEqual(result.directive, { type: 'COMMAND', command: 'Fix the routing issue' });
+    assert.strictEqual(result.context, 'Worker is using Next.js');
+  });
+
+  it('text with directive only returns directive and null context', () => {
+    const text = '● COMMAND: npm test';
+    const result = parseDirectiveWithContext(text);
+    assert.deepStrictEqual(result.directive, { type: 'COMMAND', command: 'npm test' });
+    assert.strictEqual(result.context, null);
+  });
+
+  it('text with context only returns null directive and context string', () => {
+    const text = '● CONTEXT: project uses React';
+    const result = parseDirectiveWithContext(text);
+    assert.strictEqual(result.directive, null);
+    assert.strictEqual(result.context, 'project uses React');
   });
 });
