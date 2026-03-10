@@ -487,6 +487,28 @@ describe('parseDirectiveWithContext', () => {
       const result = parseDirective('COMMAND: npm test');
       assert.strictEqual(result, null);
     });
+
+    it('ignores echoed prompt example directives, finds actual response directive', () => {
+      // Simulates a real response buffer where:
+      // - First part is the echoed prompt with example directives (bare, no ●)
+      // - Second part is the actual orchestrator response (● CONTEXT + bare COMMAND)
+      const text = [
+        'Example correct response (your ENTIRE output should look like this):',
+        'COMMAND: Fix the bug in src/session/pty.ts where delete signals are not sent correctly',
+        '',
+        'Example CONTEXT modifier (attach to any directive):',
+        'CONTEXT: Worker is using Next.js App Router',
+        'COMMAND: Fix the routing issue',
+        '',
+        '● CONTEXT: The project uses ESM modules',
+        'COMMAND: npm run build && npm test',
+      ].join('\n');
+      const result = parseDirectiveWithContext(text);
+      assert.ok(result.directive);
+      assert.strictEqual(result.directive!.type, 'COMMAND');
+      assert.strictEqual((result.directive as any).command, 'npm run build && npm test');
+      assert.strictEqual(result.context, 'The project uses ESM modules');
+    });
   });
 
   describe('collectContinuation stops at directive keywords', () => {
