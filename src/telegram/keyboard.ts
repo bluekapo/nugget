@@ -221,13 +221,15 @@ export function registerCallbackHandlers(
       if (bridge) bridge.sendExit();
       router.removeRemote(name);
     } else {
-      // Local session: stop PTY — the session:exit bus handler in index.ts
-      // will call router.remove(name), so we do NOT call it here to avoid double-remove
+      // Local session: stop PTY and remove from router immediately.
+      // router.remove() is idempotent, so the subsequent session:exit bus handler
+      // in index.ts calling router.remove(name) again is safe.
       try {
         await sessionManager.stop(name);
       } catch {
         // Session may have already exited
       }
+      router.remove(name);
     }
     await ctx.answerCallbackQuery({ text: `Disconnected ${name}` });
 
