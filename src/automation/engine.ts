@@ -81,6 +81,7 @@ export type EngineState =
   | 'idle'
   | 'capturing-worker'
   | 'clearing-orchestrator'
+  | 'clearing-worker'
   | 'prompting-orchestrator'
   | 'waiting-response'
   | 'consulting-orchestrator'
@@ -148,6 +149,9 @@ export class AutomationEngine {
   private idleEnteredAt = 0;
   private idleDurationMs = 0;
   private persistentContext: string[] = [];
+  private workerClearBuffer = '';
+  private workerClearPollTimer: unknown = null;
+  private resetMode = false;
   private readonly maxConsultationRetries = 3;
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
@@ -210,6 +214,11 @@ export class AutomationEngine {
       // response off-screen. Parsing the raw buffer avoids this limitation.
       if ((this._state === 'waiting-response' || this._state === 'waiting-consultation') && sessionName === this.config.orchestratorSession) {
         this.responseBuffer += data;
+      }
+
+      // Accumulate raw PTY data during clearing-worker state (worker /clear output).
+      if (this._state === 'clearing-worker' && sessionName === this.config.workerSession) {
+        this.workerClearBuffer += data;
       }
 
       // Reset stagnation timer on worker output while idle
@@ -279,10 +288,13 @@ export class AutomationEngine {
     this.cancelResponsePolling();
     this.cancelStagnationTimer();
     this.cancelConsultationWaitTimer();
+    this.cancelWorkerClearPolling();
 
     // Reset buffers
     this.clearingBuffer = '';
     this.responseBuffer = '';
+    this.workerClearBuffer = '';
+    this.resetMode = false;
 
     this.setState('stopped');
   }
@@ -293,6 +305,7 @@ export class AutomationEngine {
     this.cancelResponsePolling();
     this.cancelStagnationTimer();
     this.cancelConsultationWaitTimer();
+    this.cancelWorkerClearPolling();
     this.setState('paused');
   }
 
@@ -403,10 +416,16 @@ export class AutomationEngine {
   }
 
   private onClearComplete(): void {
-    debugLog(`[onClearComplete] state=${this._state}`);
+    debugLog(`[onClearComplete] state=${this._state} resetMode=${this.resetMode}`);
     this.cancelClearPolling();
     this.clearingBuffer = '';
     if (this._state !== 'clearing-orchestrator') return;
+
+    // If RESET-triggered, update action outcome and clear reset flag
+    if (this.resetMode) {
+      this.resetMode = false;
+      this.actionLog.updateLastOutcome('Orchestrator reset, re-sending full prompt');
+    }
 
     this.setState('prompting-orchestrator');
 
@@ -503,6 +522,27 @@ export class AutomationEngine {
 
     // Explicit null guard for TypeScript narrowing (all null paths returned above)
     if (!directive) return;
+
+    // Handle CLEAR directive: send /clear to worker, poll for (no content)
+    if (directive.type === 'CLEAR') {
+      this.actionLog.add('CLEAR', '(clearing worker)');
+      this.workerClearBuffer = '';
+      this.sessionManager.writeToSession(this.config.workerSession, '/clear\r');
+      this.setState('clearing-worker');
+      this.startWorkerClearPolling();
+      return;
+    }
+
+    // Handle RESET directive: clear orchestrator, re-send full prompt
+    if (directive.type === 'RESET') {
+      this.actionLog.add('RESET', '(resetting orchestrator)');
+      this.clearingBuffer = '';
+      this.sessionManager.writeToSession(this.config.orchestratorSession, '/clear\r');
+      this.resetMode = true;
+      this.setState('clearing-orchestrator');
+      this.startClearPolling();
+      return;
+    }
 
     // Handle based on directive type
     if (directive.type === 'SELECT') {
@@ -688,6 +728,45 @@ export class AutomationEngine {
     if (this.responsePollTimer !== null) {
       this.timer.clearTimeout(this.responsePollTimer);
       this.responsePollTimer = null;
+    }
+  }
+
+  private startWorkerClearPolling(): void {
+    this.cancelWorkerClearPolling();
+    debugLog(`[startWorkerClearPolling] scheduling poll in 1000ms, bufferLen=${this.workerClearBuffer.length}`);
+    this.workerClearPollTimer = this.timer.setTimeout(() => {
+      if (this._state !== 'clearing-worker') {
+        debugLog(`[worker-clear-poll] SKIPPED — state changed to ${this._state}`);
+        return;
+      }
+
+      const stripped = this.workerClearBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+      debugLog(`[worker-clear-poll] rawBufferLen=${this.workerClearBuffer.length} strippedLen=${stripped.length}`);
+      if (stripped.includes('(no content)')) {
+        debugLog(`[worker-clear-poll] FOUND "(no content)" — completing CLEAR`);
+        this.workerClearPollTimer = null;
+        this.workerClearBuffer = '';
+        this.actionLog.updateLastOutcome('Worker context cleared');
+        this.bus.emit('automation:cycle-complete', this.cycleNumber, 'CLEAR');
+
+        // Reset worker monitor for next cycle and re-enter idle
+        if (this.workerMonitor) {
+          this.workerMonitor.capture.resetBaseline();
+          this.workerMonitor.capture.markInputSent();
+          this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
+        }
+        this.setState('idle');
+      } else {
+        debugLog(`[worker-clear-poll] "(no content)" NOT found — re-polling`);
+        this.startWorkerClearPolling();
+      }
+    }, 1000);
+  }
+
+  private cancelWorkerClearPolling(): void {
+    if (this.workerClearPollTimer !== null) {
+      this.timer.clearTimeout(this.workerClearPollTimer);
+      this.workerClearPollTimer = null;
     }
   }
 
