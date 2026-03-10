@@ -871,6 +871,12 @@ export class AutomationEngine {
       // Log scrollback text — clean content not affected by Ink's cursor rendering
       const scrollback = this.workerMonitor.emulator.getScrollbackText();
       debugLog(`[onWorkerStagnation] SCROLLBACK TEXT (${scrollback.length} chars, last 2000):\n${scrollback.slice(-2000)}`);
+
+      // Update action log with fresh screen content so consultation prompt is accurate
+      const fullText = scrollback ? scrollback + '\n' + this.workerScreenText : this.workerScreenText;
+      this.actionLog.updateLastOutcome(fullText.slice(-1000));
+    } else {
+      this.actionLog.updateLastOutcome(this.workerScreenText.slice(-1000));
     }
 
     // Reset clearing buffer before sending /clear

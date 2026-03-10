@@ -150,6 +150,14 @@ export function buildConsultationPrompt(ctx: ConsultationPacket): string {
   // Action log section (compressed format)
   renderActionLog(lines, ctx.actionLog, ctx.cycleNumber);
 
+  lines.push('## How to Determine');
+  lines.push('Look for these indicators in the terminal output:');
+  lines.push('- An idle prompt character (e.g. `>` or `$`) visible at the bottom = worker is idle, ready for input');
+  lines.push('- A timing line like `Cooked for Xm Ys` or `Brewed for Xm Ys` = response generation completed');
+  lines.push('- Follow-up suggestions or questions from the worker = work completed, waiting for next instruction');
+  lines.push('- Only answer NO if the worker is actively processing (spinner visible, partial output still streaming, no idle prompt)');
+  lines.push('');
+
   lines.push('## Question');
   if (ctx.idleDurationMs !== undefined) {
     lines.push(`The worker has been idle for ${Math.round(ctx.idleDurationMs / 1000)} seconds.`);
