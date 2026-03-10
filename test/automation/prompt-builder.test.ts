@@ -71,14 +71,16 @@ describe('buildPrompt', () => {
     );
   });
 
-  it('output contains all 6 directive types (COMMAND, SELECT, ENTER, WAIT, ESCALATE, DONE)', () => {
+  it('output contains all directive types (COMMAND, SELECT, ENTER, ESCALATE, DONE, CLEAR, RESET, CONTEXT)', () => {
     const prompt = buildPrompt(basePacket);
     assert.ok(prompt.includes('COMMAND'), 'Expected COMMAND directive type');
     assert.ok(prompt.includes('SELECT'), 'Expected SELECT directive type');
     assert.ok(prompt.includes('ENTER'), 'Expected ENTER directive type');
-    assert.ok(prompt.includes('WAIT'), 'Expected WAIT directive type');
     assert.ok(prompt.includes('ESCALATE'), 'Expected ESCALATE directive type');
     assert.ok(prompt.includes('DONE'), 'Expected DONE directive type');
+    assert.ok(prompt.includes('CLEAR'), 'Expected CLEAR directive type');
+    assert.ok(prompt.includes('RESET'), 'Expected RESET directive type');
+    assert.ok(prompt.includes('CONTEXT:'), 'Expected CONTEXT modifier');
   });
 
   it('output contains DONE directive in available directives list', () => {
@@ -110,6 +112,62 @@ describe('buildPrompt', () => {
       prompt.includes('ESCALATE: Task is complete'),
       `Expected wrong example for ESCALATE task completion:\n${prompt}`
     );
+  });
+
+  it('includes persistent context section when persistentContext provided', () => {
+    const packet: ContextPacket = {
+      ...basePacket,
+      persistentContext: ['Worker uses React', 'DB is PostgreSQL'],
+    };
+    const prompt = buildPrompt(packet);
+    assert.ok(
+      prompt.includes('Persistent Context'),
+      `Expected "Persistent Context" header in prompt:\n${prompt}`
+    );
+    assert.ok(
+      prompt.includes('Worker uses React'),
+      `Expected first context item in prompt:\n${prompt}`
+    );
+    assert.ok(
+      prompt.includes('DB is PostgreSQL'),
+      `Expected second context item in prompt:\n${prompt}`
+    );
+  });
+
+  it('omits persistent context section when persistentContext is empty', () => {
+    const packet: ContextPacket = {
+      ...basePacket,
+      persistentContext: [],
+    };
+    const prompt = buildPrompt(packet);
+    assert.ok(
+      !prompt.includes('Persistent Context'),
+      `Should NOT include "Persistent Context" when array is empty:\n${prompt}`
+    );
+  });
+
+  it('omits persistent context section when persistentContext undefined', () => {
+    const prompt = buildPrompt(basePacket);
+    assert.ok(
+      !prompt.includes('Persistent Context'),
+      `Should NOT include "Persistent Context" when undefined:\n${prompt}`
+    );
+  });
+
+  it('directive reference includes CLEAR and RESET', () => {
+    const prompt = buildPrompt(basePacket);
+    const lines = prompt.split('\n');
+    const clearLine = lines.find(l => l.includes('CLEAR') && l.includes('--'));
+    const resetLine = lines.find(l => l.includes('RESET') && l.includes('--'));
+    assert.ok(clearLine, `Expected CLEAR directive in reference:\n${prompt}`);
+    assert.ok(resetLine, `Expected RESET directive in reference:\n${prompt}`);
+  });
+
+  it('directive reference documents CONTEXT modifier', () => {
+    const prompt = buildPrompt(basePacket);
+    const lines = prompt.split('\n');
+    const contextLine = lines.find(l => l.includes('CONTEXT:') && l.includes('--'));
+    assert.ok(contextLine, `Expected CONTEXT: modifier documentation in prompt:\n${prompt}`);
   });
 });
 
