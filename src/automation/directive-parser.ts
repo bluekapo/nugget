@@ -1,4 +1,4 @@
-import type { Directive } from './types.js';
+import type { Directive, ParseResult } from './types.js';
 
 /**
  * Parse a directive from orchestrator output text.
@@ -101,9 +101,62 @@ function matchSingleLine(line: string): Directive | null {
     return { type: 'NO' };
   }
 
+  // CLEAR (exact match, no parameters)
+  if (line === 'CLEAR') {
+    return { type: 'CLEAR' };
+  }
+
+  // RESET (exact match, no parameters)
+  if (line === 'RESET') {
+    return { type: 'RESET' };
+  }
+
   // WAIT (removed directive -- return null so it triggers normal retry/parse-failure flow)
   if (line === 'WAIT') return null;
   if (/^WAIT:\s+\d+$/.test(line)) return null;
 
   return null;
+}
+
+/**
+ * Extract a CONTEXT: block from orchestrator output text.
+ *
+ * CONTEXT is a modifier, not a directive. It appears alongside a directive
+ * (e.g., the orchestrator response has both a COMMAND: line and a CONTEXT: line).
+ * parseDirective does NOT match CONTEXT: -- this is a separate extraction.
+ *
+ * Scans for a line matching `● CONTEXT:` with the ● prefix.
+ * Collects indented continuation lines below it (same pattern as directives).
+ * Returns the joined context string, or null if no CONTEXT: block found.
+ */
+export function parseContextBlock(text: string): string | null {
+  const lines = text.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) continue;
+
+    // Only match lines with the ● prefix
+    if (!/^●/.test(trimmed)) continue;
+
+    const line = trimmed.replace(/^●\s*/, '');
+
+    const ctxMatch = line.match(/^CONTEXT:\s+(.+)$/);
+    if (ctxMatch) {
+      return collectContinuation(ctxMatch[1].trim(), lines, i);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Convenience function: parse both directive and context block from the same text.
+ * Returns combined ParseResult with both directive and context (either may be null).
+ */
+export function parseDirectiveWithContext(text: string): ParseResult {
+  return {
+    directive: parseDirective(text),
+    context: parseContextBlock(text),
+  };
 }

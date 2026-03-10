@@ -7,7 +7,7 @@
 
 // --- Directive Types ---
 
-export type DirectiveType = 'COMMAND' | 'SELECT' | 'ENTER' | 'ESCALATE' | 'DONE' | 'YES' | 'NO';
+export type DirectiveType = 'COMMAND' | 'SELECT' | 'ENTER' | 'ESCALATE' | 'DONE' | 'YES' | 'NO' | 'CLEAR' | 'RESET';
 
 export interface CommandDirective {
   type: 'COMMAND';
@@ -41,6 +41,14 @@ export interface NoDirective {
   type: 'NO';
 }
 
+export interface ClearDirective {
+  type: 'CLEAR';
+}
+
+export interface ResetDirective {
+  type: 'RESET';
+}
+
 export type Directive =
   | CommandDirective
   | SelectDirective
@@ -48,7 +56,15 @@ export type Directive =
   | EscalateDirective
   | DoneDirective
   | YesDirective
-  | NoDirective;
+  | NoDirective
+  | ClearDirective
+  | ResetDirective;
+
+/** Combined result of parsing both directive and context from the same text. */
+export interface ParseResult {
+  directive: Directive | null;
+  context: string | null;
+}
 
 // --- Context Types ---
 
@@ -63,6 +79,7 @@ export interface ContextPacket {
   workerScreen: string;
   actionLog: ActionEntry[];
   cycleNumber: number;
+  persistentContext?: string[];
 }
 
 // --- Consultation Types ---
