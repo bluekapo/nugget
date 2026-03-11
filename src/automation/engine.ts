@@ -956,6 +956,7 @@ export class AutomationEngine {
           this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
         }
         this.setState('idle');
+        this.cancelStagnationTimer();  // Prevent false stagnation after CLEAR -- onWorkerIdle will re-enter the cycle
       } else {
         debugLog(`[worker-clear-poll] "(no content)" NOT found — re-polling`);
         this.startWorkerClearPolling();
