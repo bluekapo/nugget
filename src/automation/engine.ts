@@ -644,9 +644,44 @@ export class AutomationEngine {
     }
 
     if (!directive && this.retryAttempted) {
+      debugLog(`[onResponseReady] parse failed after retry — retrying again`);
+      this.retryAttempted = false;  // Reset so the retry-prompt block above fires again
       this.actionLog.add('PARSE_FAILURE', stripped.slice(0, 200));
-      this.bus.emit('automation:escalation', 'Failed to parse orchestrator response after retry');
-      this.setState('paused');
+      this.bus.emit('automation:error', 'Failed to parse orchestrator response, retrying again');
+
+      try {
+        this.sessionManager.writeToSession(this.config.orchestratorSession, RETRY_PROMPT);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debugLog(`[onResponseReady] unlimited retry write failed: ${msg}`);
+        this.actionLog.add('EXEC_FAILURE', msg);
+        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.stop();
+        return;
+      }
+      this.setState('prompting-orchestrator');
+
+      this.timer.setTimeout(() => {
+        if (this._state !== 'prompting-orchestrator') return;
+        try {
+          this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          debugLog(`[onResponseReady] unlimited retry Enter failed: ${msg}`);
+          this.actionLog.add('EXEC_FAILURE', msg);
+          this.bus.emit('automation:error', `Execution failed: ${msg}`);
+          this.stop();
+          return;
+        }
+        if (this.orchestratorMonitor) {
+          this.orchestratorMonitor.capture.resetBaseline();
+          this.orchestratorMonitor.capture.markInputSent();
+        }
+        this.responseBuffer = '';
+        this.lastResponseBufLen = 0;
+        this.setState('waiting-response');
+        this.startResponsePolling();
+      }, this.baseDelay);
       return;
     }
 
@@ -1010,6 +1045,7 @@ export class AutomationEngine {
     // Enter consultation mode -- re-arm full prompt since consultation clears orchestrator context
     this.consultationMode = true;
     this.needsFullPrompt = true;
+    this.retryAttempted = false;
 
     this.setState('consulting-orchestrator');
 
@@ -1251,11 +1287,44 @@ export class AutomationEngine {
       return;
     }
 
-    // Retry already attempted — escalate
-    debugLog(`[onConsultationResponse] unparseable after retry — escalating`);
-    this.consultationMode = false;
-    this.bus.emit('automation:escalation', 'Failed to parse YES/NO from consultation response after retry');
-    this.setState('paused');
+    // Retry already attempted — retry again (unlimited)
+    debugLog(`[onConsultationResponse] parse failed after retry — retrying again`);
+    this.retryAttempted = false;  // Reset so the retry block above fires again
+    this.bus.emit('automation:error', 'Failed to parse consultation response, retrying again');
+
+    try {
+      this.sessionManager.writeToSession(this.config.orchestratorSession, CONSULTATION_RETRY_PROMPT);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      debugLog(`[onConsultationResponse] unlimited retry write failed: ${msg}`);
+      this.actionLog.add('EXEC_FAILURE', msg);
+      this.bus.emit('automation:error', `Execution failed: ${msg}`);
+      this.stop();
+      return;
+    }
+    this.setState('consulting-orchestrator');
+
+    this.timer.setTimeout(() => {
+      if (this._state !== 'consulting-orchestrator') return;
+      try {
+        this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debugLog(`[onConsultationResponse] unlimited retry Enter failed: ${msg}`);
+        this.actionLog.add('EXEC_FAILURE', msg);
+        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.stop();
+        return;
+      }
+      if (this.orchestratorMonitor) {
+        this.orchestratorMonitor.capture.resetBaseline();
+        this.orchestratorMonitor.capture.markInputSent();
+      }
+      this.responseBuffer = '';
+      this.lastResponseBufLen = 0;
+      this.setState('waiting-consultation');
+      this.startResponsePolling();
+    }, this.baseDelay);
   }
 
   private cancelConsultationWaitTimer(): void {
