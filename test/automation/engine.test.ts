@@ -2157,6 +2157,84 @@ describe('AutomationEngine', () => {
     });
   });
 
+  // ========== writeToSession error handling ==========
+
+  describe('writeToSession error handling', () => {
+    let shouldThrow: boolean;
+    let throwingSessionManager: { writeToSession: (name: string, data: string) => void };
+    let errorEvents: string[];
+
+    beforeEach(() => {
+      shouldThrow = false;
+      throwingSessionManager = {
+        writeToSession: (name: string, data: string) => {
+          if (shouldThrow) throw new Error('Session inactive');
+          writes.push({ name, data });
+        },
+      };
+      errorEvents = [];
+      bus.on('automation:error', (err: string) => errorEvents.push(err));
+    });
+
+    it('onWorkerIdle /clear write failure: engine stops gracefully with EXEC_FAILURE', async () => {
+      engine = new AutomationEngine(config, throwingSessionManager, bus);
+      engine.start();
+
+      // Set shouldThrow before the first cycle's /clear write fires
+      shouldThrow = true;
+
+      // Trigger first cycle via deferred timer -> onWorkerIdle -> writeToSession throws
+      timer.advance(1);
+
+      assert.equal(engine.state, 'stopped', 'engine should stop when writeToSession throws during onWorkerIdle');
+      assert.ok(errorEvents.some(e => e.includes('Execution failed')), 'should emit automation:error');
+    });
+
+    it('onResponseReady executeDirective write failure: engine stops gracefully', async () => {
+      engine = new AutomationEngine(config, throwingSessionManager, bus);
+      engine.start();
+
+      // First cycle: get to waiting-response (shouldThrow=false)
+      timer.advance(1); // deferred start -> onWorkerIdle -> clearing-orchestrator
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+
+      assert.equal(engine.state, 'waiting-response', 'should be waiting for response');
+
+      // Set throw before COMMAND execution
+      shouldThrow = true;
+
+      // Orchestrator responds with COMMAND -> executeDirective's writeFn calls writeToSession -> throws
+      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: npm test'));
+      timer.advance(1000); // response poll fires
+
+      assert.equal(engine.state, 'stopped', 'engine should stop when writeToSession throws during executeDirective');
+      assert.ok(errorEvents.some(e => e.includes('Execution failed')), 'should emit automation:error');
+    });
+
+    it('sendSelect write failure: engine stops gracefully', async () => {
+      engine = new AutomationEngine(config, throwingSessionManager, bus);
+      engine.start();
+
+      // First cycle: get to waiting-response (shouldThrow=false)
+      timer.advance(1); // deferred start -> onWorkerIdle -> clearing-orchestrator
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+
+      assert.equal(engine.state, 'waiting-response', 'should be waiting for response');
+
+      // Set throw before SELECT execution
+      shouldThrow = true;
+
+      // Orchestrator responds with SELECT -> sendSelect calls writeToSession -> throws
+      await emitOutput(bus, 'orchestrator', directiveOutput('SELECT: 3'));
+      timer.advance(1000); // response poll fires
+
+      assert.equal(engine.state, 'stopped', 'engine should stop when writeToSession throws during sendSelect');
+      assert.ok(errorEvents.some(e => e.includes('Execution failed')), 'should emit automation:error');
+    });
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------
