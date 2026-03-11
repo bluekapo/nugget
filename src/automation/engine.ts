@@ -36,7 +36,7 @@ export function stripAnsi(raw: string): string {
     .replace(/\x1b\[[\?]?[0-9;]*[a-zA-Z]/g, '')   // CSI sequences (including private modes like ?2026l)
     .replace(/\x1b[()][0-9A-Za-z]/g, '')           // Character set selection
     .replace(/\x1b[A-Za-z]/g, '')                  // Single-char escapes
-    .replace(/\r(?!\n)/g, '');                      // Bare CR (without LF) — cursor to start of line
+    .replace(/[^\n]*\r(?!\n)/g, '');                  // Bare CR — discard everything before it on same line (terminal overwrite)
 }
 
 /** Strip Claude Code spinner lines and blank whitespace-only lines from screen text. */
