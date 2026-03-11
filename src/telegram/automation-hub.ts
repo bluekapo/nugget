@@ -327,7 +327,7 @@ export class AutomationHubRenderer {
         this.onRender?.();
       },
       error: (error: string) => {
-        this.api.sendMessage(this.chatId, `Automation stopped: ${error}`, {
+        this.api.sendMessage(this.chatId, `Automation error: ${error}`, {
           parse_mode: 'HTML',
           reply_markup: {
             inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],

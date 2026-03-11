@@ -397,7 +397,7 @@ describe('AutomationHubRenderer', () => {
   });
 
   describe('notification delete buttons', () => {
-    it('error notification (automation stopped) includes reply_markup with action:delete button', async () => {
+    it('error notification (automation error) includes reply_markup with action:delete button', async () => {
       const api = createMockApi();
       const bus = new EventBus();
       const mockEng = createMockEngine('idle');
@@ -422,7 +422,7 @@ describe('AutomationHubRenderer', () => {
 
       // Find the standalone sendMessage for the error notification (not the hub re-render)
       const errorSend = api.calls.find(
-        c => c.method === 'sendMessage' && (c.args[1] as string).includes('Automation stopped'),
+        c => c.method === 'sendMessage' && (c.args[1] as string).includes('Automation error'),
       );
       assert.ok(errorSend, 'should send error notification');
       const opts = errorSend!.args[2] as { reply_markup?: { inline_keyboard: any[][] } };
@@ -750,7 +750,7 @@ describe('AutomationHubRenderer', () => {
 
       // Should NOT have an error notification -- the errorHandler must have been removed
       const errorSend = api.calls.find(
-        c => c.method === 'sendMessage' && (c.args[1] as string).includes('Automation stopped'),
+        c => c.method === 'sendMessage' && (c.args[1] as string).includes('Automation error'),
       );
       assert.equal(errorSend, undefined, 'should NOT send error notification after done');
 
