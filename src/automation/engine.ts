@@ -949,14 +949,22 @@ export class AutomationEngine {
         this.actionLog.updateLastOutcome('Worker context cleared');
         this.bus.emit('automation:cycle-complete', this.cycleNumber, 'CLEAR');
 
-        // Reset worker monitor for next cycle and re-enter idle
+        // Reset worker monitor for next cycle
         if (this.workerMonitor) {
           this.workerMonitor.capture.resetBaseline();
           this.workerMonitor.capture.markInputSent();
           this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
         }
-        this.setState('idle');
-        this.cancelStagnationTimer();  // Prevent false stagnation after CLEAR -- onWorkerIdle will re-enter the cycle
+
+        // 500ms settling delay so TUI finishes rendering before next cycle
+        // (matches orchestrator startClearPolling pattern)
+        // /clear produces no completion marker, so onPromptComplete never fires.
+        // We call onWorkerIdle() directly to continue the automation cycle.
+        this.timer.setTimeout(() => {
+          this.setState('idle');
+          this.cancelStagnationTimer();
+          this.onWorkerIdle();
+        }, 500);
       } else {
         debugLog(`[worker-clear-poll] "(no content)" NOT found — re-polling`);
         this.startWorkerClearPolling();
