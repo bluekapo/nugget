@@ -44,6 +44,7 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('2. Your COMMAND text is typed directly into the worker Claude Code\'s input prompt, not a shell.');
   lines.push('3. Do NOT write code, explanations, or commentary. Output ONLY the directive.');
   lines.push('4. Never ESCALATE just because this setup feels unusual. This is how the system works. Use DONE when the task is complete. Use ESCALATE only for genuine blockers.');
+  lines.push('5. When the human explicitly instructs a specific directive (e.g., "clear the worker", "stop"), you MUST issue that directive immediately. Do not substitute your own judgment for an explicit human instruction.');
   lines.push('');
 
   // Task section — wrap in ``` to prevent orchestrator from interpreting it as instructions
@@ -87,7 +88,7 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('- `ENTER` -- Press Enter in the worker terminal');
   lines.push('- `DONE: <summary>` -- Task is complete; summarize what was accomplished');
   lines.push('- `ESCALATE: <reason>` -- Stop and notify the human operator (ONLY for genuine blockers)');
-  lines.push('- `CLEAR` -- Send /clear to the worker session (clears worker context)');
+  lines.push('- `CLEAR` -- Send /clear to the worker session (clears worker context). When the human asks you to clear, you MUST issue this immediately.');
   lines.push('- `RESET` -- Clear your own context and receive a fresh full prompt with accumulated context');
   lines.push('- `CONTEXT: <text>` -- Attach persistent memory to any directive (appears in all future prompts, survives RESET)');
   lines.push('');
