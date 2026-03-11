@@ -158,23 +158,39 @@ describe('buildPrompt', () => {
     );
   });
 
-  it('includes GSD hint when taskDescription contains gsd', () => {
+  it('always includes CLEAR hint regardless of task content', () => {
+    const prompt = buildPrompt(basePacket);
+    assert.ok(
+      prompt.includes('HINT:') && prompt.includes('CLEAR'),
+      `Expected CLEAR HINT line in prompt:\n${prompt}`
+    );
+  });
+
+  it('includes both CLEAR hint and GSD hint when taskDescription contains gsd', () => {
     const packet: ContextPacket = {
       ...basePacket,
       taskDescription: 'Run gsd workflow on the project',
     };
     const prompt = buildPrompt(packet);
+    const hints = prompt.split('\n').filter(l => l.startsWith('HINT:'));
+    assert.equal(hints.length, 2, `Expected 2 HINT lines when task contains "gsd", got ${hints.length}`);
     assert.ok(
-      prompt.includes('HINT:') && prompt.includes('good practice to ask the worker some questions'),
-      `Expected GSD HINT line in prompt when taskDescription contains "gsd":\n${prompt}`
+      hints.some(h => h.includes('CLEAR')),
+      `Expected CLEAR hint in prompt:\n${prompt}`
+    );
+    assert.ok(
+      hints.some(h => h.includes('good practice to ask the worker some questions')),
+      `Expected GSD hint in prompt:\n${prompt}`
     );
   });
 
-  it('does not include GSD hint when taskDescription lacks gsd', () => {
+  it('includes only CLEAR hint when taskDescription lacks gsd', () => {
     const prompt = buildPrompt(basePacket);
+    const hints = prompt.split('\n').filter(l => l.startsWith('HINT:'));
+    assert.equal(hints.length, 1, `Expected exactly 1 HINT line when task lacks "gsd", got ${hints.length}`);
     assert.ok(
-      !prompt.includes('HINT:'),
-      `Should NOT include HINT line when taskDescription lacks "gsd":\n${prompt}`
+      hints[0].includes('CLEAR'),
+      `Expected the single hint to be about CLEAR:\n${prompt}`
     );
   });
 
