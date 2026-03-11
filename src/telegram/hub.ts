@@ -3,6 +3,9 @@ import type { HubStore } from '../db/hub-store.js';
 import type { AutomationHubRenderer } from './automation-hub.js';
 import { logError } from '../logging/logger.js';
 
+/** The three states the hub view can be in. */
+export type HubViewState = 'sessions' | 'automationHub' | 'automationDetails';
+
 /**
  * Renders and manages the central "Sessions Hub" message in Telegram.
  *
@@ -13,7 +16,7 @@ import { logError } from '../logging/logger.js';
 export class HubRenderer {
   private hubMessageId: number | null = null;
   private advancedMode = false;
-  private automationView = false;
+  private hubViewState: HubViewState = 'sessions';
   private execStateMap: Map<string, 'busy' | 'idle'> = new Map();
   private automationHub: AutomationHubRenderer | null = null;
 
@@ -40,14 +43,14 @@ export class HubRenderer {
     return this.advancedMode;
   }
 
-  /** Toggle between normal session list and automation details view. */
-  toggleAutomationView(): void {
-    this.automationView = !this.automationView;
+  /** Set the hub view to one of the three navigation states. */
+  setHubView(view: HubViewState): void {
+    this.hubViewState = view;
   }
 
-  /** Whether the hub is currently in automation view mode. */
-  get isAutomationView(): boolean {
-    return this.automationView;
+  /** Current hub view state (sessions, automationHub, or automationDetails). */
+  get hubView(): HubViewState {
+    return this.hubViewState;
   }
 
   constructor(
@@ -111,8 +114,8 @@ export class HubRenderer {
       }
 
       const activeSession = this.getActiveSession();
-      const text = buildText(sessions, activeSession, this.advancedMode, this.execStateMap, this.automationHub, this.automationView);
-      const keyboard = buildKeyboard(sessions, activeSession, this.advancedMode, this.automationHub, this.automationView);
+      const text = buildText(sessions, activeSession, this.advancedMode, this.execStateMap, this.automationHub, this.hubViewState);
+      const keyboard = buildKeyboard(sessions, activeSession, this.advancedMode, this.automationHub, this.hubViewState);
 
       if (this.hubMessageId === null) {
         // Send new message
@@ -173,7 +176,7 @@ function buildText(
   advanced = false,
   execStateMap: Map<string, 'busy' | 'idle'> = new Map(),
   automationHub?: AutomationHubRenderer | null,
-  automationView = false,
+  hubView: HubViewState = 'sessions',
 ): string {
   const activeAuto = automationHub?.activeAutomationInfo ?? null;
   const pendingCreation = automationHub?.pendingCreationInfo ?? null;
@@ -215,8 +218,8 @@ function buildText(
     return (stepTexts[pendingCreation.step] ?? ['<b>Automation Hub</b>']).join('\n');
   }
 
-  // Automation view mode: show automation details instead of session list
-  if (automationView) {
+  // Automation details view: full detail with worker/orch/task/status/cycles/lastAction
+  if (hubView === 'automationDetails') {
     if (activeAuto) {
       const lines = [
         '<b>Automation Details</b>',
@@ -232,6 +235,25 @@ function buildText(
       return lines.join('\n');
     }
     return ['<b>Automation Details</b>', '', 'No automation running.'].join('\n');
+  }
+
+  // Automation hub view: intermediate summary with state, cycles, truncated task
+  if (hubView === 'automationHub') {
+    if (activeAuto) {
+      const truncatedTask = activeAuto.taskDescription.length > 80
+        ? activeAuto.taskDescription.slice(0, 80) + '...'
+        : activeAuto.taskDescription;
+      const lines = [
+        '<b>Automation Hub</b>',
+        '',
+        `State: ${activeAuto.engine.state} | Cycles: ${activeAuto.cycleCount}`,
+        `Task: ${truncatedTask}`,
+        '',
+        'Tap View Details for full status and controls.',
+      ];
+      return lines.join('\n');
+    }
+    return ['<b>Automation Hub</b>', '', 'No automation running.'].join('\n');
   }
 
   if (sessions.length === 0) {
@@ -315,7 +337,7 @@ function buildKeyboard(
   activeSession: string | null,
   advanced = false,
   automationHub?: AutomationHubRenderer | null,
-  automationView = false,
+  hubView: HubViewState = 'sessions',
 ): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
   const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
 
@@ -348,8 +370,8 @@ function buildKeyboard(
     return { inline_keyboard: keyboard };
   }
 
-  // Automation view mode: show automation control buttons
-  if (automationView) {
+  // Automation details view: show automation control buttons (pause/stop, refresh, back)
+  if (hubView === 'automationDetails') {
     if (activeAuto) {
       const engineState = activeAuto.engine.state;
       if (engineState === 'paused') {
@@ -364,6 +386,15 @@ function buildKeyboard(
         ]);
       }
       keyboard.push([{ text: '\uD83D\uDD04 Refresh', callback_data: 'auto:refresh' }]);
+    }
+    keyboard.push([{ text: '\u2190 Back to Sessions', callback_data: 'hub:auto-back' }]);
+    return { inline_keyboard: keyboard };
+  }
+
+  // Automation hub view: intermediate summary with View Details + Back
+  if (hubView === 'automationHub') {
+    if (activeAuto) {
+      keyboard.push([{ text: '\uD83D\uDD0D View Details', callback_data: 'hub:auto-details' }]);
     }
     keyboard.push([{ text: '\u2190 Back to Sessions', callback_data: 'hub:auto-back' }]);
     return { inline_keyboard: keyboard };
