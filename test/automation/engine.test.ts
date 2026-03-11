@@ -1903,8 +1903,11 @@ describe('AutomationEngine', () => {
       // Worker responds with (no content) after /clear
       await emitOutput(bus, 'worker', clearOutput());
       timer.advance(1000); // worker clear poll fires, finds "(no content)"
+      timer.advance(500);  // 500ms settling delay fires, sets idle + calls onWorkerIdle
 
-      assert.equal(engine.state, 'idle', 'engine should return to idle after worker clear completes');
+      // After settling delay, onWorkerIdle should have advanced to capturing-worker
+      assert.equal(engine.state, 'clearing-orchestrator',
+        'engine should advance past idle after worker CLEAR settling delay');
 
       // Clear any events from the CLEAR cycle itself
       consultationEvents.length = 0;
@@ -1912,10 +1915,49 @@ describe('AutomationEngine', () => {
       // Advance the full stagnation delay -- should NOT trigger consultation
       timer.advance(200);
 
-      assert.equal(engine.state, 'idle',
-        'stagnation timer should NOT fire after worker CLEAR -- state must remain idle');
+      assert.notEqual(engine.state, 'consulting-orchestrator',
+        'stagnation timer should NOT fire after worker CLEAR');
       assert.equal(consultationEvents.length, 0,
         'no consultation-related state transitions should occur after worker CLEAR');
+    });
+
+    it('continues workflow after worker CLEAR without relying on onPromptComplete', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // Cycle 1: advance to waiting-response
+      timer.advance(1); // deferred start -> clearing-orchestrator
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+
+      // Orchestrator responds with CLEAR directive
+      await emitOutput(bus, 'orchestrator', directiveOutput('CLEAR'));
+      timer.advance(1000); // response poll fires, finds CLEAR -> clearing-worker
+
+      assert.equal(engine.state, 'clearing-worker', 'should be in clearing-worker state');
+
+      // Worker responds with (no content) after /clear
+      await emitOutput(bus, 'worker', clearOutput());
+      timer.advance(1000); // worker clear poll fires, finds "(no content)"
+
+      // Engine should NOT yet be in capturing-worker (still in settling delay)
+      assert.notEqual(engine.state, 'capturing-worker',
+        'engine should not advance immediately — 500ms settling delay pending');
+
+      // Advance the 500ms settling delay
+      timer.advance(500);
+
+      // onWorkerIdle was called directly -> engine should have advanced through
+      // capturing-worker (transient) into clearing-orchestrator
+      assert.equal(engine.state, 'clearing-orchestrator',
+        'engine should advance to clearing-orchestrator after worker CLEAR settling delay');
+
+      // Verify no stagnation fires when advancing a full stagnation period
+      const statesBefore = engine.state;
+      timer.advance(30000); // default stagnation delay
+      // Engine should still be in clearing-orchestrator (or advanced further), not consulting
+      assert.notEqual(engine.state, 'consulting-orchestrator',
+        'no stagnation should fire after worker CLEAR continuation');
     });
   });
 
