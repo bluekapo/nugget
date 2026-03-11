@@ -296,7 +296,7 @@ async function startPrimary(
     try { await ctx.deleteMessage(); } catch { /* ignore */ }
   });
   bot.on('message:text', inputHandler.handler());
-  registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), screenCapture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { shutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, automationHub, settingsStore);
+  registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), screenCapture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { shutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, async () => { hubRenderer.toggleAutomationView(); await hubRenderer.render(); }, automationHub, settingsStore);
 
   // 17. Start bot long polling in background (do NOT await -- it blocks forever)
   bot.start({ onStart: () => logInfo('Telegram bot listening') });
@@ -727,7 +727,7 @@ async function becomeNewPrimary(
       try { await ctx.deleteMessage(); } catch { /* ignore */ }
     });
     bot.on('message:text', inputHandler.handler());
-    registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), capture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { promotedShutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, promotedAutomationHub, settingsStore);
+    registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), capture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { promotedShutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, async () => { hubRenderer.toggleAutomationView(); await hubRenderer.render(); }, promotedAutomationHub, settingsStore);
 
     bus.on('session:exit', (name: string) => {
       const wasActive = router.activeSession === name;

@@ -115,6 +115,7 @@ export function registerCallbackHandlers(
   toggleAdvanced?: () => Promise<void>,
   onShutdown?: () => Promise<void>,
   deleteHub?: () => Promise<void>,
+  toggleAutomationView?: () => Promise<void>,
   automationHub?: { handleCallback(data: string): Promise<string>; render(opts?: { forceNew?: boolean }): Promise<void> },
   settingsStore?: SettingsStore,
 ): void {
@@ -259,11 +260,16 @@ export function registerCallbackHandlers(
     });
   }
 
-  // Hub: open automation hub as separate message
-  if (automationHub) {
+  // Hub: toggle automation view in-place (edits hub message to show automation details)
+  if (toggleAutomationView) {
     bot.callbackQuery('hub:automations', async (ctx) => {
-      await automationHub.render({ forceNew: true });
-      await ctx.answerCallbackQuery({ text: 'Automation hub opened' });
+      await toggleAutomationView();
+      await ctx.answerCallbackQuery();
+    });
+
+    bot.callbackQuery('hub:auto-back', async (ctx) => {
+      await toggleAutomationView();
+      await ctx.answerCallbackQuery();
     });
   }
 
