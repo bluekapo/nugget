@@ -158,6 +158,26 @@ describe('buildPrompt', () => {
     );
   });
 
+  it('includes GSD hint when taskDescription contains gsd', () => {
+    const packet: ContextPacket = {
+      ...basePacket,
+      taskDescription: 'Run gsd workflow on the project',
+    };
+    const prompt = buildPrompt(packet);
+    assert.ok(
+      prompt.includes('HINT:') && prompt.includes('good practice to ask the worker some questions'),
+      `Expected GSD HINT line in prompt when taskDescription contains "gsd":\n${prompt}`
+    );
+  });
+
+  it('does not include GSD hint when taskDescription lacks gsd', () => {
+    const prompt = buildPrompt(basePacket);
+    assert.ok(
+      !prompt.includes('HINT:'),
+      `Should NOT include HINT line when taskDescription lacks "gsd":\n${prompt}`
+    );
+  });
+
   it('directive reference includes CLEAR and RESET', () => {
     const prompt = buildPrompt(basePacket);
     const lines = prompt.split('\n');

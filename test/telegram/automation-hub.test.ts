@@ -718,6 +718,54 @@ describe('AutomationHubRenderer', () => {
     });
   });
 
+  describe('doneHandler race condition', () => {
+    it('doneHandler removes errorHandler before cleanup (no duplicate messages)', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const mockEng = createMockEngine('idle');
+      const { hub } = createHub(api, {
+        sessions: ['w', 'o'],
+        engineFactory: () => mockEng as any,
+        bus,
+      });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.completeCreation('run tests');
+      api.calls.length = 0;
+
+      // Emit done event
+      bus.emit('automation:done', 'All tests passed');
+
+      // Wait for async sendMessage
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Find the "complete" notification
+      const completeSend = api.calls.find(
+        c => c.method === 'sendMessage' && (c.args[1] as string).includes('Automation complete'),
+      );
+      assert.ok(completeSend, 'should send completion notification');
+
+      // Should NOT have an error notification -- the errorHandler must have been removed
+      const errorSend = api.calls.find(
+        c => c.method === 'sendMessage' && (c.args[1] as string).includes('Automation stopped'),
+      );
+      assert.equal(errorSend, undefined, 'should NOT send error notification after done');
+
+      // Verify the errorHandler is no longer on the bus
+      // Emitting another error after done should not produce a message
+      const callsBefore = api.calls.length;
+      bus.emit('automation:error', 'ghost error');
+      await new Promise(resolve => setTimeout(resolve, 50));
+      const errorAfter = api.calls.slice(callsBefore).find(
+        c => c.method === 'sendMessage' && (c.args[1] as string).includes('ghost error'),
+      );
+      assert.equal(errorAfter, undefined, 'should NOT send error after done handler cleaned up');
+    });
+  });
+
   describe('stale session handling', () => {
     it('handleCallback auto:w:<stale> where session no longer exists resets to idle with error', async () => {
       const api = createMockApi();
