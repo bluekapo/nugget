@@ -55,7 +55,7 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('');
 
   // Always show CLEAR hint; add extra GSD hint when task mentions "gsd"
-  lines.push('HINT: If the worker\'s context is stale or cluttered, use CLEAR to reset it before sending new instructions.');
+  lines.push('HINT: Use CLEAR when the human asks you to clear, when a pipeline or workflow execution requires clearing between actions, or when the worker\'s context is stale or cluttered.');
   lines.push('');
   if (ctx.taskDescription.toLowerCase().includes('gsd')) {
     lines.push('HINT: It is good practice to ask the worker some questions to get context on the system and the task before sending the task itself, to prompt it better.');
