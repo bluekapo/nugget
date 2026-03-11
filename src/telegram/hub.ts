@@ -180,6 +180,8 @@ function buildText(
   hubView: HubViewState = 'sessions',
 ): string {
   const activeAuto = automationHub?.activeAutomationInfo ?? null;
+  const autoCount = automationHub?.activeAutomationCount ?? 0;
+  const allAutos = automationHub?.allAutomations;
   const pendingCreation = automationHub?.pendingCreationInfo ?? null;
 
   // Pending creation flow still replaces the hub (user is actively configuring)
@@ -264,8 +266,8 @@ function buildText(
       'No sessions connected.',
       'Start a session with: npm run dev -- session-name',
     ];
-    if (activeAuto) {
-      emptyLines.push('', '\uD83E\uDD16 1 automation in progress');
+    if (autoCount > 0) {
+      emptyLines.push('', `\uD83E\uDD16 ${autoCount} automation${autoCount !== 1 ? 's' : ''} in progress`);
     }
     return emptyLines.join('\n');
   }
@@ -297,12 +299,16 @@ function buildText(
 
     let line = `${prefix}${emoji} <b>${s.name}</b> -- ${viewState} \u00B7 ${execState}`;
 
-    // Append role indicator if session is part of an active automation
-    if (activeAuto) {
-      if (s.name === activeAuto.workerSession) {
-        line += ' [worker]';
-      } else if (s.name === activeAuto.orchestratorSession) {
-        line += ' [orch]';
+    // Append role indicator if session is part of any active automation
+    if (allAutos) {
+      for (const auto of allAutos.values()) {
+        if (s.name === auto.workerSession) {
+          line += ' [worker]';
+          break;
+        } else if (s.name === auto.orchestratorSession) {
+          line += ' [orch]';
+          break;
+        }
       }
     }
 
@@ -326,8 +332,8 @@ function buildText(
   });
 
   let result = `${header}\n\n${lines.join('\n')}`;
-  if (activeAuto) {
-    result += '\n\n\uD83E\uDD16 1 automation in progress';
+  if (autoCount > 0) {
+    result += `\n\n\uD83E\uDD16 ${autoCount} automation${autoCount !== 1 ? 's' : ''} in progress`;
   }
   return result;
 }
@@ -343,6 +349,7 @@ function buildKeyboard(
   const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
 
   const activeAuto = automationHub?.activeAutomationInfo ?? null;
+  const autoCount = automationHub?.activeAutomationCount ?? 0;
   const pendingCreation = automationHub?.pendingCreationInfo ?? null;
 
   // Pending creation flow still replaces the keyboard (user is actively configuring)
@@ -432,8 +439,8 @@ function buildKeyboard(
   ]);
 
   // Automation button: show status link when active, or new automation button when idle
-  if (activeAuto) {
-    keyboard.push([{ text: '\uD83E\uDD16 Automations (1)', callback_data: 'hub:automations' }]);
+  if (autoCount > 0) {
+    keyboard.push([{ text: `\uD83E\uDD16 Automations (${autoCount})`, callback_data: 'hub:automations' }]);
   } else if (automationHub) {
     keyboard.push([{ text: '\uD83E\uDD16 Automate', callback_data: 'auto:new' }]);
   }

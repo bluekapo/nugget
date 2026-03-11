@@ -1,10 +1,13 @@
 /**
  * AutomationHubRenderer -- Telegram message manager for the automation lifecycle.
  *
+ * Supports multiple concurrent automations via a Map-based data structure.
+ * Provides list view (all automations) and detail view (single automation controls).
+ *
  * Handles the full automation flow via a single editable hub message:
  * - Creation flow: select worker -> select orchestrator -> enter task description
- * - Status display: shows engine state, cycle count, last action
- * - Controls: pause/resume/stop via inline buttons
+ * - List view: shows all active automations with "View Details" per-row
+ * - Detail view: shows engine state, cycle count, last action, pause/resume/stop
  *
  * Follows the same renderQueue serialization pattern as HubRenderer.
  */
@@ -28,26 +31,49 @@ export interface ActiveAutomation {
   taskDescription: string;
   cycleCount: number;
   lastAction: string | null;
+  startTime: number;
+  handlers: {
+    stateChange: (state: string) => void;
+    cycleComplete: (cycleNumber: number, action: string) => void;
+    escalation: (reason: string) => void;
+    done: (summary: string) => void;
+    error: (error: string) => void;
+  };
 }
 
 export class AutomationHubRenderer {
   private hubMessageId: number | null = null;
   private renderQueue: Promise<void> = Promise.resolve();
   private pendingCreation: PendingCreation | null = null;
-  private activeAutomation: ActiveAutomation | null = null;
-
-  private stateChangeHandler: ((state: string) => void) | null = null;
-  private cycleCompleteHandler: ((cycleNumber: number, action: string) => void) | null = null;
-  private escalationHandler: ((reason: string) => void) | null = null;
-  private doneHandler: ((summary: string) => void) | null = null;
-  private errorHandler: ((error: string) => void) | null = null;
+  private activeAutomations: Map<number, ActiveAutomation> = new Map();
+  private nextAutomationId = 1;
+  private detailViewId: number | null = null;
 
   /** Optional callback invoked when automation state changes and a re-render is needed. */
   onRender: (() => void | Promise<void>) | null = null;
 
-  /** Public getter for the active automation info (read-only access for hub display). */
+  /** Public getter for the automation currently in detail view (or null if in list view).
+   *  Backwards-compatible: hub.ts uses this for automationDetails rendering. */
   get activeAutomationInfo(): ActiveAutomation | null {
-    return this.activeAutomation;
+    if (this.detailViewId !== null) {
+      return this.activeAutomations.get(this.detailViewId) ?? null;
+    }
+    // When in list view but only one automation exists, still return it
+    // for backward compat with hub.ts session role indicators
+    if (this.activeAutomations.size === 1) {
+      return this.activeAutomations.values().next().value ?? null;
+    }
+    return null;
+  }
+
+  /** Number of active automations. */
+  get activeAutomationCount(): number {
+    return this.activeAutomations.size;
+  }
+
+  /** All active automations (read-only) for hub.ts to render the list. */
+  get allAutomations(): ReadonlyMap<number, ActiveAutomation> {
+    return this.activeAutomations;
   }
 
   /** Public getter for the pending creation info (read-only access for hub display). */
@@ -183,28 +209,58 @@ export class AutomationHubRenderer {
       return 'Enter your task description';
     }
 
-    if (data === 'auto:pause' && this.activeAutomation) {
-      this.activeAutomation.engine.pause();
-      await this.onRender?.();
-      return 'Automation paused';
-    }
-
-    if (data === 'auto:resume' && this.activeAutomation) {
-      this.activeAutomation.engine.resume();
-      await this.onRender?.();
-      return 'Automation resumed';
-    }
-
-    if (data === 'auto:stop' && this.activeAutomation) {
-      // Clean up error handler before stopping to prevent ghost notifications
-      if (this.errorHandler) {
-        this.bus.off('automation:error', this.errorHandler);
-        this.errorHandler = null;
+    // Detail view: auto:details:N
+    if (data.startsWith('auto:details:')) {
+      const id = parseInt(data.slice('auto:details:'.length), 10);
+      if (this.activeAutomations.has(id)) {
+        this.detailViewId = id;
+        await this.onRender?.();
+        return 'Viewing automation details';
       }
-      this.activeAutomation.engine.stop();
-      this.activeAutomation = null;
+      return '';
+    }
+
+    // Back to list view
+    if (data === 'auto:back') {
+      this.detailViewId = null;
       await this.onRender?.();
-      return 'Automation stopped';
+      return 'Back to list';
+    }
+
+    // Pause/resume/stop operate on the detail-view automation
+    if (data === 'auto:pause') {
+      const auto = this.getDetailAutomation();
+      if (auto) {
+        auto.engine.pause();
+        await this.onRender?.();
+        return 'Automation paused';
+      }
+      return '';
+    }
+
+    if (data === 'auto:resume') {
+      const auto = this.getDetailAutomation();
+      if (auto) {
+        auto.engine.resume();
+        await this.onRender?.();
+        return 'Automation resumed';
+      }
+      return '';
+    }
+
+    if (data === 'auto:stop') {
+      const id = this.detailViewId;
+      if (id !== null) {
+        const auto = this.activeAutomations.get(id);
+        if (auto) {
+          this.removeAutomation(id);
+          // Return to list or clear detail view
+          this.detailViewId = null;
+          await this.onRender?.();
+          return 'Automation stopped';
+        }
+      }
+      return '';
     }
 
     if (data === 'auto:refresh') {
@@ -230,68 +286,81 @@ export class AutomationHubRenderer {
     };
 
     const engine = this.engineFactory(config, this.bus);
+    const id = this.nextAutomationId++;
 
-    this.activeAutomation = {
+    // Build per-automation handlers that capture the automation ID
+    const handlers = {
+      stateChange: (_state: string) => {
+        this.onRender?.();
+      },
+      cycleComplete: (cycleNumber: number, action: string) => {
+        const auto = this.activeAutomations.get(id);
+        if (auto) {
+          auto.cycleCount = cycleNumber;
+          auto.lastAction = action;
+        }
+        this.onRender?.();
+      },
+      escalation: (reason: string) => {
+        this.api.sendMessage(this.chatId, `Automation escalated: ${reason}`, {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
+          },
+        }).catch(() => {});
+        this.onRender?.();
+      },
+      done: (_summary: string) => {
+        // Clean up error handler BEFORE cleanup to prevent race condition
+        const auto = this.activeAutomations.get(id);
+        if (auto) {
+          this.bus.off('automation:error', auto.handlers.error);
+        }
+        this.api.sendMessage(this.chatId, '\u2705 Automation complete', {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
+          },
+        }).catch(() => {});
+        this.activeAutomations.delete(id);
+        if (this.detailViewId === id) this.detailViewId = null;
+        this.onRender?.();
+      },
+      error: (error: string) => {
+        this.api.sendMessage(this.chatId, `Automation stopped: ${error}`, {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
+          },
+        }).catch(() => {});
+        this.activeAutomations.delete(id);
+        if (this.detailViewId === id) this.detailViewId = null;
+        this.onRender?.();
+      },
+    };
+
+    const automation: ActiveAutomation = {
       engine,
       workerSession: config.workerSession,
       orchestratorSession: config.orchestratorSession,
       taskDescription,
       cycleCount: 0,
       lastAction: null,
+      startTime: Date.now(),
+      handlers,
     };
 
-    // Subscribe to bus events -- trigger hub re-render via onRender callback
-    this.stateChangeHandler = (_state: string) => {
-      this.onRender?.();
-    };
-    this.cycleCompleteHandler = (cycleNumber: number, action: string) => {
-      this.updateCycleInfo(cycleNumber, action);
-      this.onRender?.();
-    };
-    this.escalationHandler = (reason: string) => {
-      // Send standalone notification so user gets a notification sound
-      this.api.sendMessage(this.chatId, `Automation escalated: ${reason}`, {
-        parse_mode: 'HTML',
-        reply_markup: {
-          inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
-        },
-      }).catch(() => {});
-      this.onRender?.();
-    };
+    this.activeAutomations.set(id, automation);
 
-    this.doneHandler = (_summary: string) => {
-      // Clean up error handler BEFORE stop to prevent race condition (same pattern as auto:stop)
-      if (this.errorHandler) {
-        this.bus.off('automation:error', this.errorHandler);
-        this.errorHandler = null;
-      }
-      this.api.sendMessage(this.chatId, '\u2705 Automation complete', {
-        parse_mode: 'HTML',
-        reply_markup: {
-          inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
-        },
-      }).catch(() => {});
-      this.activeAutomation = null;
-      this.onRender?.();
-    };
+    // Auto-navigate to detail view for the newly created automation
+    this.detailViewId = id;
 
-    this.errorHandler = (error: string) => {
-      // Send standalone notification (separate from hub message) so user gets a notification sound
-      this.api.sendMessage(this.chatId, `Automation stopped: ${error}`, {
-        parse_mode: 'HTML',
-        reply_markup: {
-          inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
-        },
-      }).catch(() => {});
-      // Also re-render hub to show stopped state
-      this.onRender?.();
-    };
-
-    this.bus.on('automation:state-change', this.stateChangeHandler);
-    this.bus.on('automation:cycle-complete', this.cycleCompleteHandler);
-    this.bus.on('automation:escalation', this.escalationHandler);
-    this.bus.on('automation:done', this.doneHandler);
-    this.bus.on('automation:error', this.errorHandler);
+    // Subscribe per-automation handlers to bus events
+    this.bus.on('automation:state-change', handlers.stateChange);
+    this.bus.on('automation:cycle-complete', handlers.cycleComplete);
+    this.bus.on('automation:escalation', handlers.escalation);
+    this.bus.on('automation:done', handlers.done);
+    this.bus.on('automation:error', handlers.error);
 
     this.pendingCreation = null;
     engine.start();
@@ -308,16 +377,18 @@ export class AutomationHubRenderer {
     await this.onRender?.();
   }
 
-  /** Update cycle count and last action for the active automation. */
+  /** Update cycle count and last action for a specific automation (by detail view). */
   updateCycleInfo(cycleNumber: number, action: string): void {
-    if (!this.activeAutomation) return;
-    this.activeAutomation.cycleCount = cycleNumber;
-    this.activeAutomation.lastAction = action;
+    // Legacy compatibility: update the detail-view automation or the only automation
+    const auto = this.getDetailAutomation() ?? (this.activeAutomations.size === 1 ? this.activeAutomations.values().next().value : null);
+    if (!auto) return;
+    auto.cycleCount = cycleNumber;
+    auto.lastAction = action;
   }
 
-  /** Returns true if the given session is the worker in an active automation. */
+  /** Returns true if the given session is the worker in ANY active automation. */
   isAutomatedSession(sessionName: string): boolean {
-    return this.activeAutomation !== null && this.activeAutomation.workerSession === sessionName;
+    return [...this.activeAutomations.values()].some(a => a.workerSession === sessionName);
   }
 
   /** Returns true iff currently in the enter-task creation step. */
@@ -325,48 +396,79 @@ export class AutomationHubRenderer {
     return this.pendingCreation?.step === 'enter-task';
   }
 
-  /** Clean up bus listeners and stop engine if running. */
+  /** Clean up bus listeners and stop all engines. */
   dispose(): void {
-    if (this.stateChangeHandler) {
-      this.bus.off('automation:state-change', this.stateChangeHandler);
-      this.stateChangeHandler = null;
+    for (const [id] of this.activeAutomations) {
+      this.removeAutomation(id);
     }
-    if (this.cycleCompleteHandler) {
-      this.bus.off('automation:cycle-complete', this.cycleCompleteHandler);
-      this.cycleCompleteHandler = null;
+    this.activeAutomations.clear();
+    this.detailViewId = null;
+  }
+
+  /** Get the automation currently viewed in detail, or null. */
+  private getDetailAutomation(): ActiveAutomation | null {
+    if (this.detailViewId !== null) {
+      return this.activeAutomations.get(this.detailViewId) ?? null;
     }
-    if (this.escalationHandler) {
-      this.bus.off('automation:escalation', this.escalationHandler);
-      this.escalationHandler = null;
-    }
-    if (this.doneHandler) {
-      this.bus.off('automation:done', this.doneHandler);
-      this.doneHandler = null;
-    }
-    if (this.errorHandler) {
-      this.bus.off('automation:error', this.errorHandler);
-      this.errorHandler = null;
-    }
-    if (this.activeAutomation) {
-      this.activeAutomation.engine.stop();
-      this.activeAutomation = null;
-    }
+    return null;
+  }
+
+  /** Remove an automation: unsubscribe handlers, stop engine, delete from map. */
+  private removeAutomation(id: number): void {
+    const auto = this.activeAutomations.get(id);
+    if (!auto) return;
+
+    this.bus.off('automation:state-change', auto.handlers.stateChange);
+    this.bus.off('automation:cycle-complete', auto.handlers.cycleComplete);
+    this.bus.off('automation:escalation', auto.handlers.escalation);
+    this.bus.off('automation:done', auto.handlers.done);
+    this.bus.off('automation:error', auto.handlers.error);
+
+    auto.engine.stop();
+    this.activeAutomations.delete(id);
+  }
+
+  /** Format relative time from startTime to now. */
+  private formatElapsed(startTime: number): string {
+    const elapsedMs = Date.now() - startTime;
+    const minutes = Math.floor(elapsedMs / 60000);
+    if (minutes < 1) return 'just started';
+    if (minutes === 1) return '1m ago';
+    return `${minutes}m ago`;
   }
 
   /** Build HTML text based on current state. */
   private buildText(): string {
-    if (this.activeAutomation) {
-      const a = this.activeAutomation;
+    // Detail view for a specific automation
+    if (this.detailViewId !== null) {
+      const a = this.activeAutomations.get(this.detailViewId);
+      if (a) {
+        const lines = [
+          '<b>Automation Hub</b>',
+          '',
+          `Worker: <b>${a.workerSession}</b> -> Orchestrator: <b>${a.orchestratorSession}</b>`,
+          `Task: ${a.taskDescription}`,
+          '',
+          `Status: ${engineStateLabel(a.engine.state)} | Cycles: ${a.cycleCount}`,
+        ];
+        if (a.lastAction) {
+          lines.push(`Last: ${a.lastAction}`);
+        }
+        return lines.join('\n');
+      }
+      // Automation was removed while viewing -- fall through to list/idle
+      this.detailViewId = null;
+    }
+
+    // List view: multiple automations running
+    if (this.activeAutomations.size > 0 && this.detailViewId === null) {
       const lines = [
         '<b>Automation Hub</b>',
         '',
-        `Worker: <b>${a.workerSession}</b> -> Orchestrator: <b>${a.orchestratorSession}</b>`,
-        `Task: ${a.taskDescription}`,
-        '',
-        `Status: ${engineStateLabel(a.engine.state)} | Cycles: ${a.cycleCount}`,
+        'Active Automations:',
       ];
-      if (a.lastAction) {
-        lines.push(`Last: ${a.lastAction}`);
+      for (const [id, a] of this.activeAutomations) {
+        lines.push(`${id}. ${a.workerSession} -> ${a.orchestratorSession} (${this.formatElapsed(a.startTime)})`);
       }
       return lines.join('\n');
     }
@@ -425,8 +527,10 @@ export class AutomationHubRenderer {
   private buildKeyboard(): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
     const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
 
-    if (this.activeAutomation) {
-      const engineState = this.activeAutomation.engine.state;
+    // Detail view: show controls for the specific automation
+    if (this.detailViewId !== null && this.activeAutomations.has(this.detailViewId)) {
+      const auto = this.activeAutomations.get(this.detailViewId)!;
+      const engineState = auto.engine.state;
       if (engineState === 'paused') {
         keyboard.push([
           { text: '\u25B6\uFE0F Resume', callback_data: 'auto:resume' },
@@ -441,6 +545,23 @@ export class AutomationHubRenderer {
       keyboard.push([
         { text: '\uD83D\uDD04 Refresh', callback_data: 'auto:refresh' },
       ]);
+      if (this.activeAutomations.size > 1) {
+        keyboard.push([
+          { text: '\u2190 Back to List', callback_data: 'auto:back' },
+        ]);
+      }
+      return { inline_keyboard: keyboard };
+    }
+
+    // List view: show "View Details" per automation + "New Automation"
+    if (this.activeAutomations.size > 0 && this.detailViewId === null && !this.pendingCreation) {
+      for (const [id, a] of this.activeAutomations) {
+        keyboard.push([
+          { text: `\uD83D\uDD0D ${a.workerSession} -> ${a.orchestratorSession}`, callback_data: `auto:details:${id}` },
+        ]);
+      }
+      keyboard.push([{ text: '\uD83E\uDD16 New Automation', callback_data: 'auto:new' }]);
+      keyboard.push([{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]);
       return { inline_keyboard: keyboard };
     }
 

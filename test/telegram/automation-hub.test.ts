@@ -238,7 +238,7 @@ describe('AutomationHubRenderer', () => {
 
       const lastCall = api.calls[api.calls.length - 1];
       const text = lastCall.args[lastCall.method === 'sendMessage' ? 1 : 2] as string;
-      assert.ok(text.includes('idle'), 'should show engine state');
+      assert.ok(text.includes('Working...'), 'should show engine state label');
       assert.ok(text.includes('3'), 'should show cycle count');
       assert.ok(text.includes('COMMAND: npm test'), 'should show last action');
 
@@ -782,6 +782,121 @@ describe('AutomationHubRenderer', () => {
       const lastCall = api.calls[api.calls.length - 1];
       const text = lastCall.args[lastCall.method === 'sendMessage' ? 1 : 2] as string;
       assert.ok(text.includes('No automation running'), 'should reset to idle state');
+    });
+  });
+
+  describe('multi-automation support', () => {
+    /** Helper: create two automations on a hub with 4 sessions. */
+    async function setupTwoAutomations() {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const engines: ReturnType<typeof createMockEngine>[] = [];
+      const factory = () => {
+        const eng = createMockEngine('idle');
+        engines.push(eng);
+        return eng;
+      };
+      const { hub } = createHub(api, {
+        sessions: ['w1', 'o1', 'w2', 'o2'],
+        engineFactory: factory as any,
+        bus,
+      });
+
+      // Create first automation: w1 -> o1
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w1');
+      await hub.handleCallback('auto:o:o1');
+      await hub.completeCreation('task A');
+
+      // Go back to list view, then create second automation: w2 -> o2
+      await hub.handleCallback('auto:back');
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w2');
+      await hub.handleCallback('auto:o:o2');
+      await hub.completeCreation('task B');
+
+      return { api, bus, hub, engines };
+    }
+
+    it('creating two automations results in activeAutomationCount === 2', async () => {
+      const { hub } = await setupTwoAutomations();
+      assert.equal(hub.activeAutomationCount, 2);
+    });
+
+    it('isAutomatedSession returns true for both worker sessions', async () => {
+      const { hub } = await setupTwoAutomations();
+      assert.equal(hub.isAutomatedSession('w1'), true);
+      assert.equal(hub.isAutomatedSession('w2'), true);
+      assert.equal(hub.isAutomatedSession('o1'), false);
+      assert.equal(hub.isAutomatedSession('o2'), false);
+    });
+
+    it('auto:details:N sets detail view, auto:back returns to list', async () => {
+      const { hub, api } = await setupTwoAutomations();
+      // Should be in detail view for the second automation (auto-set on creation)
+      // Go back to list
+      await hub.handleCallback('auto:back');
+      api.calls.length = 0;
+
+      // Navigate to detail view for automation 1
+      await hub.handleCallback('auto:details:1');
+      const lastCall = api.calls[api.calls.length - 1];
+      const text = lastCall.args[lastCall.method === 'sendMessage' ? 1 : 2] as string;
+      assert.ok(text.includes('w1'), 'detail view should show first automation worker');
+      assert.ok(text.includes('o1'), 'detail view should show first automation orchestrator');
+      assert.ok(text.includes('task A'), 'detail view should show first automation task');
+
+      // Go back to list
+      api.calls.length = 0;
+      await hub.handleCallback('auto:back');
+      const listCall = api.calls[api.calls.length - 1];
+      const listText = listCall.args[listCall.method === 'sendMessage' ? 1 : 2] as string;
+      assert.ok(listText.includes('Active Automations'), 'should show list view after back');
+      assert.ok(listText.includes('w1'), 'list should mention first automation');
+      assert.ok(listText.includes('w2'), 'list should mention second automation');
+    });
+
+    it('stopping one automation leaves the other running', async () => {
+      const { hub, engines } = await setupTwoAutomations();
+      // Currently in detail view for automation 2 (last created)
+      assert.equal(hub.activeAutomationCount, 2);
+
+      // Stop the current detail-view automation (id=2)
+      await hub.handleCallback('auto:stop');
+
+      assert.equal(hub.activeAutomationCount, 1, 'should have 1 automation remaining');
+      assert.equal(hub.isAutomatedSession('w1'), true, 'first automation should still be active');
+      assert.equal(hub.isAutomatedSession('w2'), false, 'second automation should be stopped');
+      assert.ok(engines[1].engineCalls.includes('stop'), 'second engine should be stopped');
+      assert.ok(!engines[0].engineCalls.includes('stop'), 'first engine should NOT be stopped');
+    });
+
+    it('list view shows View Details buttons for each automation', async () => {
+      const { hub, api } = await setupTwoAutomations();
+      // Go to list view
+      await hub.handleCallback('auto:back');
+      api.calls.length = 0;
+      await hub.render();
+
+      const lastCall = api.calls[api.calls.length - 1];
+      const opts = lastCall.args[lastCall.method === 'sendMessage' ? 2 : 3] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      const allData = keyboard!.flat().map((b: any) => b.callback_data);
+      assert.ok(allData.includes('auto:details:1'), 'should have details button for automation 1');
+      assert.ok(allData.includes('auto:details:2'), 'should have details button for automation 2');
+      assert.ok(allData.includes('auto:new'), 'should have New Automation button in list view');
+    });
+
+    it('dispose stops all engines and clears the map', async () => {
+      const { hub, engines } = await setupTwoAutomations();
+      assert.equal(hub.activeAutomationCount, 2);
+
+      hub.dispose();
+
+      assert.equal(hub.activeAutomationCount, 0, 'should have no automations after dispose');
+      assert.ok(engines[0].engineCalls.includes('stop'), 'first engine should be stopped');
+      assert.ok(engines[1].engineCalls.includes('stop'), 'second engine should be stopped');
     });
   });
 
