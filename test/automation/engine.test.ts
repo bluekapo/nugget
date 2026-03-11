@@ -528,12 +528,12 @@ describe('AutomationEngine', () => {
     assert.ok(retryWrites.length >= 1, 'should send clarifying re-prompt to orchestrator');
   });
 
-  // ---------- Test 14: SAF-02 ESCALATE after retry also fails ----------
+  // ---------- Test 14: SAF-02 unlimited retries on parse failure ----------
 
-  it('SAF-02: engine ESCALATEs when retry also fails to parse', async () => {
+  it('SAF-02: engine retries again after second parse failure (unlimited retries)', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
-    const escalations: string[] = [];
-    bus.on('automation:escalation', (reason) => escalations.push(reason));
+    const errors: string[] = [];
+    bus.on('automation:error', (err) => errors.push(err));
 
     engine.start();
 
@@ -551,12 +551,17 @@ describe('AutomationEngine', () => {
     timer.advance(50);
     assert.equal(engine.state, 'waiting-response', 'should be waiting for retry response');
 
-    // Second unparseable response -> should ESCALATE
+    // Second unparseable response -> should retry again (unlimited), NOT escalate/pause
     await emitOutput(bus, 'orchestrator', directiveOutput('Hmm let me think about that'));
     timer.advance(1000); // response poll fires, finds completion marker -> onResponseReady
 
-    assert.equal(engine.state, 'paused', 'should be paused after double parse failure');
-    assert.ok(escalations.some(e => e.includes('parse')), 'should emit escalation about parse failure');
+    // Unlimited retry sends another retry prompt + delayed Enter
+    timer.advance(50);
+    assert.equal(engine.state, 'waiting-response', 'should still be waiting for response (unlimited retries)');
+
+    // Verify retry prompts were sent (at least 2)
+    const retryWrites = writes.filter(w => w.name === 'orchestrator' && w.data.includes('could not be parsed'));
+    assert.ok(retryWrites.length >= 2, 'should send multiple retry prompts (unlimited retries)');
   });
 
   // ---------- Test 15: SAF-03 Worker session disconnect ----------
@@ -1546,12 +1551,12 @@ describe('AutomationEngine', () => {
       'YES after two NOs should trigger normal directive cycle');
   });
 
-  it('consultation unparseable response triggers retry, second failure escalates', async () => {
+  it('consultation unparseable response triggers retry, second failure retries again (unlimited)', async () => {
     const stagnationConfig = { ...config, stagnationDelay: 200, consultationWaitDelay: 300 };
     engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
-    const escalations: string[] = [];
-    bus.on('automation:escalation', (reason: string) => {
-      escalations.push(reason);
+    const errors: string[] = [];
+    bus.on('automation:error', (err: string) => {
+      errors.push(err);
     });
     engine.start();
 
@@ -1572,12 +1577,63 @@ describe('AutomationEngine', () => {
     timer.advance(50); // delayed Enter
     assert.equal(engine.state, 'waiting-consultation', 'should be waiting for retry response');
 
-    // Second unparseable response -> escalation
+    // Second unparseable response -> should retry again (unlimited), NOT escalate/pause
     await emitOutput(bus, 'orchestrator', directiveOutput('Well it depends on the context'));
     timer.advance(1000);
 
-    assert.equal(engine.state, 'paused', 'should be paused after double consultation parse failure');
-    assert.ok(escalations.length >= 1, 'should emit escalation after double failure');
+    // Unlimited retry sends another consultation retry prompt + delayed Enter
+    timer.advance(50);
+    assert.equal(engine.state, 'waiting-consultation', 'should still be waiting for consultation (unlimited retries)');
+
+    // Verify multiple retry prompts were sent
+    const allRetryWrites = writes.filter(
+      w => w.name === 'orchestrator' && w.data.includes('YES or NO')
+    );
+    assert.ok(allRetryWrites.length >= 2, 'should send multiple consultation retry prompts (unlimited retries)');
+  });
+
+  it('retryAttempted is reset when entering consultation mode via stagnation', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200, consultationWaitDelay: 300 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle to idle
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    // First unparseable response -> sets retryAttempted=true
+    await emitOutput(bus, 'orchestrator', directiveOutput('I am confused'));
+    timer.advance(1000); // response poll fires -> onResponseReady -> retry
+
+    // Retry prompt + Enter
+    timer.advance(50);
+    assert.equal(engine.state, 'waiting-response', 'should be waiting for retry response');
+
+    // Second response IS parseable -> succeeds, goes to idle
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo hello'));
+    timer.advance(1000);
+    assert.equal(engine.state, 'idle', 'should be idle after successful parse');
+
+    // Now let stagnation fire -> enters consultation mode
+    timer.advance(200);
+    // Complete consultation clear + prompt
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    assert.equal(engine.state, 'waiting-consultation', 'should be in waiting-consultation');
+
+    // First unparseable consultation response -> should get a retry (retryAttempted was reset)
+    await emitOutput(bus, 'orchestrator', directiveOutput('I think the worker needs more time'));
+    timer.advance(1000);
+
+    // Should have sent a retry prompt (not immediately escalated)
+    const retryWrites = writes.filter(
+      w => w.name === 'orchestrator' && w.data.includes('YES or NO')
+    );
+    assert.ok(retryWrites.length >= 1, 'consultation should get a retry (retryAttempted was reset by stagnation)');
+
+    timer.advance(50);
+    assert.equal(engine.state, 'waiting-consultation', 'should be waiting for consultation retry response');
   });
 
   it('consultation NO wait timer: idle prompt on worker screen does not false-positive into normal cycle', async () => {
