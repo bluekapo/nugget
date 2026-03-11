@@ -663,18 +663,19 @@ describe('HubRenderer', () => {
 
   describe('active automation', () => {
     function createMockAutomationHub(active: boolean) {
+      const autoInfo = active ? {
+        engine: { state: 'executing' },
+        workerSession: 'worker-1',
+        orchestratorSession: 'orch-1',
+        taskDescription: 'Fix bugs',
+        cycleCount: 5,
+        lastAction: 'COMMAND: npm test',
+      } : null;
+      const allAutos = active ? new Map([[1, autoInfo!]]) : new Map();
       return {
-        get activeAutomationInfo() {
-          if (!active) return null;
-          return {
-            engine: { state: 'executing' },
-            workerSession: 'worker-1',
-            orchestratorSession: 'orch-1',
-            taskDescription: 'Fix bugs',
-            cycleCount: 5,
-            lastAction: 'COMMAND: npm test',
-          };
-        },
+        get activeAutomationInfo() { return autoInfo; },
+        get activeAutomationCount() { return allAutos.size; },
+        get allAutomations() { return allAutos; },
         get pendingCreationInfo() { return null; },
       };
     }
@@ -926,17 +927,18 @@ describe('HubRenderer', () => {
         { name: 'orch-1', status: 'running' },
       ]);
       const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      const autoInfo = {
+        engine: { state: 'executing' },
+        workerSession: 'worker-1',
+        orchestratorSession: 'orch-1',
+        taskDescription: 'Fix all the bugs in the authentication module and deploy to production server quickly',
+        cycleCount: 5,
+        lastAction: 'COMMAND: npm test',
+      };
       hub.setAutomationHub({
-        get activeAutomationInfo() {
-          return {
-            engine: { state: 'executing' },
-            workerSession: 'worker-1',
-            orchestratorSession: 'orch-1',
-            taskDescription: 'Fix all the bugs in the authentication module and deploy to production server quickly',
-            cycleCount: 5,
-            lastAction: 'COMMAND: npm test',
-          };
-        },
+        get activeAutomationInfo() { return autoInfo; },
+        get activeAutomationCount() { return 1; },
+        get allAutomations() { return new Map([[1, autoInfo]]); },
         get pendingCreationInfo() { return null; },
       } as any);
 
@@ -1018,17 +1020,18 @@ describe('HubRenderer', () => {
 
       // Exactly 80 chars -- no truncation
       const task80 = 'a'.repeat(80);
+      const auto80 = {
+        engine: { state: 'executing' },
+        workerSession: 'w',
+        orchestratorSession: 'o',
+        taskDescription: task80,
+        cycleCount: 1,
+        lastAction: null,
+      };
       hub.setAutomationHub({
-        get activeAutomationInfo() {
-          return {
-            engine: { state: 'executing' },
-            workerSession: 'w',
-            orchestratorSession: 'o',
-            taskDescription: task80,
-            cycleCount: 1,
-            lastAction: null,
-          };
-        },
+        get activeAutomationInfo() { return auto80; },
+        get activeAutomationCount() { return 1; },
+        get allAutomations() { return new Map([[1, auto80]]); },
         get pendingCreationInfo() { return null; },
       } as any);
 
@@ -1041,17 +1044,18 @@ describe('HubRenderer', () => {
 
       // 81+ chars -- should truncate
       const task81 = 'b'.repeat(81);
+      const auto81 = {
+        engine: { state: 'executing' },
+        workerSession: 'w',
+        orchestratorSession: 'o',
+        taskDescription: task81,
+        cycleCount: 1,
+        lastAction: null,
+      };
       hub.setAutomationHub({
-        get activeAutomationInfo() {
-          return {
-            engine: { state: 'executing' },
-            workerSession: 'w',
-            orchestratorSession: 'o',
-            taskDescription: task81,
-            cycleCount: 1,
-            lastAction: null,
-          };
-        },
+        get activeAutomationInfo() { return auto81; },
+        get activeAutomationCount() { return 1; },
+        get allAutomations() { return new Map([[1, auto81]]); },
         get pendingCreationInfo() { return null; },
       } as any);
 
