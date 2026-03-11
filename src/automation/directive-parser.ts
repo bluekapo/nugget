@@ -21,7 +21,10 @@ const DIRECTIVE_KEYWORD_RE = /^(COMMAND|ESCALATE|DONE|SELECT|CONTEXT):\s|^(ENTER
 function splitMidLineDirectives(text: string): string {
   // Lookahead: split at 2+ whitespace chars followed by a directive keyword.
   // The lookahead keeps the keyword attached to the right-hand part.
-  const midLineRe = /\s{2,}(?=(?:COMMAND|ESCALATE|DONE|SELECT|CONTEXT):\s)/;
+  // Handles both colon-directives (COMMAND: ...) and bare keywords (CLEAR, ENTER, etc.)
+  // at end of line — bare keywords appear at line-end when terminal wrapping places them
+  // after padding spaces following CONTEXT continuation text.
+  const midLineRe = /\s{2,}(?=(?:COMMAND|ESCALATE|DONE|SELECT|CONTEXT):\s|(?:ENTER|CLEAR|RESET|YES|NO)$)/;
 
   return text.split('\n').flatMap(line => {
     const trimmed = line.trim();

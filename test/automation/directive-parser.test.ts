@@ -644,6 +644,58 @@ describe('parseDirectiveWithContext', () => {
       assert.strictEqual(result.directive!.type, 'COMMAND');
       assert.strictEqual((result.directive as any).command, 'npm test');
     });
+
+    it('finds CLEAR mid-line after CONTEXT continuation text', () => {
+      // Bug: CLEAR has no colon, so splitMidLineDirectives didn't split it.
+      // CLEAR was swallowed into CONTEXT text, then parseDirectiveRelaxed
+      // matched a stale COMMAND from echoed prompt examples instead.
+      const text = [
+        '● CONTEXT: This is a test run. Task: clear worker session, ask a question, save',
+        '  context.                                                                        CLEAR',
+      ].join('\n');
+      const result = parseDirectiveWithContext(text);
+      assert.ok(result.directive, 'should find mid-line CLEAR');
+      assert.strictEqual(result.directive!.type, 'CLEAR');
+      assert.ok(result.context, 'should find CONTEXT');
+      assert.ok(!(result.context as string).includes('CLEAR'), 'context should not contain CLEAR keyword');
+    });
+
+    it('CLEAR mid-line not confused with prompt-echo COMMAND example', () => {
+      // Full reproduction: echoed prompt with COMMAND example + actual CONTEXT+CLEAR response.
+      // Before fix: parser returned COMMAND "Fix the routing issue" from prompt echo.
+      const text = [
+        'Example CONTEXT modifier (attach to any directive):',
+        'CONTEXT: Worker is using Next.js App Router',
+        'COMMAND: Fix the routing issue',
+        '',
+        '● CONTEXT: This is a test run. Task: clear worker session, ask a question, save',
+        '  context.                                                                        CLEAR',
+      ].join('\n');
+      const result = parseDirectiveWithContext(text);
+      assert.ok(result.directive, 'should find directive');
+      assert.strictEqual(result.directive!.type, 'CLEAR', 'should be CLEAR, not COMMAND from prompt echo');
+      assert.ok(result.context);
+    });
+
+    it('finds ENTER mid-line after CONTEXT continuation text', () => {
+      const text = [
+        '● CONTEXT: waiting for confirmation',
+        '  proceed.                                                                        ENTER',
+      ].join('\n');
+      const result = parseDirectiveWithContext(text);
+      assert.ok(result.directive, 'should find mid-line ENTER');
+      assert.strictEqual(result.directive!.type, 'ENTER');
+    });
+
+    it('finds RESET mid-line after CONTEXT continuation text', () => {
+      const text = [
+        '● CONTEXT: stale state detected',
+        '  clearing.                                                                       RESET',
+      ].join('\n');
+      const result = parseDirectiveWithContext(text);
+      assert.ok(result.directive, 'should find mid-line RESET');
+      assert.strictEqual(result.directive!.type, 'RESET');
+    });
   });
 
   describe('completion marker boundary', () => {
