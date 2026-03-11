@@ -437,7 +437,16 @@ export class AutomationEngine {
 
     debugLog(`[onWorkerIdle] writing /clear to orchestrator="${this.config.orchestratorSession}"`);
     // Send /clear to orchestrator
-    this.sessionManager.writeToSession(this.config.orchestratorSession, '/clear\r');
+    try {
+      this.sessionManager.writeToSession(this.config.orchestratorSession, '/clear\r');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      debugLog(`[onWorkerIdle] write failed: ${msg}`);
+      this.actionLog.add('EXEC_FAILURE', msg);
+      this.bus.emit('automation:error', `Execution failed: ${msg}`);
+      this.stop();
+      return;
+    }
 
     this.setState('clearing-orchestrator');
 
@@ -474,12 +483,30 @@ export class AutomationEngine {
     // Send prompt text to orchestrator (without Enter).
     // The Enter keystroke is sent after a short delay so the TUI (Ink raw mode)
     // has time to process the multiline text before the submission signal arrives.
-    this.sessionManager.writeToSession(this.config.orchestratorSession, prompt);
+    try {
+      this.sessionManager.writeToSession(this.config.orchestratorSession, prompt);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      debugLog(`[onClearComplete] write failed: ${msg}`);
+      this.actionLog.add('EXEC_FAILURE', msg);
+      this.bus.emit('automation:error', `Execution failed: ${msg}`);
+      this.stop();
+      return;
+    }
 
     this.timer.setTimeout(() => {
       if (this._state !== 'prompting-orchestrator') return;
 
-      this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+      try {
+        this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debugLog(`[onClearComplete] Enter write failed: ${msg}`);
+        this.actionLog.add('EXEC_FAILURE', msg);
+        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.stop();
+        return;
+      }
 
       // Reset orchestrator monitor for clean screen reads
       if (this.orchestratorMonitor) {
@@ -511,12 +538,30 @@ export class AutomationEngine {
 
     debugLog(`[sendFollowUpPrompt] FOLLOW-UP PROMPT (${prompt.length} chars):\n${prompt}`);
 
-    this.sessionManager.writeToSession(this.config.orchestratorSession, prompt);
+    try {
+      this.sessionManager.writeToSession(this.config.orchestratorSession, prompt);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      debugLog(`[sendFollowUpPrompt] write failed: ${msg}`);
+      this.actionLog.add('EXEC_FAILURE', msg);
+      this.bus.emit('automation:error', `Execution failed: ${msg}`);
+      this.stop();
+      return;
+    }
 
     this.timer.setTimeout(() => {
       if (this._state !== 'prompting-orchestrator') return;
 
-      this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+      try {
+        this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debugLog(`[sendFollowUpPrompt] Enter write failed: ${msg}`);
+        this.actionLog.add('EXEC_FAILURE', msg);
+        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.stop();
+        return;
+      }
 
       // Reset orchestrator monitor for clean screen reads
       if (this.orchestratorMonitor) {
@@ -557,13 +602,31 @@ export class AutomationEngine {
       this.bus.emit('automation:error', 'Failed to parse directive from orchestrator response, retrying');
 
       // Send clarifying re-prompt text (without Enter), then submit after delay
-      this.sessionManager.writeToSession(this.config.orchestratorSession, RETRY_PROMPT);
+      try {
+        this.sessionManager.writeToSession(this.config.orchestratorSession, RETRY_PROMPT);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debugLog(`[onResponseReady] retry write failed: ${msg}`);
+        this.actionLog.add('EXEC_FAILURE', msg);
+        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.stop();
+        return;
+      }
       this.setState('prompting-orchestrator');
 
       this.timer.setTimeout(() => {
         if (this._state !== 'prompting-orchestrator') return;
 
-        this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+        try {
+          this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          debugLog(`[onResponseReady] retry Enter write failed: ${msg}`);
+          this.actionLog.add('EXEC_FAILURE', msg);
+          this.bus.emit('automation:error', `Execution failed: ${msg}`);
+          this.stop();
+          return;
+        }
 
         // Reset orchestrator monitor for clean screen reads
         if (this.orchestratorMonitor) {
@@ -594,7 +657,16 @@ export class AutomationEngine {
     if (directive.type === 'CLEAR') {
       this.actionLog.add('CLEAR', '(clearing worker)');
       this.workerClearBuffer = '';
-      this.sessionManager.writeToSession(this.config.workerSession, '/clear\r');
+      try {
+        this.sessionManager.writeToSession(this.config.workerSession, '/clear\r');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debugLog(`[onResponseReady] CLEAR write failed: ${msg}`);
+        this.actionLog.add('EXEC_FAILURE', msg);
+        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.stop();
+        return;
+      }
       this.setState('clearing-worker');
       this.startWorkerClearPolling();
       return;
@@ -604,7 +676,16 @@ export class AutomationEngine {
     if (directive.type === 'RESET') {
       this.actionLog.add('RESET', '(resetting orchestrator)');
       this.clearingBuffer = '';
-      this.sessionManager.writeToSession(this.config.orchestratorSession, '/clear\r');
+      try {
+        this.sessionManager.writeToSession(this.config.orchestratorSession, '/clear\r');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debugLog(`[onResponseReady] RESET write failed: ${msg}`);
+        this.actionLog.add('EXEC_FAILURE', msg);
+        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.stop();
+        return;
+      }
       this.resetMode = true;
       this.needsFullPrompt = true;
       this.setState('clearing-orchestrator');
@@ -623,7 +704,17 @@ export class AutomationEngine {
     const writeFn = (data: string) => {
       this.sessionManager.writeToSession(this.config.workerSession, data);
     };
-    const result = executeDirective(directive, writeFn);
+    let result: ReturnType<typeof executeDirective>;
+    try {
+      result = executeDirective(directive, writeFn);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      debugLog(`[onResponseReady] executeDirective failed: ${msg}`);
+      this.actionLog.add('EXEC_FAILURE', msg);
+      this.bus.emit('automation:error', `Execution failed: ${msg}`);
+      this.stop();
+      return;
+    }
 
     if (directive.type === 'DONE') {
       this.actionLog.add(result.description, result.doneSummary ?? 'done');
@@ -670,12 +761,30 @@ export class AutomationEngine {
       if (this._state === 'paused' || this._state === 'stopped') return;
 
       if (sent < arrowDownCount) {
-        this.sessionManager.writeToSession(this.config.workerSession, '\x1b[B');
+        try {
+          this.sessionManager.writeToSession(this.config.workerSession, '\x1b[B');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          debugLog(`[sendSelect] arrow-down write failed: ${msg}`);
+          this.actionLog.add('EXEC_FAILURE', msg);
+          this.bus.emit('automation:error', `Execution failed: ${msg}`);
+          this.stop();
+          return;
+        }
         sent++;
         this.timer.setTimeout(() => sendNext(), this.arrowKeyDelayMs);
       } else {
         // Send Enter
-        this.sessionManager.writeToSession(this.config.workerSession, '\r');
+        try {
+          this.sessionManager.writeToSession(this.config.workerSession, '\r');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          debugLog(`[sendSelect] Enter write failed: ${msg}`);
+          this.actionLog.add('EXEC_FAILURE', msg);
+          this.bus.emit('automation:error', `Execution failed: ${msg}`);
+          this.stop();
+          return;
+        }
 
         // Log and complete cycle
         const description = `SELECT: ${option}`;
@@ -694,12 +803,30 @@ export class AutomationEngine {
 
     // Send first arrow immediately, then schedule the rest
     if (arrowDownCount > 0) {
-      this.sessionManager.writeToSession(this.config.workerSession, '\x1b[B');
+      try {
+        this.sessionManager.writeToSession(this.config.workerSession, '\x1b[B');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debugLog(`[sendSelect] first arrow-down write failed: ${msg}`);
+        this.actionLog.add('EXEC_FAILURE', msg);
+        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.stop();
+        return;
+      }
       sent++;
       this.timer.setTimeout(() => sendNext(), this.arrowKeyDelayMs);
     } else {
       // SELECT: 1 -- no arrow-downs, just Enter
-      this.sessionManager.writeToSession(this.config.workerSession, '\r');
+      try {
+        this.sessionManager.writeToSession(this.config.workerSession, '\r');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debugLog(`[sendSelect] SELECT:1 Enter write failed: ${msg}`);
+        this.actionLog.add('EXEC_FAILURE', msg);
+        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.stop();
+        return;
+      }
       const description = `SELECT: ${option}`;
       this.actionLog.add(description, '(awaiting result)');
       this.bus.emit('automation:cycle-complete', this.cycleNumber, description);
@@ -908,7 +1035,16 @@ export class AutomationEngine {
     this.clearingBuffer = '';
 
     debugLog(`[onWorkerStagnation] writing /clear to orchestrator="${this.config.orchestratorSession}"`);
-    this.sessionManager.writeToSession(this.config.orchestratorSession, '/clear\r');
+    try {
+      this.sessionManager.writeToSession(this.config.orchestratorSession, '/clear\r');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      debugLog(`[onWorkerStagnation] write failed: ${msg}`);
+      this.actionLog.add('EXEC_FAILURE', msg);
+      this.bus.emit('automation:error', `Execution failed: ${msg}`);
+      this.stop();
+      return;
+    }
 
     this.setState('clearing-orchestrator');
 
@@ -936,12 +1072,30 @@ export class AutomationEngine {
     debugLog(`[onConsultationClearComplete] CONSULTATION PROMPT BEING SENT (${prompt.length} chars):\n${prompt}`);
 
     // Send prompt text to orchestrator (without Enter)
-    this.sessionManager.writeToSession(this.config.orchestratorSession, prompt);
+    try {
+      this.sessionManager.writeToSession(this.config.orchestratorSession, prompt);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      debugLog(`[onConsultationClearComplete] write failed: ${msg}`);
+      this.actionLog.add('EXEC_FAILURE', msg);
+      this.bus.emit('automation:error', `Execution failed: ${msg}`);
+      this.stop();
+      return;
+    }
 
     this.timer.setTimeout(() => {
       if (this._state !== 'consulting-orchestrator') return;
 
-      this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+      try {
+        this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debugLog(`[onConsultationClearComplete] Enter write failed: ${msg}`);
+        this.actionLog.add('EXEC_FAILURE', msg);
+        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.stop();
+        return;
+      }
 
       // Reset orchestrator monitor for clean screen reads
       if (this.orchestratorMonitor) {
@@ -1049,13 +1203,31 @@ export class AutomationEngine {
       this.retryAttempted = true;
 
       // Send clarifying prompt
-      this.sessionManager.writeToSession(this.config.orchestratorSession, CONSULTATION_RETRY_PROMPT);
+      try {
+        this.sessionManager.writeToSession(this.config.orchestratorSession, CONSULTATION_RETRY_PROMPT);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debugLog(`[onConsultationResponse] retry write failed: ${msg}`);
+        this.actionLog.add('EXEC_FAILURE', msg);
+        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.stop();
+        return;
+      }
       this.setState('consulting-orchestrator');
 
       this.timer.setTimeout(() => {
         if (this._state !== 'consulting-orchestrator') return;
 
-        this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+        try {
+          this.sessionManager.writeToSession(this.config.orchestratorSession, '\r');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          debugLog(`[onConsultationResponse] retry Enter write failed: ${msg}`);
+          this.actionLog.add('EXEC_FAILURE', msg);
+          this.bus.emit('automation:error', `Execution failed: ${msg}`);
+          this.stop();
+          return;
+        }
 
         if (this.orchestratorMonitor) {
           this.orchestratorMonitor.capture.resetBaseline();
