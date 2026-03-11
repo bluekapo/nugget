@@ -53,6 +53,12 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('```');
   lines.push('');
 
+  // Conditional GSD hint
+  if (ctx.taskDescription.toLowerCase().includes('gsd')) {
+    lines.push('HINT: It is good practice to ask the worker some questions to get context on the system and the task before sending the task itself, to prompt it better.');
+    lines.push('');
+  }
+
   // Persistent context section (only if context strings exist)
   if (ctx.persistentContext && ctx.persistentContext.length > 0) {
     lines.push('## Persistent Context (carried across cycles)');

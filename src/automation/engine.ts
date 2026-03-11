@@ -628,6 +628,11 @@ export class AutomationEngine {
     if (directive.type === 'DONE') {
       this.actionLog.add(result.description, result.doneSummary ?? 'done');
       this.bus.emit('automation:done', result.doneSummary ?? directive.summary);
+      // Remove session exit handler BEFORE stop() to prevent race condition
+      if (this.sessionExitHandler) {
+        this.bus.off('session:exit', this.sessionExitHandler);
+        this.sessionExitHandler = null;
+      }
       this.stop();
       return;
     }

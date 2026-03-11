@@ -260,6 +260,11 @@ export class AutomationHubRenderer {
     };
 
     this.doneHandler = (_summary: string) => {
+      // Clean up error handler BEFORE stop to prevent race condition (same pattern as auto:stop)
+      if (this.errorHandler) {
+        this.bus.off('automation:error', this.errorHandler);
+        this.errorHandler = null;
+      }
       this.api.sendMessage(this.chatId, '\u2705 Automation complete', {
         parse_mode: 'HTML',
         reply_markup: {
