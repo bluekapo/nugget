@@ -830,7 +830,7 @@ describe('HubRenderer', () => {
       const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
       hub.setAutomationHub(createMockAutomationHub(true) as any);
 
-      hub.toggleAutomationView();
+      hub.setHubView('automationDetails');
       await hub.render();
 
       const sentText = api.calls[0].args[1] as string;
@@ -853,7 +853,7 @@ describe('HubRenderer', () => {
       const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
       hub.setAutomationHub(createMockAutomationHub(true) as any);
 
-      hub.toggleAutomationView();
+      hub.setHubView('automationDetails');
       await hub.render();
 
       const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
@@ -883,7 +883,7 @@ describe('HubRenderer', () => {
       const hub = new HubRenderer(api as any, 123, sm as any, () => 'session-1');
       hub.setAutomationHub(createMockAutomationHub(false) as any);
 
-      hub.toggleAutomationView();
+      hub.setHubView('automationDetails');
       await hub.render();
 
       const sentText = api.calls[0].args[1] as string;
@@ -905,16 +905,162 @@ describe('HubRenderer', () => {
       assert.equal(allBtns.length, 1, 'should only have back button');
     });
 
-    it('toggleAutomationView flips the mode', () => {
+    it('setHubView transitions between all three states', () => {
       const api = createMockApi();
       const sm = createMockSessionManager([]);
       const hub = new HubRenderer(api as any, 123, sm as any, () => null);
 
-      assert.equal(hub.isAutomationView, false, 'should start in normal mode');
-      hub.toggleAutomationView();
-      assert.equal(hub.isAutomationView, true, 'should be automation view after first toggle');
-      hub.toggleAutomationView();
-      assert.equal(hub.isAutomationView, false, 'should be normal after second toggle');
+      assert.equal(hub.hubView, 'sessions', 'should start in sessions state');
+      hub.setHubView('automationHub');
+      assert.equal(hub.hubView, 'automationHub', 'should be automationHub after set');
+      hub.setHubView('automationDetails');
+      assert.equal(hub.hubView, 'automationDetails', 'should be automationDetails after set');
+      hub.setHubView('sessions');
+      assert.equal(hub.hubView, 'sessions', 'should be sessions after set');
+    });
+
+    it('automationHub view shows summary with state, cycles, and truncated task', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      hub.setAutomationHub({
+        get activeAutomationInfo() {
+          return {
+            engine: { state: 'executing' },
+            workerSession: 'worker-1',
+            orchestratorSession: 'orch-1',
+            taskDescription: 'Fix all the bugs in the authentication module and deploy to production server quickly',
+            cycleCount: 5,
+            lastAction: 'COMMAND: npm test',
+          };
+        },
+        get pendingCreationInfo() { return null; },
+      } as any);
+
+      hub.setHubView('automationHub');
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(sentText.includes('<b>Automation Hub</b>'), 'should show Automation Hub header');
+      assert.ok(sentText.includes('State: executing'), 'should show engine state');
+      assert.ok(sentText.includes('Cycles: 5'), 'should show cycle count');
+      assert.ok(sentText.includes('...'), 'should truncate long task description');
+      assert.ok(!sentText.includes('Automation Details'), 'should NOT show Automation Details header');
+      assert.ok(!sentText.includes('Sessions Hub'), 'should NOT show Sessions Hub header');
+    });
+
+    it('automationHub keyboard has View Details and Back buttons', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      hub.setAutomationHub(createMockAutomationHub(true) as any);
+
+      hub.setHubView('automationHub');
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'should have inline keyboard');
+
+      const allBtns: Array<{ text: string; callback_data: string }> = [];
+      for (const row of keyboard as any[][]) {
+        for (const btn of row) {
+          if (btn.callback_data) allBtns.push(btn);
+        }
+      }
+
+      assert.ok(allBtns.some(b => b.callback_data === 'hub:auto-details'), 'should have View Details button');
+      assert.ok(allBtns.some(b => b.text.includes('View Details')), 'button text should say View Details');
+      assert.ok(allBtns.some(b => b.callback_data === 'hub:auto-back'), 'should have Back to Sessions button');
+      assert.ok(allBtns.some(b => b.text.includes('Back to Sessions')), 'button text should say Back to Sessions');
+      assert.ok(!allBtns.some(b => b.callback_data === 'auto:pause'), 'should NOT have pause button');
+      assert.ok(!allBtns.some(b => b.callback_data === 'auto:stop'), 'should NOT have stop button');
+      assert.ok(!allBtns.some(b => b.callback_data === 'auto:refresh'), 'should NOT have refresh button');
+    });
+
+    it('automationHub with no active automation shows empty state', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'session-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'session-1');
+      hub.setAutomationHub(createMockAutomationHub(false) as any);
+
+      hub.setHubView('automationHub');
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(sentText.includes('No automation running'), 'should show no automation message');
+      assert.ok(sentText.includes('<b>Automation Hub</b>'), 'should show Automation Hub header');
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      const allBtns: Array<{ text: string; callback_data: string }> = [];
+      for (const row of keyboard as any[][]) {
+        for (const btn of row) {
+          if (btn.callback_data) allBtns.push(btn);
+        }
+      }
+
+      assert.ok(allBtns.some(b => b.callback_data === 'hub:auto-back'), 'should have back button');
+      assert.ok(!allBtns.some(b => b.callback_data === 'hub:auto-details'), 'should NOT have View Details button');
+    });
+
+    it('automationHub summary truncates long task descriptions at 80 chars', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([{ name: 'w', status: 'running' }]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'w');
+
+      // Exactly 80 chars -- no truncation
+      const task80 = 'a'.repeat(80);
+      hub.setAutomationHub({
+        get activeAutomationInfo() {
+          return {
+            engine: { state: 'executing' },
+            workerSession: 'w',
+            orchestratorSession: 'o',
+            taskDescription: task80,
+            cycleCount: 1,
+            lastAction: null,
+          };
+        },
+        get pendingCreationInfo() { return null; },
+      } as any);
+
+      hub.setHubView('automationHub');
+      await hub.render();
+
+      const text80 = api.calls[0].args[1] as string;
+      assert.ok(!text80.includes('...'), 'should NOT truncate 80-char task');
+      assert.ok(text80.includes(task80), 'should show full 80-char task');
+
+      // 81+ chars -- should truncate
+      const task81 = 'b'.repeat(81);
+      hub.setAutomationHub({
+        get activeAutomationInfo() {
+          return {
+            engine: { state: 'executing' },
+            workerSession: 'w',
+            orchestratorSession: 'o',
+            taskDescription: task81,
+            cycleCount: 1,
+            lastAction: null,
+          };
+        },
+        get pendingCreationInfo() { return null; },
+      } as any);
+
+      api.calls.length = 0;
+      await hub.render({ forceNew: true });
+
+      const text81 = api.calls.filter(c => c.method === 'sendMessage')[0]?.args[1] as string;
+      assert.ok(text81.includes('...'), 'should truncate 81-char task with ...');
+      assert.ok(!text81.includes(task81), 'should NOT show full 81-char task');
     });
   });
 
