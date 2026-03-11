@@ -13,6 +13,7 @@ import { logError } from '../logging/logger.js';
 export class HubRenderer {
   private hubMessageId: number | null = null;
   private advancedMode = false;
+  private automationView = false;
   private execStateMap: Map<string, 'busy' | 'idle'> = new Map();
   private automationHub: AutomationHubRenderer | null = null;
 
@@ -37,6 +38,16 @@ export class HubRenderer {
   /** Whether the hub is currently in advanced view mode. */
   get isAdvanced(): boolean {
     return this.advancedMode;
+  }
+
+  /** Toggle between normal session list and automation details view. */
+  toggleAutomationView(): void {
+    this.automationView = !this.automationView;
+  }
+
+  /** Whether the hub is currently in automation view mode. */
+  get isAutomationView(): boolean {
+    return this.automationView;
   }
 
   constructor(
@@ -100,8 +111,8 @@ export class HubRenderer {
       }
 
       const activeSession = this.getActiveSession();
-      const text = buildText(sessions, activeSession, this.advancedMode, this.execStateMap, this.automationHub);
-      const keyboard = buildKeyboard(sessions, activeSession, this.advancedMode, this.automationHub);
+      const text = buildText(sessions, activeSession, this.advancedMode, this.execStateMap, this.automationHub, this.automationView);
+      const keyboard = buildKeyboard(sessions, activeSession, this.advancedMode, this.automationHub, this.automationView);
 
       if (this.hubMessageId === null) {
         // Send new message
@@ -162,6 +173,7 @@ function buildText(
   advanced = false,
   execStateMap: Map<string, 'busy' | 'idle'> = new Map(),
   automationHub?: AutomationHubRenderer | null,
+  automationView = false,
 ): string {
   const activeAuto = automationHub?.activeAutomationInfo ?? null;
   const pendingCreation = automationHub?.pendingCreationInfo ?? null;
@@ -203,6 +215,25 @@ function buildText(
     return (stepTexts[pendingCreation.step] ?? ['<b>Automation Hub</b>']).join('\n');
   }
 
+  // Automation view mode: show automation details instead of session list
+  if (automationView) {
+    if (activeAuto) {
+      const lines = [
+        '<b>Automation Details</b>',
+        '',
+        `Worker: <b>${activeAuto.workerSession}</b> \u2192 Orchestrator: <b>${activeAuto.orchestratorSession}</b>`,
+        `Task: ${activeAuto.taskDescription}`,
+        '',
+        `Status: ${activeAuto.engine.state} | Cycles: ${activeAuto.cycleCount}`,
+      ];
+      if (activeAuto.lastAction) {
+        lines.push(`Last: ${activeAuto.lastAction}`);
+      }
+      return lines.join('\n');
+    }
+    return ['<b>Automation Details</b>', '', 'No automation running.'].join('\n');
+  }
+
   if (sessions.length === 0) {
     const emptyLines = [
       '<b>Sessions Hub</b>',
@@ -242,6 +273,16 @@ function buildText(
     }
 
     let line = `${prefix}${emoji} <b>${s.name}</b> -- ${viewState} \u00B7 ${execState}`;
+
+    // Append role indicator if session is part of an active automation
+    if (activeAuto) {
+      if (s.name === activeAuto.workerSession) {
+        line += ' [worker]';
+      } else if (s.name === activeAuto.orchestratorSession) {
+        line += ' [orch]';
+      }
+    }
+
     if (advanced) {
       const pid = s.pid != null ? String(s.pid) : '?';
       let since = '?';
@@ -274,6 +315,7 @@ function buildKeyboard(
   activeSession: string | null,
   advanced = false,
   automationHub?: AutomationHubRenderer | null,
+  automationView = false,
 ): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
   const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
 
@@ -303,6 +345,27 @@ function buildKeyboard(
         { text: '\u274C Cancel', callback_data: 'auto:cancel' },
       ]);
     }
+    return { inline_keyboard: keyboard };
+  }
+
+  // Automation view mode: show automation control buttons
+  if (automationView) {
+    if (activeAuto) {
+      const engineState = activeAuto.engine.state;
+      if (engineState === 'paused') {
+        keyboard.push([
+          { text: '\u25B6\uFE0F Resume', callback_data: 'auto:resume' },
+          { text: '\uD83D\uDED1 Stop', callback_data: 'auto:stop' },
+        ]);
+      } else {
+        keyboard.push([
+          { text: '\u23F8 Pause', callback_data: 'auto:pause' },
+          { text: '\uD83D\uDED1 Stop', callback_data: 'auto:stop' },
+        ]);
+      }
+      keyboard.push([{ text: '\uD83D\uDD04 Refresh', callback_data: 'auto:refresh' }]);
+    }
+    keyboard.push([{ text: '\u2190 Back to Sessions', callback_data: 'hub:auto-back' }]);
     return { inline_keyboard: keyboard };
   }
 
