@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseDirective, parseContextBlock, parseDirectiveWithContext } from '../../src/automation/directive-parser.js';
+import { stripAnsi } from '../../src/automation/engine.js';
 
 describe('parseDirective', () => {
   describe('COMMAND directive', () => {
@@ -817,5 +818,31 @@ describe('parseDirectiveWithContext', () => {
       assert.ok(result.context, 'should find context');
       assert.ok(result.context!.includes('Telegram bot'), `expected context content, got: ${result.context}`);
     });
+  });
+});
+
+describe('stripAnsi', () => {
+  it('resolves Ink TUI streaming bare CRs to final rendered text', () => {
+    // Ink progressively repaints: "● Y\r● YE\r● YES\n"
+    // Only the final repaint before \n should survive
+    const result = stripAnsi('● Y\r● YE\r● YES\n');
+    assert.strictEqual(result, '● YES\n');
+  });
+
+  it('resolves simple bare CR as terminal overwrite', () => {
+    // "abc\rdef" means def overwrites abc (cursor returns to start of line)
+    const result = stripAnsi('abc\rdef');
+    assert.strictEqual(result, 'def');
+  });
+
+  it('preserves normal \\r\\n line endings unchanged', () => {
+    const result = stripAnsi('line1\r\nline2\r\nline3\r\n');
+    assert.strictEqual(result, 'line1\r\nline2\r\nline3\r\n');
+  });
+
+  it('passes through text with no bare CRs unchanged', () => {
+    const text = 'hello world\nno bare CRs here\n';
+    const result = stripAnsi(text);
+    assert.strictEqual(result, text);
   });
 });
