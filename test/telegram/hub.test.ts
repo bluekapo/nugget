@@ -782,6 +782,140 @@ describe('HubRenderer', () => {
       const sentText = api.calls[0].args[1] as string;
       assert.ok(!sentText.includes('automation in progress'), 'should not show status when no automation');
     });
+
+    it('session role indicators show [worker] and [orch] tags', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      hub.setAutomationHub(createMockAutomationHub(true) as any);
+
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      // Find the worker line and check for [worker] tag
+      const workerLine = sentText.split('\n').find(l => l.includes('worker-1'));
+      assert.ok(workerLine, 'should have worker-1 line');
+      assert.ok(workerLine!.includes('[worker]'), 'worker session should have [worker] tag');
+      // Find the orch line and check for [orch] tag
+      const orchLine = sentText.split('\n').find(l => l.includes('orch-1'));
+      assert.ok(orchLine, 'should have orch-1 line');
+      assert.ok(orchLine!.includes('[orch]'), 'orchestrator session should have [orch] tag');
+    });
+
+    it('no role tags when no automation active', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      hub.setAutomationHub(createMockAutomationHub(false) as any);
+
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(!sentText.includes('[worker]'), 'should not have [worker] tag when idle');
+      assert.ok(!sentText.includes('[orch]'), 'should not have [orch] tag when idle');
+    });
+
+    it('automationView mode shows automation details', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      hub.setAutomationHub(createMockAutomationHub(true) as any);
+
+      hub.toggleAutomationView();
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(sentText.includes('Automation Details'), 'should show Automation Details header');
+      assert.ok(sentText.includes('<b>worker-1</b>'), 'should show worker session name');
+      assert.ok(sentText.includes('<b>orch-1</b>'), 'should show orchestrator session name');
+      assert.ok(sentText.includes('Fix bugs'), 'should show task description');
+      assert.ok(sentText.includes('executing'), 'should show engine state');
+      assert.ok(sentText.includes('Cycles: 5'), 'should show cycle count');
+      assert.ok(sentText.includes('COMMAND: npm test'), 'should show last action');
+      assert.ok(!sentText.includes('Sessions Hub'), 'should NOT show Sessions Hub header');
+    });
+
+    it('automationView keyboard has pause/stop/refresh/back buttons', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      hub.setAutomationHub(createMockAutomationHub(true) as any);
+
+      hub.toggleAutomationView();
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'should have inline keyboard');
+
+      const allBtns: Array<{ text: string; callback_data: string }> = [];
+      for (const row of keyboard as any[][]) {
+        for (const btn of row) {
+          if (btn.callback_data) allBtns.push(btn);
+        }
+      }
+
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:pause'), 'should have pause button');
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:stop'), 'should have stop button');
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:refresh'), 'should have refresh button');
+      assert.ok(allBtns.some(b => b.callback_data === 'hub:auto-back'), 'should have back button');
+      assert.ok(!allBtns.some(b => b.callback_data === 'hub:switch:orch-1'), 'should NOT have switch button');
+      assert.ok(!allBtns.some(b => b.callback_data.startsWith('hub:disconnect')), 'should NOT have disconnect button');
+    });
+
+    it('automationView with no active automation shows empty state + back button', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'session-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'session-1');
+      hub.setAutomationHub(createMockAutomationHub(false) as any);
+
+      hub.toggleAutomationView();
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(sentText.includes('Automation Details'), 'should show Automation Details header');
+      assert.ok(sentText.includes('No automation running'), 'should show no automation message');
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'should have inline keyboard');
+
+      const allBtns: Array<{ text: string; callback_data: string }> = [];
+      for (const row of keyboard as any[][]) {
+        for (const btn of row) {
+          if (btn.callback_data) allBtns.push(btn);
+        }
+      }
+
+      assert.ok(allBtns.some(b => b.callback_data === 'hub:auto-back'), 'should have back button');
+      assert.equal(allBtns.length, 1, 'should only have back button');
+    });
+
+    it('toggleAutomationView flips the mode', () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => null);
+
+      assert.equal(hub.isAutomationView, false, 'should start in normal mode');
+      hub.toggleAutomationView();
+      assert.equal(hub.isAutomationView, true, 'should be automation view after first toggle');
+      hub.toggleAutomationView();
+      assert.equal(hub.isAutomationView, false, 'should be normal after second toggle');
+    });
   });
 
   describe('error helpers', () => {
