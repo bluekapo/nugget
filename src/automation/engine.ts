@@ -90,6 +90,26 @@ export type EngineState =
   | 'executing'
   | 'paused';
 
+const ENGINE_STATE_LABELS: Record<EngineState, string> = {
+  'stopped': 'Stopped',
+  'idle': 'Working...',
+  'capturing-worker': 'Capturing worker output',
+  'clearing-orchestrator': 'Preparing orchestrator',
+  'clearing-worker': 'Preparing worker',
+  'prompting-orchestrator': 'Prompting orchestrator',
+  'waiting-response': 'Waiting for response',
+  'consulting-orchestrator': 'Consulting orchestrator',
+  'waiting-consultation': 'Waiting for consultation',
+  'consultation-wait': 'Waiting for consultation',
+  'executing': 'Executing directive',
+  'paused': 'Paused',
+};
+
+/** Map raw EngineState values to human-friendly labels for display. */
+export function engineStateLabel(state: string): string {
+  return ENGINE_STATE_LABELS[state as EngineState] ?? state;
+}
+
 export interface EngineConfig {
   workerSession: string;
   orchestratorSession: string;

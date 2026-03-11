@@ -838,7 +838,7 @@ describe('HubRenderer', () => {
       assert.ok(sentText.includes('<b>worker-1</b>'), 'should show worker session name');
       assert.ok(sentText.includes('<b>orch-1</b>'), 'should show orchestrator session name');
       assert.ok(sentText.includes('Fix bugs'), 'should show task description');
-      assert.ok(sentText.includes('executing'), 'should show engine state');
+      assert.ok(sentText.includes('Executing directive'), 'should show engine state label');
       assert.ok(sentText.includes('Cycles: 5'), 'should show cycle count');
       assert.ok(sentText.includes('COMMAND: npm test'), 'should show last action');
       assert.ok(!sentText.includes('Sessions Hub'), 'should NOT show Sessions Hub header');
@@ -945,7 +945,7 @@ describe('HubRenderer', () => {
 
       const sentText = api.calls[0].args[1] as string;
       assert.ok(sentText.includes('<b>Automation Hub</b>'), 'should show Automation Hub header');
-      assert.ok(sentText.includes('State: executing'), 'should show engine state');
+      assert.ok(sentText.includes('State: Executing directive'), 'should show engine state label');
       assert.ok(sentText.includes('Cycles: 5'), 'should show cycle count');
       assert.ok(sentText.includes('...'), 'should truncate long task description');
       assert.ok(!sentText.includes('Automation Details'), 'should NOT show Automation Details header');

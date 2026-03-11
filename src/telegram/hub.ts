@@ -1,6 +1,7 @@
 import type { SessionManager } from '../session/manager.js';
 import type { HubStore } from '../db/hub-store.js';
 import type { AutomationHubRenderer } from './automation-hub.js';
+import { engineStateLabel } from '../automation/engine.js';
 import { logError } from '../logging/logger.js';
 
 /** The three states the hub view can be in. */
@@ -227,7 +228,7 @@ function buildText(
         `Worker: <b>${activeAuto.workerSession}</b> \u2192 Orchestrator: <b>${activeAuto.orchestratorSession}</b>`,
         `Task: ${activeAuto.taskDescription}`,
         '',
-        `Status: ${activeAuto.engine.state} | Cycles: ${activeAuto.cycleCount}`,
+        `Status: ${engineStateLabel(activeAuto.engine.state)} | Cycles: ${activeAuto.cycleCount}`,
       ];
       if (activeAuto.lastAction) {
         lines.push(`Last: ${activeAuto.lastAction}`);
@@ -246,7 +247,7 @@ function buildText(
       const lines = [
         '<b>Automation Hub</b>',
         '',
-        `State: ${activeAuto.engine.state} | Cycles: ${activeAuto.cycleCount}`,
+        `State: ${engineStateLabel(activeAuto.engine.state)} | Cycles: ${activeAuto.cycleCount}`,
         `Task: ${truncatedTask}`,
         '',
         'Tap View Details for full status and controls.',

@@ -9,6 +9,7 @@
  * Follows the same renderQueue serialization pattern as HubRenderer.
  */
 import type { AutomationEngine, EngineConfig } from '../automation/engine.js';
+import { engineStateLabel } from '../automation/engine.js';
 import type { EventBus } from '../events/bus.js';
 import { isNotModifiedError, isMessageNotFoundError } from './hub.js';
 import { logError } from '../logging/logger.js';
@@ -357,7 +358,7 @@ export class AutomationHubRenderer {
         `Worker: <b>${a.workerSession}</b> -> Orchestrator: <b>${a.orchestratorSession}</b>`,
         `Task: ${a.taskDescription}`,
         '',
-        `Status: ${a.engine.state} | Cycles: ${a.cycleCount}`,
+        `Status: ${engineStateLabel(a.engine.state)} | Cycles: ${a.cycleCount}`,
       ];
       if (a.lastAction) {
         lines.push(`Last: ${a.lastAction}`);
