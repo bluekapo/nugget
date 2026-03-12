@@ -4,6 +4,20 @@ import type { SessionManager } from '../session/manager.js';
 import type { SessionRouter } from '../session/router.js';
 import type { SettingsStore } from '../db/settings-store.js';
 
+/** Safely answer a callback query, ignoring "query is too old" and "query ID invalid" errors.
+ *  These occur when a user clicks an inline button after Telegram's ~30s window expires. */
+export async function safeAnswer(
+  ctx: { answerCallbackQuery: (opts?: { text?: string }) => Promise<unknown> },
+  opts?: { text?: string },
+): Promise<void> {
+  try {
+    await ctx.answerCallbackQuery(opts);
+  } catch {
+    // "query is too old" (>30s) and "query ID invalid" are expected/benign.
+    // Swallow silently — do not crash the bot.
+  }
+}
+
 /** Inline button definitions for common Claude Code actions. */
 export const ACTION_BUTTONS = {
   scrollUp:   { label: '\u2B06 Scroll Up',   data: 'action:scroll-up',   input: '\x1b[5~' },
@@ -129,17 +143,17 @@ export function registerCallbackHandlers(
     } catch {
       // Message may already be deleted
     }
-    await ctx.answerCallbackQuery();
+    await safeAnswer(ctx);
   });
 
   // Scroll lock toggle -- dedicated handler outside the ACTION_BUTTONS loop
   bot.callbackQuery('action:scroll-lock', async (ctx) => {
-    if (!scrollHandler) { await ctx.answerCallbackQuery(); return; }
+    if (!scrollHandler) { await safeAnswer(ctx); return; }
     scrollHandler.toggleLock();
     try {
       await ctx.editMessageReplyMarkup({ reply_markup: buildCLIKeyboard(scrollHandler.scrollLocked, settingsStore?.get('enter_confirmation') ?? false) });
     } catch { /* message may not be editable */ }
-    await ctx.answerCallbackQuery();
+    await safeAnswer(ctx);
   });
 
   // Action buttons -- resolve session dynamically
@@ -147,7 +161,7 @@ export function registerCallbackHandlers(
     bot.callbackQuery(action.data, async (ctx) => {
       const sessionName = getActiveSession();
       if (sessionName === null) {
-        await ctx.answerCallbackQuery({ text: 'No active session' });
+        await safeAnswer(ctx, { text: 'No active session' });
         return;
       }
 
@@ -166,7 +180,7 @@ export function registerCallbackHandlers(
             await ctx.editMessageReplyMarkup({ reply_markup: buildCLIKeyboard(scrollHandler.scrollLocked, settingsStore?.get('enter_confirmation') ?? false) });
           } catch { /* message may not be editable */ }
         }
-        await ctx.answerCallbackQuery();
+        await safeAnswer(ctx);
         return;
       }
 
@@ -176,7 +190,7 @@ export function registerCallbackHandlers(
         sendChunkedKeys(sessionManager, sessionName, '\x1b[C', 200, 10, 15).then(() =>
           sendChunkedKeys(sessionManager, sessionName, '\x7f', 200, 10, 15)
         );
-        await ctx.answerCallbackQuery();
+        await safeAnswer(ctx);
         return;
       }
 
@@ -194,15 +208,15 @@ export function registerCallbackHandlers(
             enterPendingConfirm = false;
             enterConfirmTimer = null;
           }, 7000);
-          await ctx.answerCallbackQuery({ text: 'Press again within 7s to confirm' });
+          await safeAnswer(ctx, { text: 'Press again within 7s to confirm' });
           return;
         }
-        await ctx.answerCallbackQuery();
+        await safeAnswer(ctx);
         return;
       }
 
       sessionManager.writeToSession(sessionName, action.input);
-      await ctx.answerCallbackQuery();
+      await safeAnswer(ctx);
     });
   }
 
@@ -210,7 +224,7 @@ export function registerCallbackHandlers(
   bot.callbackQuery(/^hub:switch:(.+)$/, async (ctx) => {
     const name = ctx.match![1];
     router.switchTo(name);
-    await ctx.answerCallbackQuery({ text: `Switched to ${name}` });
+    await safeAnswer(ctx, { text: `Switched to ${name}` });
   });
 
   // Hub: disconnect session
@@ -232,7 +246,7 @@ export function registerCallbackHandlers(
       }
       router.remove(name);
     }
-    await ctx.answerCallbackQuery({ text: `Disconnected ${name}` });
+    await safeAnswer(ctx, { text: `Disconnected ${name}` });
 
     // If no sessions remain, refresh hub (shows empty state) then trigger shutdown
     if (router.getAll().length === 0) {
@@ -248,7 +262,7 @@ export function registerCallbackHandlers(
   if (refreshHub) {
     bot.callbackQuery('hub:refresh', async (ctx) => {
       await refreshHub();
-      await ctx.answerCallbackQuery();
+      await safeAnswer(ctx);
     });
   }
 
@@ -256,7 +270,7 @@ export function registerCallbackHandlers(
   if (toggleAdvanced) {
     bot.callbackQuery('hub:advanced', async (ctx) => {
       await toggleAdvanced();
-      await ctx.answerCallbackQuery();
+      await safeAnswer(ctx);
     });
   }
 
@@ -264,17 +278,17 @@ export function registerCallbackHandlers(
   if (setHubView) {
     bot.callbackQuery('hub:automations', async (ctx) => {
       await setHubView('automationHub');
-      await ctx.answerCallbackQuery();
+      await safeAnswer(ctx);
     });
 
     bot.callbackQuery('hub:auto-details', async (ctx) => {
       await setHubView('automationDetails');
-      await ctx.answerCallbackQuery();
+      await safeAnswer(ctx);
     });
 
     bot.callbackQuery('hub:auto-back', async (ctx) => {
       await setHubView('sessions');
-      await ctx.answerCallbackQuery();
+      await safeAnswer(ctx);
     });
   }
 
@@ -283,12 +297,12 @@ export function registerCallbackHandlers(
     bot.callbackQuery(/^auto:/, async (ctx) => {
       const data = ctx.callbackQuery.data;
       const text = await automationHub.handleCallback(data);
-      await ctx.answerCallbackQuery({ text });
+      await safeAnswer(ctx, { text });
     });
   }
 
   // Catch-all for unknown callbacks -- prevent stuck loading animation
   bot.on('callback_query:data', async (ctx) => {
-    await ctx.answerCallbackQuery();
+    await safeAnswer(ctx);
   });
 }

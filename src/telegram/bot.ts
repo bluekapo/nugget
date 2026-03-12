@@ -192,6 +192,12 @@ export async function createBot(token: string, ownerId: number): Promise<Bot> {
     throw new Error(`Invalid bot token -- verify BOT_TOKEN in .env: ${message}`);
   }
 
+  // Global error handler -- catches any unhandled middleware errors so they don't
+  // become uncaught promise rejections that crash Node.js.
+  bot.catch((err) => {
+    logError('Unhandled bot error:', err.error);
+  });
+
   // Cache the bot for same-process reuse
   botCache.set(token, bot);
 
