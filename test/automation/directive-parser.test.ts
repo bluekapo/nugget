@@ -869,6 +869,20 @@ describe('stripAnsi', () => {
       `Last spinner frame should survive bare CR, got: ${JSON.stringify(result)}`);
   });
 
+  it('strips OSC 8 hyperlinks terminated by ST (ESC backslash)', () => {
+    // OSC 8 hyperlinks: \x1b]8;params;url\x1b\\clickable text\x1b]8;;\x1b\\
+    const raw = 'See \x1b]8;;https://example.com\x1b\\docs\x1b]8;;\x1b\\ for details';
+    const result = stripAnsi(raw);
+    assert.strictEqual(result, 'See docs for details');
+  });
+
+  it('strips OSC 8 hyperlinks without eating content between links', () => {
+    // Two separate hyperlinks with normal text between them
+    const raw = '\x1b]8;;https://a.com\x1b\\link1\x1b]8;;\x1b\\ and \x1b]8;;https://b.com\x1b\\link2\x1b]8;;\x1b\\';
+    const result = stripAnsi(raw);
+    assert.strictEqual(result, 'link1 and link2');
+  });
+
   it('does not merge response and status areas after cursor positioning strip', () => {
     // Reproduces the exact corruption pattern from Claude Code v2.1.74
     // Response at row 10, spinner at row 38, prompt at row 39
