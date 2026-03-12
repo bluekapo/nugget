@@ -34,6 +34,7 @@ export function stripAnsi(raw: string): string {
   return raw
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '') // OSC sequences (BEL or ST terminated, including OSC 8 hyperlinks)
     .replace(/\x1b\[\d*;?\d*[Hf]/g, '\n')            // CSI cursor position → newline (preserves Ink TUI spatial layout)
+    .replace(/\x1b\[(\d*)C/g, (_, n) => ' '.repeat(parseInt(n || '1', 10))) // CUF (Cursor Forward) → spaces (Ink TUI word spacing)
     .replace(/\x1b\[[\?]?[0-9;]*[a-zA-Z]/g, '')      // Remaining CSI sequences (colors, erase, modes)
     .replace(/\x1b[()][0-9A-Za-z]/g, '')              // Character set selection
     .replace(/\x1b[A-Za-z]/g, '')                     // Single-char escapes
