@@ -107,7 +107,7 @@ function collectContinuation(firstLine: string, lines: string[], startIdx: numbe
 
     // Stop at empty lines, new bullets, prompts, separator lines, directive keywords,
     // or completion markers (✻ Crunched/Brewed/Forged for Xm Ys)
-    if (!contTrimmed || /^[●❯✻]/.test(contTrimmed) || /^─{3,}/.test(contTrimmed)) break;
+    if (!contTrimmed || /^[●❯✻✶✽✢]/.test(contTrimmed) || /^[·*]\s+\w+/.test(contTrimmed) || /^─{3,}/.test(contTrimmed)) break;
     if (DIRECTIVE_KEYWORD_RE.test(contTrimmed)) break;
 
     parts.push(contTrimmed);

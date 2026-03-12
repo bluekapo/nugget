@@ -845,4 +845,74 @@ describe('stripAnsi', () => {
     const result = stripAnsi(text);
     assert.strictEqual(result, text);
   });
+
+  it('replaces CSI cursor position with newline to preserve line separation', () => {
+    // Ink TUI renders response and spinner at different rows via cursor positioning
+    // \x1b[5;1H = cursor to row 5, col 1; \x1b[6;1H = cursor to row 6, col 1
+    const raw = '\x1b[5;1H● COMMAND: /gsd:plan-phase 19\x1b[6;1H✶ Scurrying…\x1b[7;1H❯ ';
+    const result = stripAnsi(raw);
+    // Each cursor position becomes a newline — command stays on its own line
+    assert.ok(result.includes('● COMMAND: /gsd:plan-phase 19\n'),
+      `Expected command on own line, got: ${JSON.stringify(result)}`);
+    assert.ok(!result.includes('19✶'),
+      `Command and spinner should not merge, got: ${JSON.stringify(result)}`);
+  });
+
+  it('handles cursor positioning + bare CR (Ink repaint with spinner overwrite)', () => {
+    // Ink positions spinner, then overwrites with next animation frame via bare CR
+    const raw = '\x1b[5;1H● COMMAND: /clear\x1b[6;1H✶ Osmosing…\r✽ Ruminating…';
+    const result = stripAnsi(raw);
+    assert.ok(result.includes('● COMMAND: /clear\n'),
+      `Command should be on own line, got: ${JSON.stringify(result)}`);
+    // Bare CR handling: "✶ Osmosing…\r✽ Ruminating…" → "✽ Ruminating…"
+    assert.ok(result.includes('✽ Ruminating…'),
+      `Last spinner frame should survive bare CR, got: ${JSON.stringify(result)}`);
+  });
+
+  it('does not merge response and status areas after cursor positioning strip', () => {
+    // Reproduces the exact corruption pattern from Claude Code v2.1.74
+    // Response at row 10, spinner at row 38, prompt at row 39
+    const raw = '\x1b[10;1H● COMMAND: /gsd:execute-phase 19\x1b[38;1H✢ Seasoning…\x1b[39;1H❯ \x1b[40;1H  ⏵⏵ bypass permissions on';
+    const result = stripAnsi(raw);
+    // Command must be on its own line, not merged with spinner/prompt/footer
+    const lines = result.split('\n');
+    const cmdLine = lines.find(l => l.includes('● COMMAND:'));
+    assert.ok(cmdLine, `Should find ● COMMAND line in: ${JSON.stringify(result)}`);
+    assert.strictEqual(cmdLine!.trim(), '● COMMAND: /gsd:execute-phase 19');
+  });
+});
+
+describe('parseDirective spinner isolation', () => {
+  it('does not include spinner text in command via continuation', () => {
+    // After cursor positioning fix, spinner ends up on its own line
+    const text = '● COMMAND: /gsd:plan-phase 19\n✶ Scurrying…\n❯ ';
+    const result = parseDirective(text);
+    assert.strictEqual(result?.type, 'COMMAND');
+    assert.strictEqual(result?.command, '/gsd:plan-phase 19');
+  });
+
+  it('does not include any spinner variant in continuation', () => {
+    const text = '● COMMAND: /clear\n✽ Ruminating…\n❯ ';
+    const result = parseDirective(text);
+    assert.strictEqual(result?.type, 'COMMAND');
+    assert.strictEqual(result?.command, '/clear');
+  });
+
+  it('does not include middle-dot spinner in continuation', () => {
+    const text = '● COMMAND: /gsd:progress\n· Osmosing…\n❯ ';
+    const result = parseDirective(text);
+    assert.strictEqual(result?.type, 'COMMAND');
+    assert.strictEqual(result?.command, '/gsd:progress');
+  });
+
+  it('still collects legitimate indented continuation lines', () => {
+    // Multi-line commands should still work (continuation stops at spinner, not at normal text)
+    const text = '● COMMAND: Fix the bug in\n  src/session/pty.ts where signals fail\n❯ ';
+    const result = parseDirective(text);
+    assert.strictEqual(result?.type, 'COMMAND');
+    assert.ok(result?.command.includes('Fix the bug in'),
+      `Should start with first line, got: ${result?.command}`);
+    assert.ok(result?.command.includes('src/session/pty.ts'),
+      `Should include continuation, got: ${result?.command}`);
+  });
 });

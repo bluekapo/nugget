@@ -32,11 +32,12 @@ function debugLog(msg: string): void {
 /** Strip all ANSI escape sequences from raw PTY data. */
 export function stripAnsi(raw: string): string {
   return raw
-    .replace(/\x1b\][^\x07]*\x07/g, '')           // OSC sequences (window title etc.)
-    .replace(/\x1b\[[\?]?[0-9;]*[a-zA-Z]/g, '')   // CSI sequences (including private modes like ?2026l)
-    .replace(/\x1b[()][0-9A-Za-z]/g, '')           // Character set selection
-    .replace(/\x1b[A-Za-z]/g, '')                  // Single-char escapes
-    .replace(/[^\n]*\r(?!\n)/g, '');                  // Bare CR — discard everything before it on same line (terminal overwrite)
+    .replace(/\x1b\][^\x07]*\x07/g, '')              // OSC sequences (window title etc.)
+    .replace(/\x1b\[\d*;?\d*[Hf]/g, '\n')            // CSI cursor position → newline (preserves Ink TUI spatial layout)
+    .replace(/\x1b\[[\?]?[0-9;]*[a-zA-Z]/g, '')      // Remaining CSI sequences (colors, erase, modes)
+    .replace(/\x1b[()][0-9A-Za-z]/g, '')              // Character set selection
+    .replace(/\x1b[A-Za-z]/g, '')                     // Single-char escapes
+    .replace(/[^\n]*\r(?!\n)/g, '');                   // Bare CR — discard everything before it on same line (terminal overwrite)
 }
 
 /** Strip Claude Code spinner lines and blank whitespace-only lines from screen text. */
