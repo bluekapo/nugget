@@ -894,6 +894,24 @@ describe('stripAnsi', () => {
     assert.ok(cmdLine, `Should find ● COMMAND line in: ${JSON.stringify(result)}`);
     assert.strictEqual(cmdLine!.trim(), '● COMMAND: /gsd:execute-phase 19');
   });
+
+  it('converts CUF (\\x1b[1C) between words to single space', () => {
+    const raw = 'In\x1b[1Cthe\x1b[1Cbackend-antibot\x1b[1Cproject';
+    const result = stripAnsi(raw);
+    assert.strictEqual(result, 'In the backend-antibot project');
+  });
+
+  it('converts CUF with count 3 to 3 spaces', () => {
+    const raw = 'hello\x1b[3Cworld';
+    const result = stripAnsi(raw);
+    assert.strictEqual(result, 'hello   world');
+  });
+
+  it('converts CUF with no digit (defaults to 1) to single space', () => {
+    const raw = 'foo\x1b[Cbar';
+    const result = stripAnsi(raw);
+    assert.strictEqual(result, 'foo bar');
+  });
 });
 
 describe('parseDirective spinner isolation', () => {
