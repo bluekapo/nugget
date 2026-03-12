@@ -1,5 +1,6 @@
 import { Bot } from 'grammy';
 import { autoRetry } from '@grammyjs/auto-retry';
+import { createRateLimiter } from './rate-limiter.js';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { createServer, connect, type Server, type Socket } from 'node:net';
@@ -159,11 +160,14 @@ export async function createBot(token: string, ownerId: number): Promise<Bot> {
 
   const bot = new Bot(token);
 
-  // Install auto-retry transformer -- catches 429 responses and retries with backoff
-  bot.api.config.use(autoRetry({
-    maxRetryAttempts: 3,
-    maxDelaySeconds: 30,
-  }));
+  // Install rate limiter FIRST -- proactively throttles all API calls to prevent 429s.
+  // editMessageText (99.4% of 429s) gets 350ms minimum spacing; all calls get 50ms base spacing.
+  bot.api.config.use(createRateLimiter());
+
+  // Install auto-retry AFTER rate limiter -- catches any 429s that slip through and
+  // waits the full retry_after duration (even 500+ seconds). Previous config of
+  // maxDelaySeconds=30 caused cascading failures when retry_after exceeded 30s.
+  bot.api.config.use(autoRetry());
 
   // Register owner-only auth as first middleware -- all messages from non-owners are silently dropped
   bot.use(ownerOnly(ownerId));
