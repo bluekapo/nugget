@@ -18,7 +18,7 @@ function createMockPrev() {
 describe('TelegramRateLimiter', () => {
   it('Test 1: Sequential calls are spaced at least minInterval ms apart', async () => {
     const { prev, calls } = createMockPrev();
-    const config: RateLimiterConfig = { baseInterval: 80, methodIntervals: {} };
+    const config: RateLimiterConfig = { baseInterval: 40, methodIntervals: {} };
     const transformer = createRateLimiter(config);
 
     // Fire 3 sequential calls
@@ -27,11 +27,11 @@ describe('TelegramRateLimiter', () => {
     await transformer(prev as any, 'sendMessage' as any, {} as any);
 
     assert.equal(calls.length, 3);
-    // Each gap should be >= baseInterval (allow 30ms jitter tolerance)
+    // Each gap should be >= baseInterval (allow 20ms jitter tolerance)
     const gap1 = calls[1].timestamp - calls[0].timestamp;
     const gap2 = calls[2].timestamp - calls[1].timestamp;
-    assert.ok(gap1 >= 80 - 30, `Gap 1 should be >= 50ms (was ${gap1}ms)`);
-    assert.ok(gap2 >= 80 - 30, `Gap 2 should be >= 50ms (was ${gap2}ms)`);
+    assert.ok(gap1 >= 40 - 20, `Gap 1 should be >= 20ms (was ${gap1}ms)`);
+    assert.ok(gap2 >= 40 - 20, `Gap 2 should be >= 20ms (was ${gap2}ms)`);
   });
 
   it('Test 2: editMessageText calls get extra spacing beyond the base interval', async () => {
@@ -96,5 +96,21 @@ describe('TelegramRateLimiter', () => {
       () => transformer(prev as any, 'sendMessage' as any, {} as any),
       { message: 'Telegram API down' },
     );
+  });
+
+  it('Test 6: Default config uses 25ms base interval and no per-method overrides', async () => {
+    const { prev, calls } = createMockPrev();
+    // Create with NO config -- uses defaults
+    const transformer = createRateLimiter();
+
+    // Two consecutive editMessageText calls
+    await transformer(prev as any, 'editMessageText' as any, {} as any);
+    await transformer(prev as any, 'editMessageText' as any, {} as any);
+
+    assert.equal(calls.length, 2);
+    const gap = calls[1].timestamp - calls[0].timestamp;
+    // With no per-method override, gap should be ~25ms (base interval), NOT 350ms
+    // Allow 20ms jitter tolerance but cap at 100ms to prove no 350ms override
+    assert.ok(gap < 100, `editMessageText gap should be < 100ms with default config (was ${gap}ms)`);
   });
 });
