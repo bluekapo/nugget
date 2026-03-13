@@ -3,24 +3,6 @@ import assert from 'node:assert/strict';
 
 import { SessionRouter } from '../../src/session/router.js';
 
-/** Minimal mock for TelegramOutputSink (post-Phase 9: no attach/detach) */
-function createMockOutputSink() {
-  return {
-    getCurrentState: mock.fn(() => null),
-    restoreState: mock.fn((_state: { messageId: number; text: string }) => {}),
-    clearCurrent: mock.fn(() => {}),
-  };
-}
-
-/** Create a mock MessageTracker with call tracking. */
-function createMockTracker() {
-  return {
-    persistAndDelete: mock.fn(async (_session: string, _sink: unknown) => {}),
-    restore: mock.fn(async (_session: string) => null as { messageId: number; text: string } | null),
-    archive: mock.fn(async (_session: string, _sink: unknown) => {}),
-  };
-}
-
 /** Minimal mock for EventBus */
 function createMockBus() {
   return {
@@ -31,17 +13,14 @@ function createMockBus() {
 }
 
 describe('SessionRouter', () => {
-  let sink: ReturnType<typeof createMockOutputSink>;
   let bus: ReturnType<typeof createMockBus>;
   let hubUpdateCount: number;
   let router: SessionRouter;
 
   beforeEach(() => {
-    sink = createMockOutputSink();
     bus = createMockBus();
     hubUpdateCount = 0;
     router = new SessionRouter(
-      sink as unknown as Parameters<typeof SessionRouter['prototype']['switchTo']> extends never[] ? never : any,
       bus as any,
       () => { hubUpdateCount++; },
     );
@@ -83,6 +62,16 @@ describe('SessionRouter', () => {
     router.remove('active');
 
     assert.equal(router.activeSession, null);
+  });
+
+  it('remove() calls onHubUpdate', () => {
+    router.add('a');
+    router.switchTo('a');
+    hubUpdateCount = 0;
+
+    router.remove('a');
+
+    assert.equal(hubUpdateCount, 1);
   });
 
   it('remove() of non-active session preserves activeSession', () => {
@@ -133,142 +122,64 @@ describe('SessionRouter', () => {
     // No hub update
     assert.equal(hubUpdateCount, 0);
   });
-});
 
-describe('SessionRouter with MessageTracker', () => {
-  let sink: ReturnType<typeof createMockOutputSink>;
-  let bus: ReturnType<typeof createMockBus>;
-  let tracker: ReturnType<typeof createMockTracker>;
-  let hubUpdateCount: number;
-  let router: SessionRouter;
-
-  beforeEach(() => {
-    sink = createMockOutputSink();
-    bus = createMockBus();
-    tracker = createMockTracker();
-    hubUpdateCount = 0;
-    router = new SessionRouter(
-      sink as any,
-      bus as any,
-      () => { hubUpdateCount++; },
-      tracker,
-    );
-  });
-
-  it('switchTo() calls messageTracker.persistAndDelete for the old active session', async () => {
-    router.add('a');
-    router.add('b');
-    router.switchTo('a');
-    await new Promise(r => setTimeout(r, 50)); // let first lifecycle settle
-    tracker.persistAndDelete.mock.resetCalls();
-    tracker.restore.mock.resetCalls();
-
-    router.switchTo('b');
-    await new Promise(r => setTimeout(r, 50));
-
-    assert.equal(tracker.persistAndDelete.mock.callCount(), 1);
-    assert.equal(tracker.persistAndDelete.mock.calls[0].arguments[0], 'a');
-  });
-
-  it('switchTo() calls messageTracker.restore for the new session', async () => {
-    router.add('a');
-    router.add('b');
-    router.switchTo('a');
-    await new Promise(r => setTimeout(r, 50)); // let first lifecycle settle
-    tracker.restore.mock.resetCalls();
-
-    router.switchTo('b');
-    await new Promise(r => setTimeout(r, 50));
-
-    assert.equal(tracker.restore.mock.callCount(), 1);
-    assert.equal(tracker.restore.mock.calls[0].arguments[0], 'b');
-  });
-
-  it('switchTo() calls outputSink.restoreState with the restore result if non-null', async () => {
-    const restoreResult = { messageId: 42, text: 'restored text' };
-    tracker.restore = mock.fn(async () => restoreResult);
-    // Re-create router with the updated tracker
-    router = new SessionRouter(sink as any, bus as any, () => { hubUpdateCount++; }, tracker);
+  it('switchTo() fires onSessionSwitch with old and new session names', () => {
+    const switchCalls: Array<{ from: string | null; to: string }> = [];
+    router.onSessionSwitch = (from, to) => {
+      switchCalls.push({ from, to });
+    };
 
     router.add('a');
     router.add('b');
     router.switchTo('a');
-    await new Promise(r => setTimeout(r, 50)); // let first lifecycle settle
-    sink.restoreState.mock.resetCalls();
-
     router.switchTo('b');
-    await new Promise(r => setTimeout(r, 50));
 
-    assert.equal(sink.restoreState.mock.callCount(), 1);
-    assert.deepEqual(sink.restoreState.mock.calls[0].arguments[0], restoreResult);
+    assert.equal(switchCalls.length, 2);
+    assert.deepEqual(switchCalls[0], { from: null, to: 'a' });
+    assert.deepEqual(switchCalls[1], { from: 'a', to: 'b' });
   });
 
-  it('switchTo() on same session does not trigger persist/delete/restore', async () => {
+  it('switchTo() with no previous session fires onSessionSwitch(null, newSession)', () => {
+    const switchCalls: Array<{ from: string | null; to: string }> = [];
+    router.onSessionSwitch = (from, to) => {
+      switchCalls.push({ from, to });
+    };
+
+    router.add('first');
+    router.switchTo('first');
+
+    assert.equal(switchCalls.length, 1);
+    assert.deepEqual(switchCalls[0], { from: null, to: 'first' });
+  });
+
+  it('switchTo() triggers local redraw for local sessions', () => {
+    const redraws: string[] = [];
+    router.onLocalRedraw = (name) => { redraws.push(name); };
+
+    router.add('local');
+    router.switchTo('local');
+
+    assert.deepEqual(redraws, ['local']);
+  });
+
+  it('switchTo() does not fire onSessionSwitch on no-op (same session)', () => {
+    const switchCalls: Array<{ from: string | null; to: string }> = [];
+    router.onSessionSwitch = (from, to) => {
+      switchCalls.push({ from, to });
+    };
+
     router.add('a');
     router.switchTo('a');
-    await new Promise(r => setTimeout(r, 50)); // let first lifecycle settle
-    tracker.persistAndDelete.mock.resetCalls();
-    tracker.restore.mock.resetCalls();
+    switchCalls.length = 0; // reset
 
     router.switchTo('a'); // no-op
-    await new Promise(r => setTimeout(r, 50));
 
-    assert.equal(tracker.persistAndDelete.mock.callCount(), 0);
-    assert.equal(tracker.restore.mock.callCount(), 0);
+    assert.equal(switchCalls.length, 0);
   });
 
-  it('remove() calls messageTracker.archive for the removed session', async () => {
-    router.add('a');
-    router.switchTo('a');
-
-    router.remove('a');
-    await new Promise(r => setTimeout(r, 50));
-
-    assert.equal(tracker.archive.mock.callCount(), 1);
-    assert.equal(tracker.archive.mock.calls[0].arguments[0], 'a');
-  });
-
-  it('remove() called twice for the same session triggers archive() exactly once', async () => {
-    router.add('a');
-    router.switchTo('a');
-    tracker.archive.mock.resetCalls();
-
-    router.remove('a');
-    router.remove('a'); // second call -- should be no-op
-    await new Promise(r => setTimeout(r, 50));
-
-    assert.equal(tracker.archive.mock.callCount(), 1, 'archive should be called exactly once');
-  });
-
-  it('remove() for a session not in the set is a silent no-op (no error, no archive)', async () => {
-    // Never added 'ghost' session
-    router.remove('ghost'); // should not throw or call archive
-    await new Promise(r => setTimeout(r, 50));
-
-    assert.equal(tracker.archive.mock.callCount(), 0, 'archive should not be called for unknown session');
-  });
-
-  it('remove() of non-active session still archives', async () => {
-    router.add('a');
-    router.add('b');
-    router.switchTo('a');
-
-    router.remove('b');
-    await new Promise(r => setTimeout(r, 50));
-
-    // Should still archive even though b is not active
-    assert.equal(tracker.archive.mock.callCount(), 1);
-    assert.equal(tracker.archive.mock.calls[0].arguments[0], 'b');
-  });
-
-  it('switchTo() with no previous active session skips persistAndDelete', async () => {
-    router.add('a');
-
-    router.switchTo('a'); // first switch, no previous session
-    await new Promise(r => setTimeout(r, 50));
-
-    assert.equal(tracker.persistAndDelete.mock.callCount(), 0);
-    // But restore should still be called for the new session
-    assert.equal(tracker.restore.mock.callCount(), 1);
+  it('remove() for a session not in the set is a silent no-op', () => {
+    hubUpdateCount = 0;
+    router.remove('ghost'); // should not throw
+    assert.equal(hubUpdateCount, 0);
   });
 });

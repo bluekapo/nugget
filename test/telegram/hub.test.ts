@@ -1206,6 +1206,76 @@ describe('HubRenderer', () => {
     });
   });
 
+  describe('CLI view keyboard', () => {
+    it('CLI view keyboard includes Back to Sessions button with hub:cli-back data', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'test-sess', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'test-sess');
+
+      hub.setCliContent('test-sess', 'some terminal output');
+      hub.setHubView('cli');
+      await hub.render({ forceNew: true });
+
+      const sendCall = api.calls.find(c => c.method === 'sendMessage');
+      assert.ok(sendCall, 'should have sent a message');
+      const opts = sendCall!.args[2] as { reply_markup?: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } };
+      assert.ok(opts?.reply_markup?.inline_keyboard, 'should have inline keyboard');
+
+      // Find the Back to Sessions button
+      const allButtons = opts.reply_markup!.inline_keyboard.flat();
+      const backButton = allButtons.find(b => b.callback_data === 'hub:cli-back');
+      assert.ok(backButton, 'should have hub:cli-back button');
+      assert.ok(backButton!.text.includes('Back to Sessions'), 'button text should include Back to Sessions');
+    });
+
+    it('CLI view keyboard includes scroll, arrow, and action buttons', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'test-sess', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'test-sess');
+
+      hub.setCliContent('test-sess', 'terminal content');
+      hub.setHubView('cli');
+      await hub.render({ forceNew: true });
+
+      const sendCall = api.calls.find(c => c.method === 'sendMessage');
+      const opts = sendCall!.args[2] as { reply_markup?: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } };
+      const allButtons = opts!.reply_markup!.inline_keyboard.flat();
+      const buttonDatas = allButtons.map(b => b.callback_data);
+
+      // Verify key button callback_data values are present
+      assert.ok(buttonDatas.includes('action:scroll-up'), 'should have scroll-up');
+      assert.ok(buttonDatas.includes('action:scroll-down'), 'should have scroll-down');
+      assert.ok(buttonDatas.includes('action:scroll-lock'), 'should have scroll-lock');
+      assert.ok(buttonDatas.includes('action:enter'), 'should have enter');
+      assert.ok(buttonDatas.includes('action:escape'), 'should have escape');
+      assert.ok(buttonDatas.includes('action:arrow-up'), 'should have arrow-up');
+      assert.ok(buttonDatas.includes('action:arrow-down'), 'should have arrow-down');
+      assert.ok(buttonDatas.includes('hub:cli-back'), 'should have cli-back');
+    });
+
+    it('setting CLI content and rendering produces correct HTML output', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'my-session', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'my-session');
+
+      hub.setCliContent('my-session', 'hello world');
+      hub.setHubView('cli');
+      await hub.render({ forceNew: true });
+
+      const sendCall = api.calls.find(c => c.method === 'sendMessage');
+      const text = sendCall!.args[1] as string;
+      assert.ok(text.includes('hello world'), 'should contain CLI screen text');
+      assert.ok(text.includes('CLI of my-session'), 'should contain session name header');
+      assert.ok(text.includes('<pre>'), 'should wrap in pre tag');
+    });
+  });
+
   describe('error helpers', () => {
     it('isNotModifiedError detects "not modified" in message', () => {
       assert.equal(isNotModifiedError(new Error('message is not modified')), true);
