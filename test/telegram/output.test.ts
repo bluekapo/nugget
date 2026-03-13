@@ -745,35 +745,39 @@ describe('TelegramOutputSink rate limiting (minInterval)', () => {
     assert.equal(sink2.minInterval, 2000, 'Custom minInterval should be 2000');
   });
 
-  it('consecutive API calls are NOT locally throttled (global rate limiter handles it)', async () => {
-    // Since the local throttle was removed in favor of the global rate limiter
-    // (installed as a grammY API transformer in bot.ts), calls through TelegramOutputSink
-    // should complete without local delays. The global rate limiter handles spacing.
-    let apiCallCount = 0;
+  it('consecutive API calls are spaced at least minInterval apart', async () => {
+    const timestamps: number[] = [];
     let messageIdCounter = 0;
 
     const timedApi = {
       sendMessage: async (_chatId: number, _text: string, _opts?: unknown) => {
-        apiCallCount++;
+        timestamps.push(Date.now());
         messageIdCounter++;
         return { message_id: messageIdCounter };
       },
       editMessageText: async (_chatId: number, _messageId: number, _text: string, _opts?: unknown) => {
-        apiCallCount++;
+        timestamps.push(Date.now());
         return true;
       },
     };
 
+    // Use minInterval=100 to keep test fast
     const sink = new TelegramOutputSink(timedApi as never, 12345, undefined, 5, 1, 100);
 
-    // Fire 3 separate replace events
+    // Fire 3 separate replace events -- each triggers a new sendMessage (current is cleared first)
     sink.handleEvent(ev('msg1', 'replace'));
     sink.handleEvent(ev('msg2', 'replace'));
     sink.handleEvent(ev('msg3', 'replace'));
     await sink.drain();
 
-    // All calls should complete (sequential queue still works)
-    assert.ok(apiCallCount >= 3, `All API calls should have completed, got ${apiCallCount}`);
+    // Verify at least 3 API calls happened
+    assert.ok(timestamps.length >= 3, `Expected at least 3 API calls, got ${timestamps.length}`);
+
+    // Check intervals between consecutive calls (allow 20ms tolerance)
+    for (let i = 1; i < timestamps.length; i++) {
+      const gap = timestamps[i] - timestamps[i - 1];
+      assert.ok(gap >= 80, `Gap between call ${i - 1} and ${i} was ${gap}ms, expected >= 80ms (100ms - 20ms tolerance)`);
+    }
   });
 
   it('minInterval=0 disables throttling', async () => {

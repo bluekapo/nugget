@@ -88,12 +88,11 @@ export class TelegramOutputSink {
   /** Queue depth at which onLowWater fires after being paused (CAPT-05). */
   readonly lowWaterMark: number;
 
-  /**
-   * Minimum milliseconds between consecutive Telegram API calls.
-   * @deprecated No longer used -- global rate limiter in bot.ts handles throttling centrally.
-   * Kept for backwards compatibility of the constructor signature.
-   */
+  /** Minimum milliseconds between consecutive Telegram API calls. */
   readonly minInterval: number;
+
+  /** Timestamp of the last API call (Date.now()). */
+  private lastApiCall = 0;
 
   constructor(
     private readonly api: {
@@ -109,6 +108,17 @@ export class TelegramOutputSink {
     this.highWaterMark = highWaterMark;
     this.lowWaterMark = lowWaterMark;
     this.minInterval = minInterval;
+  }
+
+  /** Wait if needed to enforce minInterval between API calls. */
+  private async throttle(): Promise<void> {
+    if (this.minInterval <= 0) return;
+    const now = Date.now();
+    const elapsed = now - this.lastApiCall;
+    if (elapsed < this.minInterval) {
+      await new Promise(resolve => setTimeout(resolve, this.minInterval - elapsed));
+    }
+    this.lastApiCall = Date.now();
   }
 
   /**
@@ -169,6 +179,7 @@ export class TelegramOutputSink {
         remaining = rest;
 
         try {
+          await this.throttle();
           const sendOpts: Record<string, unknown> = { parse_mode: 'HTML' };
           if (this.replyMarkup !== undefined) {
             sendOpts.reply_markup = this.replyMarkup;
@@ -201,6 +212,7 @@ export class TelegramOutputSink {
         const newText = this.current.text + chunk;
 
         try {
+          await this.throttle();
           const editOpts: Record<string, unknown> = { parse_mode: 'HTML' };
           if (this.replyMarkup !== undefined) {
             editOpts.reply_markup = this.replyMarkup;
