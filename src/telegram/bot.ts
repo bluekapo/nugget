@@ -160,8 +160,8 @@ export async function createBot(token: string, ownerId: number): Promise<Bot> {
 
   const bot = new Bot(token);
 
-  // Install rate limiter FIRST -- light 25ms base spacing between all API calls;
-  // autoRetry handles any 429s that slip through.
+  // Install rate limiter FIRST -- proactively throttles all API calls to prevent 429s.
+  // editMessageText (99.4% of 429s) gets 350ms minimum spacing; all calls get 50ms base spacing.
   bot.api.config.use(createRateLimiter());
 
   // Install auto-retry AFTER rate limiter -- catches any 429s that slip through and
