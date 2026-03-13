@@ -1,5 +1,5 @@
 /**
- * ScreenCapture — the middle layer in the TerminalEmulator -> ScreenCapture -> TelegramOutputSink pipeline.
+ * ScreenCapture — the middle layer in the TerminalEmulator -> ScreenCapture -> HubRenderer pipeline.
  *
  * Bridges raw PTY data events to clean text OutputEvents. Feeds data to the emulator,
  * debounces rapid output with adaptive timing, takes screen snapshots via getScreenText(),
@@ -14,7 +14,7 @@ import type { EventBus } from '../events/bus.js';
  * OutputEvent — the contract between ScreenCapture and downstream consumers.
  *
  * Emitted by ScreenCapture whenever the terminal screen content changes.
- * Phase 9 will wire this to TelegramOutputSink.
+ * Consumed by HubRenderer to update CLI view content.
  */
 export interface OutputEvent {
   /** The text content to send to the consumer. */
