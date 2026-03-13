@@ -3,9 +3,11 @@ import type { HubStore } from '../db/hub-store.js';
 import type { AutomationHubRenderer } from './automation-hub.js';
 import { engineStateLabel } from '../automation/engine.js';
 import { logError } from '../logging/logger.js';
+import { ACTION_BUTTONS } from './keyboard.js';
+import { wrapPre } from '../output/html.js';
 
-/** The three states the hub view can be in. */
-export type HubViewState = 'sessions' | 'automationHub' | 'automationDetails';
+/** The four states the hub view can be in. */
+export type HubViewState = 'sessions' | 'automationHub' | 'automationDetails' | 'cli';
 
 /**
  * Renders and manages the central "Sessions Hub" message in Telegram.
@@ -20,6 +22,12 @@ export class HubRenderer {
   private hubViewState: HubViewState = 'sessions';
   private execStateMap: Map<string, 'busy' | 'idle'> = new Map();
   private automationHub: AutomationHubRenderer | null = null;
+
+  /** CLI view state */
+  private cliSessionName: string | null = null;
+  private cliScreenText = '';
+  private cliScrollLocked = true;
+  private cliEnterConfirmation = false;
 
   /** Sequential promise chain to serialize render() calls and prevent duplicate sendMessage. */
   private renderQueue: Promise<void> = Promise.resolve();
@@ -40,6 +48,23 @@ export class HubRenderer {
   /** Remove exec state for a session (call on session exit to clean up). */
   clearExecState(sessionName: string): void {
     this.execStateMap.delete(sessionName);
+  }
+
+  /** Store CLI screen content for rendering. Does NOT trigger render (caller is responsible). */
+  setCliContent(sessionName: string, screenText: string): void {
+    this.cliSessionName = sessionName;
+    this.cliScreenText = screenText;
+  }
+
+  /** Update CLI keyboard scroll/enter state. */
+  setCliScrollState(locked: boolean, enterConfirmation: boolean): void {
+    this.cliScrollLocked = locked;
+    this.cliEnterConfirmation = enterConfirmation;
+  }
+
+  /** Get current CLI content state. */
+  getCliContent(): { sessionName: string | null; screenText: string } {
+    return { sessionName: this.cliSessionName, screenText: this.cliScreenText };
   }
 
   /** Debounced render -- coalesces rapid render requests into one. Use for exec-state changes. */
@@ -134,8 +159,8 @@ export class HubRenderer {
       }
 
       const activeSession = this.getActiveSession();
-      const text = buildText(sessions, activeSession, this.advancedMode, this.execStateMap, this.automationHub, this.hubViewState);
-      const keyboard = buildKeyboard(sessions, activeSession, this.advancedMode, this.automationHub, this.hubViewState);
+      const text = buildText(sessions, activeSession, this.advancedMode, this.execStateMap, this.automationHub, this.hubViewState, this.cliSessionName, this.cliScreenText);
+      const keyboard = buildKeyboard(sessions, activeSession, this.advancedMode, this.automationHub, this.hubViewState, this.cliScrollLocked, this.cliEnterConfirmation);
 
       if (this.hubMessageId === null) {
         // Send new message
@@ -197,6 +222,8 @@ function buildText(
   execStateMap: Map<string, 'busy' | 'idle'> = new Map(),
   automationHub?: AutomationHubRenderer | null,
   hubView: HubViewState = 'sessions',
+  cliSessionName: string | null = null,
+  cliScreenText = '',
 ): string {
   const activeAuto = automationHub?.activeAutomationInfo ?? null;
   const autoCount = automationHub?.activeAutomationCount ?? 0;
@@ -238,6 +265,14 @@ function buildText(
       ],
     };
     return (stepTexts[pendingCreation.step] ?? ['<b>Automation Hub</b>']).join('\n');
+  }
+
+  // CLI view: terminal screen content in a pre block
+  if (hubView === 'cli') {
+    if (cliSessionName) {
+      return wrapPre(cliScreenText, `CLI of ${cliSessionName}`);
+    }
+    return '<b>CLI View</b>\n\nNo session selected.';
   }
 
   // Automation details view: full detail with worker/orch/task/status/cycles/lastAction
@@ -364,6 +399,8 @@ function buildKeyboard(
   advanced = false,
   automationHub?: AutomationHubRenderer | null,
   hubView: HubViewState = 'sessions',
+  cliScrollLocked = true,
+  cliEnterConfirmation = false,
 ): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
   const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
 
@@ -394,6 +431,46 @@ function buildKeyboard(
         { text: '\u274C Cancel', callback_data: 'auto:cancel' },
       ]);
     }
+    return { inline_keyboard: keyboard };
+  }
+
+  // CLI view: replicate CLI keyboard layout with Back to Sessions
+  if (hubView === 'cli') {
+    const lockLabel = cliScrollLocked ? '\uD83D\uDD34\uD83D\uDD12' : '\uD83D\uDFE2\uD83D\uDD13';
+    const scrollUpLabel = cliScrollLocked ? '\uD83D\uDD12 \u2B06 Scroll Up' : '\u2B06 Scroll Up';
+    const scrollDownLabel = cliScrollLocked ? '\uD83D\uDD12 \u2B07 Scroll Down' : '\u2B07 Scroll Down';
+    const enterLabel = cliEnterConfirmation ? '\uD83D\uDEE1 \u21A9 Enter' : ACTION_BUTTONS.enter.label;
+
+    keyboard.push(
+      // Row 1: Scroll Up / Lock / Scroll Down
+      [
+        { text: scrollUpLabel, callback_data: ACTION_BUTTONS.scrollUp.data },
+        { text: lockLabel, callback_data: 'action:scroll-lock' },
+        { text: scrollDownLabel, callback_data: ACTION_BUTTONS.scrollDown.data },
+      ],
+      // Row 2: Clear-input / /clear / Enter
+      [
+        { text: ACTION_BUTTONS.clearInput.label, callback_data: ACTION_BUTTONS.clearInput.data },
+        { text: ACTION_BUTTONS.clear.label, callback_data: ACTION_BUTTONS.clear.data },
+        { text: enterLabel, callback_data: ACTION_BUTTONS.enter.data },
+      ],
+      // Row 3: Esc / Up / Bksp
+      [
+        { text: ACTION_BUTTONS.escape.label, callback_data: ACTION_BUTTONS.escape.data },
+        { text: ACTION_BUTTONS.arrowUp.label, callback_data: ACTION_BUTTONS.arrowUp.data },
+        { text: ACTION_BUTTONS.backspace.label, callback_data: ACTION_BUTTONS.backspace.data },
+      ],
+      // Row 4: Left / Down / Right
+      [
+        { text: ACTION_BUTTONS.arrowLeft.label, callback_data: ACTION_BUTTONS.arrowLeft.data },
+        { text: ACTION_BUTTONS.arrowDown.label, callback_data: ACTION_BUTTONS.arrowDown.data },
+        { text: ACTION_BUTTONS.arrowRight.label, callback_data: ACTION_BUTTONS.arrowRight.data },
+      ],
+      // Row 5: Back to Sessions
+      [
+        { text: '\u2190 Back to Sessions', callback_data: 'hub:cli-back' },
+      ],
+    );
     return { inline_keyboard: keyboard };
   }
 
