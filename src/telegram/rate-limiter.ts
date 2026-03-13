@@ -3,8 +3,8 @@ import type { Transformer } from 'grammy';
 /**
  * Configuration for the Telegram rate limiter.
  *
- * @property baseInterval - Minimum ms between ANY two API calls (default: 50)
- * @property methodIntervals - Per-method minimum ms overrides (e.g. editMessageText: 350)
+ * @property baseInterval - Minimum ms between ANY two API calls (default: 25)
+ * @property methodIntervals - Per-method minimum ms overrides (default: none)
  */
 export interface RateLimiterConfig {
   baseInterval?: number;
@@ -25,8 +25,8 @@ export interface RateLimiterConfig {
  *   bot.api.config.use(autoRetry({ ... }));
  */
 export function createRateLimiter(config: RateLimiterConfig = {}): Transformer {
-  const baseInterval = config.baseInterval ?? 50;
-  const methodIntervals = config.methodIntervals ?? { editMessageText: 350 };
+  const baseInterval = config.baseInterval ?? 25;
+  const methodIntervals = config.methodIntervals ?? {};
 
   // Timestamps for throttle computation
   let lastCallTimestamp = 0;
