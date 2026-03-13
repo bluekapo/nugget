@@ -24,6 +24,9 @@ export class HubRenderer {
   /** Sequential promise chain to serialize render() calls and prevent duplicate sendMessage. */
   private renderQueue: Promise<void> = Promise.resolve();
 
+  /** Timer handle for debounced render. */
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
   /** Set the automation hub reference (set after construction due to init ordering). */
   setAutomationHub(hub: AutomationHubRenderer): void {
     this.automationHub = hub;
@@ -32,6 +35,22 @@ export class HubRenderer {
   /** Update the execution state for a session (busy = processing, idle = waiting for input). */
   setExecState(sessionName: string, state: 'busy' | 'idle'): void {
     this.execStateMap.set(sessionName, state);
+  }
+
+  /** Remove exec state for a session (call on session exit to clean up). */
+  clearExecState(sessionName: string): void {
+    this.execStateMap.delete(sessionName);
+  }
+
+  /** Debounced render -- coalesces rapid render requests into one. Use for exec-state changes. */
+  debouncedRender(delayMs = 500): void {
+    if (this.debounceTimer !== null) {
+      clearTimeout(this.debounceTimer);
+    }
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      this.render();
+    }, delayMs);
   }
 
   /** Toggle between normal and advanced view. */

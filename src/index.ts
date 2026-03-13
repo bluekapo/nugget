@@ -252,6 +252,7 @@ async function startPrimary(
   bus.on('session:exit', (name: string) => {
     const wasActive = router.activeSession === name;
     router.remove(name);
+    hubRenderer.clearExecState(name);
     // Auto-switch to next available session if the killed one was active
     if (wasActive && router.activeSession === null && router.getAll().length > 0) {
       router.switchTo(router.getAll()[0]);
@@ -259,10 +260,10 @@ async function startPrimary(
     hubRenderer.render();
   });
 
-  // 14b. Wire exec-state changes to hub for dynamic busy/idle display
+  // 14b. Wire exec-state changes to hub for dynamic busy/idle display (debounced)
   bus.on('session:exec-state', (name: string, state: 'busy' | 'idle') => {
     hubRenderer.setExecState(name, state);
-    hubRenderer.render();
+    hubRenderer.debouncedRender();
   });
 
   // 15. Create input pipeline with dynamic session getter
@@ -732,6 +733,7 @@ async function becomeNewPrimary(
     bus.on('session:exit', (name: string) => {
       const wasActive = router.activeSession === name;
       router.remove(name);
+      hubRenderer.clearExecState(name);
       // Auto-switch to next available session if the killed one was active
       if (wasActive && router.activeSession === null && router.getAll().length > 0) {
         router.switchTo(router.getAll()[0]);
@@ -739,10 +741,10 @@ async function becomeNewPrimary(
       hubRenderer.render();
     });
 
-    // Wire exec-state changes to hub for dynamic busy/idle display
+    // Wire exec-state changes to hub for dynamic busy/idle display (debounced)
     bus.on('session:exec-state', (name: string, state: 'busy' | 'idle') => {
       hubRenderer.setExecState(name, state);
-      hubRenderer.render();
+      hubRenderer.debouncedRender();
     });
 
     router.add(sessionName);
