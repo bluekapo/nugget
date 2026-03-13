@@ -1068,6 +1068,144 @@ describe('HubRenderer', () => {
     });
   });
 
+  describe('CLI view state', () => {
+    it('buildText renders CLI content with session name header and pre block', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'my-session', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'my-session');
+
+      hub.setCliContent('my-session', 'Hello from terminal');
+      hub.setHubView('cli');
+      await hub.render({ forceNew: true });
+
+      const sentText = api.calls.filter(c => c.method === 'sendMessage')[0]?.args[1] as string;
+      assert.ok(sentText.includes('<b>CLI of my-session</b>'), 'should have CLI header with session name');
+      assert.ok(sentText.includes('<pre>'), 'should contain pre tag');
+      assert.ok(sentText.includes('Hello from terminal'), 'should contain terminal content');
+    });
+
+    it('buildText returns fallback when CLI content has no session', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => null);
+
+      hub.setHubView('cli');
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(sentText.includes('CLI View'), 'should show CLI View header');
+      assert.ok(sentText.includes('No session selected'), 'should show no session fallback');
+    });
+
+    it('buildKeyboard returns CLI keyboard buttons plus Back to Sessions', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'test-sess', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'test-sess');
+
+      hub.setCliContent('test-sess', 'some output');
+      hub.setHubView('cli');
+      await hub.render({ forceNew: true });
+
+      const opts = api.calls.filter(c => c.method === 'sendMessage')[0]?.args[2] as any;
+      const keyboard = opts.reply_markup.inline_keyboard;
+
+      // Flatten all callback_data values
+      const allData = keyboard.flat().map((b: any) => b.callback_data);
+
+      // Should have CLI action buttons
+      assert.ok(allData.includes('action:scroll-up'), 'should have scroll up');
+      assert.ok(allData.includes('action:scroll-down'), 'should have scroll down');
+      assert.ok(allData.includes('action:enter'), 'should have enter');
+      assert.ok(allData.includes('action:escape'), 'should have escape');
+      assert.ok(allData.includes('action:arrow-up'), 'should have arrow up');
+      assert.ok(allData.includes('action:arrow-down'), 'should have arrow down');
+      assert.ok(allData.includes('action:arrow-left'), 'should have arrow left');
+      assert.ok(allData.includes('action:arrow-right'), 'should have arrow right');
+      assert.ok(allData.includes('action:backspace'), 'should have backspace');
+      assert.ok(allData.includes('action:clear-input'), 'should have clear input');
+      assert.ok(allData.includes('action:clear'), 'should have clear');
+
+      // Should have Back to Sessions button
+      assert.ok(allData.includes('hub:cli-back'), 'should have Back to Sessions button with hub:cli-back');
+
+      // Back to Sessions should be the last row
+      const lastRow = keyboard[keyboard.length - 1];
+      assert.ok(lastRow.some((b: any) => b.callback_data === 'hub:cli-back'), 'Back to Sessions should be in last row');
+    });
+
+    it('setCliContent stores and getCliContent retrieves correctly', () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => null);
+
+      // Before setting, should be null/empty
+      const before = hub.getCliContent();
+      assert.equal(before.sessionName, null, 'sessionName should be null initially');
+      assert.equal(before.screenText, '', 'screenText should be empty initially');
+
+      hub.setCliContent('alpha', 'screen output here');
+      const after = hub.getCliContent();
+      assert.equal(after.sessionName, 'alpha', 'sessionName should match');
+      assert.equal(after.screenText, 'screen output here', 'screenText should match');
+    });
+
+    it('transitioning from cli to sessions and back preserves CLI content', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'sess-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'sess-1');
+
+      // Set CLI content and render CLI view
+      hub.setCliContent('sess-1', 'terminal stuff');
+      hub.setHubView('cli');
+      await hub.render({ forceNew: true });
+
+      const cliText = api.calls.filter(c => c.method === 'sendMessage')[0]?.args[1] as string;
+      assert.ok(cliText.includes('terminal stuff'), 'CLI view should show terminal content');
+
+      // Switch to sessions
+      hub.setHubView('sessions');
+      api.calls.length = 0;
+      await hub.render({ forceNew: true });
+
+      const sessText = api.calls.filter(c => c.method === 'sendMessage')[0]?.args[1] as string;
+      assert.ok(sessText.includes('Sessions Hub'), 'sessions view should show Sessions Hub');
+
+      // Switch back to CLI -- content should be preserved
+      hub.setHubView('cli');
+      api.calls.length = 0;
+      await hub.render({ forceNew: true });
+
+      const cliText2 = api.calls.filter(c => c.method === 'sendMessage')[0]?.args[1] as string;
+      assert.ok(cliText2.includes('terminal stuff'), 'CLI content should be preserved after view transition');
+    });
+
+    it('CLI view text uses wrapPre for terminal content', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'html-test', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'html-test');
+
+      // Test HTML escaping via wrapPre
+      hub.setCliContent('html-test', 'if (x < 10 && y > 5) {}');
+      hub.setHubView('cli');
+      await hub.render({ forceNew: true });
+
+      const sentText = api.calls.filter(c => c.method === 'sendMessage')[0]?.args[1] as string;
+      // wrapPre escapes HTML, so < becomes &lt; and > becomes &gt; and & becomes &amp;
+      assert.ok(sentText.includes('&lt;'), 'should HTML-escape < character');
+      assert.ok(sentText.includes('&gt;'), 'should HTML-escape > character');
+      assert.ok(sentText.includes('&amp;'), 'should HTML-escape & character');
+      assert.ok(!sentText.includes('< 10'), 'should NOT have raw < in output');
+    });
+  });
+
   describe('error helpers', () => {
     it('isNotModifiedError detects "not modified" in message', () => {
       assert.equal(isNotModifiedError(new Error('message is not modified')), true);
