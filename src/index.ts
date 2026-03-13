@@ -14,16 +14,13 @@ import {
   connectToPrimary,
   type IpcCallbacks,
 } from './telegram/bot.js';
-import { TelegramOutputSink } from './telegram/output.js';
 import { TelegramInputHandler } from './telegram/input.js';
 import { HubRenderer } from './telegram/hub.js';
 import { HubStore } from './db/hub-store.js';
 import { SettingsStore } from './db/settings-store.js';
-import { registerCallbackHandlers, buildCLIKeyboard, buildControlsKeyboard } from './telegram/keyboard.js';
+import { registerCallbackHandlers, buildControlsKeyboard } from './telegram/keyboard.js';
 import { registerCommands, EphemeralTracker } from './telegram/commands.js';
 import { CommandAllowlist } from './security/allowlist.js';
-import { MessageStore } from './db/messages.js';
-import { MessageTracker } from './telegram/messages.js';
 import { TerminalEmulator } from './terminal/emulator.js';
 import { ScreenCapture } from './terminal/capture.js';
 import { TERMINAL_COLS, TERMINAL_ROWS } from './terminal/constants.js';
@@ -118,22 +115,25 @@ async function startPrimary(
   // 8b. Create SettingsStore early (needed by keyboard builders below)
   const settingsStore = new SettingsStore(db);
 
-  // 9. Create output sink
-  // Pass CLI keyboard so every output message shows navigation buttons (no Delete)
-  const outputSink = new TelegramOutputSink(bot.api, config.ownerId, buildCLIKeyboard(true, settingsStore.get('enter_confirmation')));
-
   // 9b. Create TerminalEmulator + ScreenCapture pipeline
-  // PTY data -> ScreenCapture.onData -> emulator -> OutputEvent -> sink.handleEvent
+  // PTY data -> ScreenCapture.onData -> emulator -> OutputEvent -> hub CLI view
   const ptyCols = process.stdout.columns ?? TERMINAL_COLS;
   const ptyRows = process.stdout.rows ?? TERMINAL_ROWS;
   const emulator = new TerminalEmulator(ptyCols, ptyRows);
   const screenCapture = new ScreenCapture(emulator, (event) => {
-    outputSink.handleEvent(event);
+    const session = router.activeSession;
+    if (!session) return;
+    if (event.mode === 'replace') {
+      hubRenderer.setCliContent(session, event.text);
+    } else {
+      // Append mode: accumulate onto existing content
+      const current = hubRenderer.getCliContent();
+      hubRenderer.setCliContent(session, current.screenText + event.text);
+    }
+    if (hubRenderer.hubView === 'cli') {
+      hubRenderer.render();
+    }
   }, { bus, sessionNameFn: () => router.activeSession });
-
-  // 10. Create MessageStore and MessageTracker for message lifecycle management
-  const messageStore = new MessageStore(db);
-  const messageTracker = new MessageTracker(bot.api, config.ownerId, messageStore);
 
   // 11. Create HubRenderer with session name getter that includes remote sessions
   const hubStore = new HubStore(db);
@@ -178,19 +178,19 @@ async function startPrimary(
   hubRenderer.setAutomationHub(automationHub);
   automationHub.onRender = () => hubRenderer.render();
 
-  // 12. Create SessionRouter with MessageTracker (onHubUpdate triggers hub re-render)
-  const router = new SessionRouter(
-    outputSink, bus, () => hubRenderer.render(), messageTracker,
-    () => screenCapture.resetBaseline(),  // reset diff baseline on session switch
-  );
+  // 12. Create SessionRouter (simplified: no TelegramOutputSink or MessageTracker)
+  const router = new SessionRouter(bus, () => {
+    hubRenderer.render();
+  });
 
-  // 12a. Wire headerFn to show "CLI of <session>" above output messages
-  outputSink.headerFn = () => {
-    const name = router.activeSession;
-    return name ? `CLI of ${name}` : null;
+  // 12a. Wire session switch callback: reset baseline, clear CLI content, switch to CLI view
+  router.onSessionSwitch = (_from, to) => {
+    screenCapture.resetBaseline();
+    hubRenderer.setCliContent(to, '');
+    hubRenderer.setHubView('cli');
   };
 
-  // 12b. Wire local redraw: resize PTY to trigger SIGWINCH → Claude Code redraws
+  // 12b. Wire local redraw: resize PTY to trigger SIGWINCH -> Claude Code redraws
   router.onLocalRedraw = (name: string) => {
     try {
       sessionManager.resizeSession(name, ptyCols, ptyRows);
@@ -220,29 +220,6 @@ async function startPrimary(
         },
       }).catch((err) => logError('Notification failed:', err));
     }
-  };
-
-  // 13. Wire onMessageCreated hook: track every output message for the active session
-  outputSink.onMessageCreated = (messageId: number) => {
-    const session = router.activeSession;
-    if (session) messageTracker.track(session, messageId);
-  };
-
-  // 13b. Wire onMessageCompleted hook: capture content when messages fill to EFFECTIVE_LIMIT
-  // This ensures persistAndDelete saves real text content, not empty strings
-  outputSink.onMessageCompleted = (messageId: number, text: string) => {
-    const session = router.activeSession;
-    if (session) messageTracker.updateContent(session, messageId, text);
-  };
-
-  // 13c. Wire flow control: pause PTY when Telegram queue backs up (CAPT-05)
-  outputSink.onHighWater = () => {
-    const session = router.activeSession;
-    if (session) sessionManager.pauseSession(session);
-  };
-  outputSink.onLowWater = () => {
-    const session = router.activeSession;
-    if (session) sessionManager.resumeSession(session);
   };
 
   // 14. Wire lifecycle events to hub
@@ -297,7 +274,7 @@ async function startPrimary(
     try { await ctx.deleteMessage(); } catch { /* ignore */ }
   });
   bot.on('message:text', inputHandler.handler());
-  registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), screenCapture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { shutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, async (view: 'sessions' | 'automationHub' | 'automationDetails') => { hubRenderer.setHubView(view); await hubRenderer.render(); }, automationHub, settingsStore);
+  registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), screenCapture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { shutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, async (view: 'sessions' | 'automationHub' | 'automationDetails' | 'cli') => { hubRenderer.setHubView(view); await hubRenderer.render(); }, automationHub, settingsStore, (locked: boolean) => { hubRenderer.setCliScrollState(locked, settingsStore.get('enter_confirmation')); });
 
   // 17. Start bot long polling in background (do NOT await -- it blocks forever)
   bot.start({ onStart: () => logInfo('Telegram bot listening') });
@@ -386,7 +363,7 @@ async function startPrimary(
   }
 
   // 23. Graceful shutdown on SIGINT/SIGTERM
-  const shutdown = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, outputSink, screenCapture, emulator, cleanupStdin, automationHub);
+  const shutdown = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, screenCapture, emulator, cleanupStdin, automationHub);
   shutdownFn = shutdown;
 
   // 24. Auto-shutdown when the main session PTY exits AND no other sessions remain.
@@ -601,11 +578,20 @@ async function becomeNewPrimary(
   try {
     const bot = await createBot(config.botToken, config.ownerId);
     const settingsStore = new SettingsStore(db);
-    const outputSink = new TelegramOutputSink(bot.api, config.ownerId, buildCLIKeyboard(true, settingsStore.get('enter_confirmation')));
 
     const emulator = new TerminalEmulator(ptyCols, ptyRows);
     const capture = new ScreenCapture(emulator, (event) => {
-      outputSink.handleEvent(event);
+      const session = router.activeSession;
+      if (!session) return;
+      if (event.mode === 'replace') {
+        hubRenderer.setCliContent(session, event.text);
+      } else {
+        const current = hubRenderer.getCliContent();
+        hubRenderer.setCliContent(session, current.screenText + event.text);
+      }
+      if (hubRenderer.hubView === 'cli') {
+        hubRenderer.render();
+      }
     }, { bus, sessionNameFn: () => router.activeSession });
 
     bus.off('session:output', stdoutHandler);
@@ -620,9 +606,6 @@ async function becomeNewPrimary(
         capture.onData(data);
       }
     });
-
-    const messageStore = new MessageStore(db);
-    const messageTracker = new MessageTracker(bot.api, config.ownerId, messageStore);
 
     const hubStore = new HubStore(db);
     const hubRenderer = new HubRenderer(
@@ -663,28 +646,18 @@ async function becomeNewPrimary(
     hubRenderer.setAutomationHub(promotedAutomationHub);
     promotedAutomationHub.onRender = () => hubRenderer.render();
 
-    const router = new SessionRouter(
-      outputSink, bus, () => hubRenderer.render(), messageTracker,
-      () => capture.resetBaseline(),
-    );
+    const router = new SessionRouter(bus, () => {
+      hubRenderer.render();
+    });
+
+    router.onSessionSwitch = (_from, to) => {
+      capture.resetBaseline();
+      hubRenderer.setCliContent(to, '');
+      hubRenderer.setHubView('cli');
+    };
 
     router.onLocalRedraw = (name: string) => {
       try { sessionManager.resizeSession(name, ptyCols, ptyRows); } catch {}
-    };
-
-    // Wire headerFn to show "CLI of <session>" above output messages
-    outputSink.headerFn = () => {
-      const name = router.activeSession;
-      return name ? `CLI of ${name}` : null;
-    };
-
-    outputSink.onMessageCreated = (messageId: number) => {
-      const session = router.activeSession;
-      if (session) messageTracker.track(session, messageId);
-    };
-    outputSink.onMessageCompleted = (messageId: number, text: string) => {
-      const session = router.activeSession;
-      if (session) messageTracker.updateContent(session, messageId, text);
     };
 
     // Wire completion detection notification for promoted primary
@@ -728,7 +701,7 @@ async function becomeNewPrimary(
       try { await ctx.deleteMessage(); } catch { /* ignore */ }
     });
     bot.on('message:text', inputHandler.handler());
-    registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), capture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { promotedShutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, async (view: 'sessions' | 'automationHub' | 'automationDetails') => { hubRenderer.setHubView(view); await hubRenderer.render(); }, promotedAutomationHub, settingsStore);
+    registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), capture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { promotedShutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, async (view: 'sessions' | 'automationHub' | 'automationDetails' | 'cli') => { hubRenderer.setHubView(view); await hubRenderer.render(); }, promotedAutomationHub, settingsStore, (locked: boolean) => { hubRenderer.setCliScrollState(locked, settingsStore.get('enter_confirmation')); });
 
     bus.on('session:exit', (name: string) => {
       const wasActive = router.activeSession === name;
@@ -760,9 +733,7 @@ async function becomeNewPrimary(
         router.addRemote(name, bridge);
         hubRenderer.render();
         bridge.onOutput((data: string) => {
-          if (router.activeSession === name) {
-            capture.onData(data);
-          }
+          bus.emit('session:output', name, data);
         });
       },
       onUnregister: (name) => {
@@ -775,7 +746,7 @@ async function becomeNewPrimary(
     bot.start({ onStart: () => logInfo('Promoted to primary -- Telegram bot listening') });
 
     // Set up graceful shutdown for the promoted primary
-    promotedShutdownFn = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, outputSink, capture, emulator, undefined, promotedAutomationHub);
+    promotedShutdownFn = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, capture, emulator, undefined, promotedAutomationHub);
 
     logInfo('Promotion complete -- Telegram control restored.');
   } catch (err) {
@@ -907,7 +878,6 @@ function setupPrimaryShutdown(
   sessionManager: SessionManager,
   router: SessionRouter,
   db: Database.Database,
-  outputSink: TelegramOutputSink,
   screenCapture: ScreenCapture,
   emulator: TerminalEmulator,
   cleanupStdin?: () => void,
@@ -933,8 +903,6 @@ function setupPrimaryShutdown(
     try {
       // Flush pending ScreenCapture debounce (synchronous -- fires onOutput callback)
       screenCapture.flush();
-      // Wait for all queued Telegram API calls to complete
-      await outputSink.drain();
       // Dispose ScreenCapture and emulator to prevent memory leaks
       screenCapture.dispose();
       emulator.dispose();

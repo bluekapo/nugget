@@ -129,9 +129,10 @@ export function registerCallbackHandlers(
   toggleAdvanced?: () => Promise<void>,
   onShutdown?: () => Promise<void>,
   deleteHub?: () => Promise<void>,
-  setHubView?: (view: 'sessions' | 'automationHub' | 'automationDetails') => Promise<void>,
+  setHubView?: (view: 'sessions' | 'automationHub' | 'automationDetails' | 'cli') => Promise<void>,
   automationHub?: { handleCallback(data: string): Promise<string>; render(opts?: { forceNew?: boolean }): Promise<void> },
   settingsStore?: SettingsStore,
+  updateCliScrollState?: (locked: boolean) => void,
 ): void {
   // Enter confirmation: double-press state
   let enterPendingConfirm = false;
@@ -150,9 +151,14 @@ export function registerCallbackHandlers(
   bot.callbackQuery('action:scroll-lock', async (ctx) => {
     if (!scrollHandler) { await safeAnswer(ctx); return; }
     scrollHandler.toggleLock();
-    try {
-      await ctx.editMessageReplyMarkup({ reply_markup: buildCLIKeyboard(scrollHandler.scrollLocked, settingsStore?.get('enter_confirmation') ?? false) });
-    } catch { /* message may not be editable */ }
+    updateCliScrollState?.(scrollHandler.scrollLocked);
+    if (refreshHub) {
+      await refreshHub();
+    } else {
+      try {
+        await ctx.editMessageReplyMarkup({ reply_markup: buildCLIKeyboard(scrollHandler.scrollLocked, settingsStore?.get('enter_confirmation') ?? false) });
+      } catch { /* message may not be editable */ }
+    }
     await safeAnswer(ctx);
   });
 
@@ -169,13 +175,15 @@ export function registerCallbackHandlers(
       if (scrollHandler && (action.data === 'action:scroll-up' || action.data === 'action:scroll-down')) {
         if (action.data === 'action:scroll-up') {
           scrollHandler.scrollUp();
-          // After scrollUp, always unlocked — update keyboard to remove lock emoji
-          try {
-            await ctx.editMessageReplyMarkup({ reply_markup: buildCLIKeyboard(false, settingsStore?.get('enter_confirmation') ?? false) });
-          } catch { /* message may not be editable */ }
+          updateCliScrollState?.(scrollHandler.scrollLocked);
         } else {
           scrollHandler.scrollDown();
-          // After scrollDown, check if re-locked (at bottom) — update keyboard accordingly
+          updateCliScrollState?.(scrollHandler.scrollLocked);
+        }
+        if (refreshHub) {
+          await refreshHub();
+        } else {
+          // Fallback: edit standalone message keyboard (legacy path)
           try {
             await ctx.editMessageReplyMarkup({ reply_markup: buildCLIKeyboard(scrollHandler.scrollLocked, settingsStore?.get('enter_confirmation') ?? false) });
           } catch { /* message may not be editable */ }
@@ -287,6 +295,11 @@ export function registerCallbackHandlers(
     });
 
     bot.callbackQuery('hub:auto-back', async (ctx) => {
+      await setHubView('sessions');
+      await safeAnswer(ctx);
+    });
+
+    bot.callbackQuery('hub:cli-back', async (ctx) => {
       await setHubView('sessions');
       await safeAnswer(ctx);
     });
