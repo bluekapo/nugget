@@ -16,6 +16,7 @@ import { engineStateLabel } from '../automation/engine.js';
 import type { EventBus } from '../events/bus.js';
 import { isNotModifiedError, isMessageNotFoundError } from './hub.js';
 import { logError } from '../logging/logger.js';
+import type { AutomationStore } from '../db/automation-store.js';
 
 export interface PendingCreation {
   step: 'select-worker' | 'select-orchestrator' | 'enter-task' | 'confirm-task';
@@ -91,6 +92,7 @@ export class AutomationHubRenderer {
     private readonly getAllSessions: () => string[],
     private readonly engineFactory: (config: EngineConfig, bus: EventBus) => AutomationEngine,
     private readonly bus: EventBus,
+    private readonly automationStore?: AutomationStore,
   ) {}
 
   /**
@@ -292,6 +294,7 @@ export class AutomationHubRenderer {
     const handlers = {
       stateChange: (_state: string) => {
         this.onRender?.();
+        this.persistState();
       },
       cycleComplete: (cycleNumber: number, action: string) => {
         const auto = this.activeAutomations.get(id);
@@ -300,6 +303,7 @@ export class AutomationHubRenderer {
           auto.lastAction = action;
         }
         this.onRender?.();
+        this.persistState();
       },
       escalation: (reason: string) => {
         this.api.sendMessage(this.chatId, `Automation escalated: ${reason}`, {
@@ -325,6 +329,7 @@ export class AutomationHubRenderer {
         this.activeAutomations.delete(id);
         if (this.detailViewId === id) this.detailViewId = null;
         this.onRender?.();
+        this.persistState();
       },
       error: (error: string) => {
         this.api.sendMessage(this.chatId, `Automation error: ${error}`, {
@@ -336,6 +341,7 @@ export class AutomationHubRenderer {
         this.activeAutomations.delete(id);
         if (this.detailViewId === id) this.detailViewId = null;
         this.onRender?.();
+        this.persistState();
       },
     };
 
@@ -364,6 +370,7 @@ export class AutomationHubRenderer {
 
     this.pendingCreation = null;
     engine.start();
+    this.persistState();
     await this.onRender?.();
   }
 
@@ -403,6 +410,137 @@ export class AutomationHubRenderer {
     }
     this.activeAutomations.clear();
     this.detailViewId = null;
+    // Graceful shutdown: clear automation records since engines are being stopped intentionally
+    this.automationStore?.clearAll();
+  }
+
+  /** Persist all active automations to SQLite for crash recovery. */
+  private persistState(): void {
+    if (!this.automationStore) return;
+    this.automationStore.clearAll();
+    for (const [id, auto] of this.activeAutomations) {
+      const engineState = auto.engine.getSerializableState();
+      this.automationStore.save({
+        id,
+        workerSession: auto.workerSession,
+        orchestratorSession: auto.orchestratorSession,
+        taskDescription: auto.taskDescription,
+        engineState: engineState.state,
+        cycleCount: auto.cycleCount,
+        lastAction: auto.lastAction,
+        actionLog: engineState.actionLog,
+        startTime: auto.startTime,
+      });
+    }
+  }
+
+  /** Restore automations from SQLite after promotion. Returns count of restored automations. */
+  async restoreFromStore(): Promise<number> {
+    if (!this.automationStore) return 0;
+    const persisted = this.automationStore.loadAll();
+    let restored = 0;
+    for (const p of persisted) {
+      // Only restore automations that were in a non-terminal state
+      if (p.engineState === 'stopped') continue;
+
+      const config: EngineConfig = {
+        workerSession: p.workerSession,
+        orchestratorSession: p.orchestratorSession,
+        taskDescription: p.taskDescription,
+      };
+
+      const engine = this.engineFactory(config, this.bus);
+      const id = p.id;
+      if (id >= this.nextAutomationId) {
+        this.nextAutomationId = id + 1;
+      }
+
+      // Build per-automation handlers (same pattern as completeCreation)
+      const handlers = {
+        stateChange: (_state: string) => {
+          this.onRender?.();
+          this.persistState();
+        },
+        cycleComplete: (cycleNumber: number, action: string) => {
+          const auto = this.activeAutomations.get(id);
+          if (auto) {
+            auto.cycleCount = cycleNumber;
+            auto.lastAction = action;
+          }
+          this.onRender?.();
+          this.persistState();
+        },
+        escalation: (reason: string) => {
+          this.api.sendMessage(this.chatId, `Automation escalated: ${reason}`, {
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
+            },
+          }).catch(() => {});
+          this.onRender?.();
+        },
+        done: (_summary: string) => {
+          const auto = this.activeAutomations.get(id);
+          if (auto) {
+            this.bus.off('automation:error', auto.handlers.error);
+          }
+          this.api.sendMessage(this.chatId, '\u2705 Automation complete', {
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
+            },
+          }).catch(() => {});
+          this.activeAutomations.delete(id);
+          if (this.detailViewId === id) this.detailViewId = null;
+          this.onRender?.();
+          this.persistState();
+        },
+        error: (error: string) => {
+          this.api.sendMessage(this.chatId, `Automation error: ${error}`, {
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
+            },
+          }).catch(() => {});
+          this.activeAutomations.delete(id);
+          if (this.detailViewId === id) this.detailViewId = null;
+          this.onRender?.();
+          this.persistState();
+        },
+      };
+
+      const automation: ActiveAutomation = {
+        engine,
+        workerSession: p.workerSession,
+        orchestratorSession: p.orchestratorSession,
+        taskDescription: p.taskDescription,
+        cycleCount: p.cycleCount,
+        lastAction: p.lastAction,
+        startTime: p.startTime,
+        handlers,
+      };
+
+      this.activeAutomations.set(id, automation);
+
+      // Subscribe handlers to bus events
+      this.bus.on('automation:state-change', handlers.stateChange);
+      this.bus.on('automation:cycle-complete', handlers.cycleComplete);
+      this.bus.on('automation:escalation', handlers.escalation);
+      this.bus.on('automation:done', handlers.done);
+      this.bus.on('automation:error', handlers.error);
+
+      // Start the engine fresh -- it will re-enter idle monitoring loop.
+      // Internal engine state (buffers, timers) is not restored; only the hub-level
+      // display state (cycle count, action log, task description) is preserved.
+      engine.start();
+      restored++;
+    }
+
+    if (restored > 0 && this.activeAutomations.size === 1) {
+      this.detailViewId = this.activeAutomations.keys().next().value ?? null;
+    }
+
+    return restored;
   }
 
   /** Get the automation currently viewed in detail, or null. */
@@ -426,6 +564,7 @@ export class AutomationHubRenderer {
 
     auto.engine.stop();
     this.activeAutomations.delete(id);
+    this.persistState();
   }
 
   /** Format relative time from startTime to now. */

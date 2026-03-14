@@ -19,6 +19,7 @@ import { HubRenderer } from './telegram/hub.js';
 import { RateLimiter } from './telegram/rate-limiter.js';
 import { HubStore } from './db/hub-store.js';
 import { SettingsStore } from './db/settings-store.js';
+import { AutomationStore } from './db/automation-store.js';
 import { registerCallbackHandlers, buildControlsKeyboard } from './telegram/keyboard.js';
 import { registerCommands, EphemeralTracker } from './telegram/commands.js';
 import { CommandAllowlist } from './security/allowlist.js';
@@ -149,7 +150,8 @@ async function startPrimary(
     rateLimiter,
   );
 
-  // 11c. Create AutomationHubRenderer with engine factory
+  // 11c. Create AutomationHubRenderer with engine factory and persistence store
+  const automationStore = new AutomationStore(db);
   const automationHub = new AutomationHubRenderer(
     bot.api,
     config.ownerId,
@@ -175,6 +177,7 @@ async function startPrimary(
         engineBus,
       ),
     bus,
+    automationStore,
   );
 
   // 11d. Wire automationHub into HubRenderer for integrated display
@@ -628,7 +631,8 @@ async function becomeNewPrimary(
       rateLimiter,
     );
 
-    // Create AutomationHubRenderer for promoted primary
+    // Create AutomationHubRenderer for promoted primary with persistence store
+    const promotedAutomationStore = new AutomationStore(db);
     const promotedAutomationHub = new AutomationHubRenderer(
       bot.api,
       config.ownerId,
@@ -653,6 +657,7 @@ async function becomeNewPrimary(
           engineBus,
         ),
       bus,
+      promotedAutomationStore,
     );
 
     // Wire automationHub into HubRenderer for integrated display
@@ -757,6 +762,12 @@ async function becomeNewPrimary(
     startIpcServer(config.botToken, ipcCallbacks);
 
     bot.start({ onStart: () => logInfo('Promoted to primary -- Telegram bot listening') });
+
+    // Restore active automations from SQLite (persisted by crashed/stopped primary)
+    const restoredCount = await promotedAutomationHub.restoreFromStore();
+    if (restoredCount > 0) {
+      logInfo(`Restored ${restoredCount} automation(s) from previous primary`);
+    }
 
     // Set up graceful shutdown for the promoted primary
     promotedShutdownFn = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, capture, emulator, undefined, promotedAutomationHub);

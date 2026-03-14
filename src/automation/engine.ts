@@ -22,6 +22,7 @@ import { parseDirective, parseDirectiveWithContext } from './directive-parser.js
 import { buildPrompt, buildConsultationPrompt, buildFollowUpPrompt } from './prompt-builder.js';
 import { executeDirective } from './action-executor.js';
 import { ActionLog } from './action-log.js';
+import type { ActionEntry } from './types.js';
 
 const LOG_FILE = 'nugget.log';
 function debugLog(msg: string): void {
@@ -203,6 +204,18 @@ export class AutomationEngine {
 
   get state(): EngineState {
     return this._state;
+  }
+
+  get cycle(): number {
+    return this.cycleNumber;
+  }
+
+  getSerializableState(): { state: EngineState; cycleNumber: number; actionLog: ActionEntry[] } {
+    return {
+      state: this._state,
+      cycleNumber: this.cycleNumber,
+      actionLog: this.actionLog.getRecent(),
+    };
   }
 
   start(): void {
