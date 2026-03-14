@@ -16,6 +16,7 @@ import {
 } from './telegram/bot.js';
 import { TelegramInputHandler } from './telegram/input.js';
 import { HubRenderer } from './telegram/hub.js';
+import { RateLimiter } from './telegram/rate-limiter.js';
 import { HubStore } from './db/hub-store.js';
 import { SettingsStore } from './db/settings-store.js';
 import { registerCallbackHandlers, buildControlsKeyboard } from './telegram/keyboard.js';
@@ -131,12 +132,13 @@ async function startPrimary(
       hubRenderer.setCliContent(session, current.screenText + event.text);
     }
     if (hubRenderer.hubView === 'cli') {
-      hubRenderer.render();
+      hubRenderer.render({ mandatory: false });
     }
   }, { bus, sessionNameFn: () => router.activeSession });
 
   // 11. Create HubRenderer with session name getter that includes remote sessions
   const hubStore = new HubStore(db);
+  const rateLimiter = new RateLimiter();
   const hubRenderer = new HubRenderer(
     bot.api,
     config.ownerId,
@@ -144,6 +146,7 @@ async function startPrimary(
     () => router.activeSession,
     () => router.getAll(),
     hubStore,
+    rateLimiter,
   );
 
   // 11c. Create AutomationHubRenderer with engine factory
@@ -590,7 +593,7 @@ async function becomeNewPrimary(
         hubRenderer.setCliContent(session, current.screenText + event.text);
       }
       if (hubRenderer.hubView === 'cli') {
-        hubRenderer.render();
+        hubRenderer.render({ mandatory: false });
       }
     }, { bus, sessionNameFn: () => router.activeSession });
 
@@ -608,11 +611,13 @@ async function becomeNewPrimary(
     });
 
     const hubStore = new HubStore(db);
+    const rateLimiter = new RateLimiter();
     const hubRenderer = new HubRenderer(
       bot.api, config.ownerId, sessionManager,
       () => router.activeSession,
       () => router.getAll(),
       hubStore,
+      rateLimiter,
     );
 
     // Create AutomationHubRenderer for promoted primary
