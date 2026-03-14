@@ -1440,7 +1440,7 @@ describe('HubRenderer', () => {
       assert.ok(!resumeButton, 'should NOT have hub:cli-resume button when activeSession is null');
     });
 
-    it('Resume button row appears between session rows and bottom row', async () => {
+    it('Resume button shares row with kill button for the active session', async () => {
       const api = createMockApi();
       const sm = createMockSessionManager([
         { name: 'sess-1', status: 'running' },
@@ -1454,21 +1454,20 @@ describe('HubRenderer', () => {
       const keyboard = opts?.reply_markup?.inline_keyboard;
       assert.ok(keyboard, 'should have inline keyboard');
 
-      // Find the resume button row index
-      const resumeRowIndex = keyboard!.findIndex(row =>
+      // Find the row containing the resume button
+      const resumeRow = keyboard!.find(row =>
         row.some(b => b.callback_data === 'hub:cli-resume')
       );
-      assert.ok(resumeRowIndex >= 0, 'should find resume button row');
+      assert.ok(resumeRow, 'should find row with resume button');
 
-      // Find the bottom row (Details/Simple + Refresh)
-      const bottomRowIndex = keyboard!.findIndex(row =>
-        row.some(b => b.callback_data === 'hub:advanced' || b.callback_data === 'hub:refresh')
-      );
-      assert.ok(bottomRowIndex >= 0, 'should find bottom row');
+      // Same row should also have the kill button for sess-1
+      const killButton = resumeRow!.find(b => b.callback_data === 'hub:disconnect:sess-1');
+      assert.ok(killButton, 'Resume and kill button should be in the same row');
 
-      // Resume should be between session rows and bottom row
-      assert.ok(resumeRowIndex < bottomRowIndex, 'Resume row should be before the bottom Details/Refresh row');
-      assert.ok(resumeRowIndex >= 2, 'Resume row should be after session rows (at least 2 sessions)');
+      // Resume should be first (left), kill second (right)
+      const resumeIdx = resumeRow!.findIndex(b => b.callback_data === 'hub:cli-resume');
+      const killIdx = resumeRow!.findIndex(b => b.callback_data === 'hub:disconnect:sess-1');
+      assert.ok(resumeIdx < killIdx, 'Resume button should be to the left of kill button');
     });
 
     it('clicking hub:cli-resume transitions hub view to cli', async () => {

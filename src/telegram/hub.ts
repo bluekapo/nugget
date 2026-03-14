@@ -529,21 +529,21 @@ function buildKeyboard(
       });
     }
 
-    // Disconnect button for all sessions
-    // Show session name only when there's no switch button (active session),
-    // since the switch button already displays the name
-    const hasSwitch = s.name !== activeSession;
+    // For the active session: Resume (left) + Kill (right) in one row
+    // For other sessions: Switch (has name) + Kill (skull only)
+    const isActive = s.name === activeSession;
+    if (isActive) {
+      row.push({
+        text: `▶️ Resume ${s.name}`,
+        callback_data: 'hub:cli-resume',
+      });
+    }
     row.push({
-      text: hasSwitch ? '\uD83D\uDC80' : `\uD83D\uDC80 ${s.name}`,
+      text: isActive ? '💀' : `💀`,
       callback_data: `hub:disconnect:${s.name}`,
     });
 
     keyboard.push(row);
-  }
-
-  // Resume button: only when there's an active session to return to CLI view
-  if (activeSession !== null) {
-    keyboard.push([{ text: '\u25B6\uFE0F Resume ' + activeSession, callback_data: 'hub:cli-resume' }]);
   }
 
   // Bottom row: Details/Simple toggle + Refresh
