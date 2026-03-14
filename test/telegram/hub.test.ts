@@ -1400,6 +1400,104 @@ describe('HubRenderer', () => {
     });
   });
 
+  describe('Resume button in sessions view', () => {
+    it('sessions keyboard includes Resume button with hub:cli-resume when activeSession is set', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'my-project', status: 'running' },
+        { name: 'other', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'my-project');
+
+      // Render in sessions view (default)
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'should have inline keyboard');
+
+      const allButtons = keyboard!.flat();
+      const resumeButton = allButtons.find(b => b.callback_data === 'hub:cli-resume');
+      assert.ok(resumeButton, 'should have hub:cli-resume button when activeSession is set');
+      assert.ok(resumeButton!.text.includes('my-project'), 'Resume button text should include session name');
+    });
+
+    it('sessions keyboard does NOT include Resume button when activeSession is null', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'proj-a', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => null);
+
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'should have inline keyboard');
+
+      const allButtons = keyboard!.flat();
+      const resumeButton = allButtons.find(b => b.callback_data === 'hub:cli-resume');
+      assert.ok(!resumeButton, 'should NOT have hub:cli-resume button when activeSession is null');
+    });
+
+    it('Resume button row appears between session rows and bottom row', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'sess-1', status: 'running' },
+        { name: 'sess-2', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'sess-1');
+
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'should have inline keyboard');
+
+      // Find the resume button row index
+      const resumeRowIndex = keyboard!.findIndex(row =>
+        row.some(b => b.callback_data === 'hub:cli-resume')
+      );
+      assert.ok(resumeRowIndex >= 0, 'should find resume button row');
+
+      // Find the bottom row (Details/Simple + Refresh)
+      const bottomRowIndex = keyboard!.findIndex(row =>
+        row.some(b => b.callback_data === 'hub:advanced' || b.callback_data === 'hub:refresh')
+      );
+      assert.ok(bottomRowIndex >= 0, 'should find bottom row');
+
+      // Resume should be between session rows and bottom row
+      assert.ok(resumeRowIndex < bottomRowIndex, 'Resume row should be before the bottom Details/Refresh row');
+      assert.ok(resumeRowIndex >= 2, 'Resume row should be after session rows (at least 2 sessions)');
+    });
+
+    it('clicking hub:cli-resume transitions hub view to cli', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'test-sess', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'test-sess');
+
+      // Set some CLI content first (simulates previous CLI view visit)
+      hub.setCliContent('test-sess', 'prior terminal output');
+
+      // Start in sessions view
+      hub.setHubView('sessions');
+      await hub.render();
+
+      // Simulate clicking Resume by setting hub view to 'cli'
+      hub.setHubView('cli');
+      assert.equal(hub.hubView, 'cli', 'hub view should transition to cli');
+
+      // Render the CLI view and verify content is preserved
+      api.calls.length = 0;
+      await hub.render({ forceNew: true });
+
+      const sentText = api.calls.filter(c => c.method === 'sendMessage')[0]?.args[1] as string;
+      assert.ok(sentText.includes('prior terminal output'), 'CLI content should be preserved after resume');
+    });
+  });
+
   describe('error helpers', () => {
     it('isNotModifiedError detects "not modified" in message', () => {
       assert.equal(isNotModifiedError(new Error('message is not modified')), true);
