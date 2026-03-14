@@ -15,6 +15,7 @@ describe('loadConfig', () => {
     delete process.env.DB_PATH;
     delete process.env.COMMAND_ALLOWLIST;
     delete process.env.MAX_SESSIONS;
+    delete process.env.NUGGET_RUNTIME;
   });
 
   afterEach(() => {
@@ -140,6 +141,46 @@ describe('loadConfig', () => {
     assert.throws(
       () => loadConfig(),
       { message: 'MAX_SESSIONS must be a positive integer' },
+    );
+  });
+
+  it('defaults runtime to "sandbox" when NUGGET_RUNTIME is not set', () => {
+    process.env.BOT_TOKEN = 'test-token';
+    process.env.OWNER_ID = '12345';
+
+    const config = loadConfig();
+
+    assert.equal(config.runtime, 'sandbox');
+  });
+
+  it('returns runtime "sandbox" when NUGGET_RUNTIME is "sandbox"', () => {
+    process.env.BOT_TOKEN = 'test-token';
+    process.env.OWNER_ID = '12345';
+    process.env.NUGGET_RUNTIME = 'sandbox';
+
+    const config = loadConfig();
+
+    assert.equal(config.runtime, 'sandbox');
+  });
+
+  it('returns runtime "container" when NUGGET_RUNTIME is "container"', () => {
+    process.env.BOT_TOKEN = 'test-token';
+    process.env.OWNER_ID = '12345';
+    process.env.NUGGET_RUNTIME = 'container';
+
+    const config = loadConfig();
+
+    assert.equal(config.runtime, 'container');
+  });
+
+  it('throws if NUGGET_RUNTIME is an invalid value', () => {
+    process.env.BOT_TOKEN = 'test-token';
+    process.env.OWNER_ID = '12345';
+    process.env.NUGGET_RUNTIME = 'invalid';
+
+    assert.throws(
+      () => loadConfig(),
+      { message: 'NUGGET_RUNTIME must be "sandbox" or "container"' },
     );
   });
 });

@@ -1420,6 +1420,7 @@ describe('HubRenderer', () => {
       const resumeButton = allButtons.find(b => b.callback_data === 'hub:cli-resume');
       assert.ok(resumeButton, 'should have hub:cli-resume button when activeSession is set');
       assert.ok(resumeButton!.text.includes('my-project'), 'Resume button text should include session name');
+      assert.ok(!resumeButton!.text.includes('Resume'), 'Resume button should NOT contain word Resume');
     });
 
     it('sessions keyboard does NOT include Resume button when activeSession is null', async () => {
