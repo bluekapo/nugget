@@ -303,6 +303,11 @@ export function registerCallbackHandlers(
       await setHubView('sessions');
       await safeAnswer(ctx);
     });
+
+    bot.callbackQuery('hub:cli-resume', async (ctx) => {
+      await setHubView('cli');
+      await safeAnswer(ctx);
+    });
   }
 
   // Automation hub callbacks

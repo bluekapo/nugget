@@ -541,6 +541,11 @@ function buildKeyboard(
     keyboard.push(row);
   }
 
+  // Resume button: only when there's an active session to return to CLI view
+  if (activeSession !== null) {
+    keyboard.push([{ text: '\u25B6\uFE0F Resume ' + activeSession, callback_data: 'hub:cli-resume' }]);
+  }
+
   // Bottom row: Details/Simple toggle + Refresh
   keyboard.push([
     { text: advanced ? '\uD83D\uDCCB Simple' : '\uD83D\uDCCA Details', callback_data: 'hub:advanced' },
