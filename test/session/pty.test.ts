@@ -65,6 +65,78 @@ require.cache[nodePtyPath] = {
 // to take effect before node-pty is loaded.
 const ptyModule = require('../../src/session/pty.ts') as typeof import('../../src/session/pty.js');
 
+describe('spawnDockerContainer', () => {
+  it('passes "docker" as the executable command', () => {
+    spawnCalls.length = 0;
+    ptyModule.spawnDockerContainer({ name: 'container-test' });
+    const call = spawnCalls[spawnCalls.length - 1];
+    assert.ok(call, 'pty.spawn should have been called');
+    assert.equal(call.cmd, 'docker', 'Command must be "docker"');
+  });
+
+  it('constructs correct args array: start -ai <name>', () => {
+    spawnCalls.length = 0;
+    ptyModule.spawnDockerContainer({ name: 'my-container' });
+    const call = spawnCalls[spawnCalls.length - 1];
+
+    assert.deepEqual(
+      call.args,
+      ['start', '-ai', 'my-container'],
+      'Args must be ["start", "-ai", name]',
+    );
+  });
+
+  it('uses the session name in the args array', () => {
+    spawnCalls.length = 0;
+    const name = 'worker-session';
+    ptyModule.spawnDockerContainer({ name });
+    const call = spawnCalls[spawnCalls.length - 1];
+
+    assert.equal(call.args[2], name, 'name arg must be the session name');
+  });
+
+  it('uses xterm-256color as the terminal name', () => {
+    spawnCalls.length = 0;
+    ptyModule.spawnDockerContainer({ name: 'term-test' });
+    const call = spawnCalls[spawnCalls.length - 1];
+
+    assert.equal(call.opts.name, 'xterm-256color', 'terminal name must be xterm-256color');
+  });
+
+  it('defaults to 120 cols when cols not specified', () => {
+    spawnCalls.length = 0;
+    ptyModule.spawnDockerContainer({ name: 'size-test' });
+    const call = spawnCalls[spawnCalls.length - 1];
+
+    assert.equal(call.opts.cols, 120, 'default cols must be 120');
+  });
+
+  it('defaults to 40 rows when rows not specified', () => {
+    spawnCalls.length = 0;
+    ptyModule.spawnDockerContainer({ name: 'rows-test' });
+    const call = spawnCalls[spawnCalls.length - 1];
+
+    assert.equal(call.opts.rows, 40, 'default rows must be 40');
+  });
+
+  it('respects custom cols and rows when provided', () => {
+    spawnCalls.length = 0;
+    ptyModule.spawnDockerContainer({ name: 'custom', cols: 200, rows: 50 });
+    const call = spawnCalls[spawnCalls.length - 1];
+
+    assert.equal(call.opts.cols, 200, 'cols must match provided value');
+    assert.equal(call.opts.rows, 50, 'rows must match provided value');
+  });
+
+  it('returns the PTY handle from pty.spawn', () => {
+    spawnCalls.length = 0;
+    const result = ptyModule.spawnDockerContainer({ name: 'return-test' });
+
+    assert.ok(result, 'must return a PTY handle');
+    assert.equal(result.pid, 99999, 'returned handle must have the pid from the spawned process');
+  });
+});
+
 describe('spawnDockerSandbox', () => {
   before(() => {
     // Clear any prior calls
