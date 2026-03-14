@@ -358,6 +358,166 @@ describe('Graceful shutdown (SIGINT/SIGTERM)', () => {
   });
 });
 
+// ---- Listener cleanup during promotion/reconnection (LIFE-01, LIFE-02) ----
+
+describe('Listener cleanup on promotion (becomeNewPrimary)', () => {
+  it('removeAllListeners clears secondary listeners so no duplicates remain', async () => {
+    const { EventBus } = await import('../src/events/bus.js');
+    const bus = new EventBus();
+
+    // Simulate startSecondary listener registration pattern (lines 415-420, 433, 505)
+    const stdoutHandler = (_name: string, _data: string) => {};
+    bus.on('session:output', stdoutHandler);                                 // line 415
+    bus.on('session:started', (_name: string) => {});                        // line 416
+    bus.on('session:exit', (_name: string, _code: number) => {});            // line 419
+    bus.on('session:output', (_name: string, _data: string) => {});          // line 433 (output forwarding)
+    bus.on('session:exit', (_name: string) => {});                           // line 505 (unregister)
+
+    // Before cleanup: secondary registered 2 output + 2 exit + 1 started listeners
+    assert.equal(bus.listenerCount('session:output'), 2, 'secondary has 2 output listeners');
+    assert.equal(bus.listenerCount('session:exit'), 2, 'secondary has 2 exit listeners');
+    assert.equal(bus.listenerCount('session:started'), 1, 'secondary has 1 started listener');
+
+    // Simulate becomeNewPrimary: removeAllListeners() then re-register primary listeners
+    bus.removeAllListeners();
+
+    assert.equal(bus.listenerCount('session:output'), 0, 'all output listeners cleared');
+    assert.equal(bus.listenerCount('session:exit'), 0, 'all exit listeners cleared');
+    assert.equal(bus.listenerCount('session:started'), 0, 'all started listeners cleared');
+
+    // Re-register primary listeners (the pattern from becomeNewPrimary lines 601-726)
+    bus.on('session:started', (_name: string) => {});                        // re-register logger
+    bus.on('session:output', (_name: string, _data: string) => {});          // stdout handler
+    bus.on('session:output', (_name: string, _data: string) => {});          // capture handler
+    bus.on('session:exit', (_name: string) => {});                           // hub exit handler
+    bus.on('session:exec-state', (_name: string, _state: 'busy' | 'idle') => {}); // exec-state
+
+    // After promotion: exactly the primary count, no leftovers from secondary
+    assert.equal(bus.listenerCount('session:output'), 2, 'primary has exactly 2 output listeners');
+    assert.equal(bus.listenerCount('session:exit'), 1, 'primary has exactly 1 exit listener');
+    assert.equal(bus.listenerCount('session:started'), 1, 'primary has exactly 1 started listener');
+    assert.equal(bus.listenerCount('session:exec-state'), 1, 'primary has exactly 1 exec-state listener');
+  });
+
+  it('stdoutHandler from secondary is removed before new output handler is added', async () => {
+    const { EventBus } = await import('../src/events/bus.js');
+    const bus = new EventBus();
+
+    // The named stdoutHandler registered by secondary
+    let secondaryFired = false;
+    const stdoutHandler = (_name: string, _data: string) => { secondaryFired = true; };
+    bus.on('session:output', stdoutHandler);
+
+    // Simulate becomeNewPrimary cleanup
+    bus.removeAllListeners();
+
+    // Register new primary stdout handler
+    let primaryFired = false;
+    bus.on('session:output', (_name: string, _data: string) => { primaryFired = true; });
+
+    bus.emit('session:output', 'test', 'data');
+
+    assert.equal(secondaryFired, false, 'secondary stdoutHandler must not fire after promotion');
+    assert.equal(primaryFired, true, 'primary stdout handler must fire after promotion');
+  });
+});
+
+describe('Listener cleanup on reconnection (attemptReconnect)', () => {
+  it('clears old output/exit listeners before adding new bridge handlers', async () => {
+    const { EventBus } = await import('../src/events/bus.js');
+    const bus = new EventBus();
+
+    // Simulate initial secondary listeners
+    bus.on('session:output', (_name: string, _data: string) => {});  // stdout
+    bus.on('session:output', (_name: string, _data: string) => {});  // old bridge forwarding
+    bus.on('session:exit', (_name: string) => {});                   // old bridge unregister
+
+    assert.equal(bus.listenerCount('session:output'), 2, 'initial output listeners');
+    assert.equal(bus.listenerCount('session:exit'), 1, 'initial exit listener');
+
+    // Simulate attemptReconnect cleanup (clear output and exit, keep started)
+    bus.on('session:started', (_name: string) => {});  // should survive
+    bus.removeAllListeners('session:output');
+    bus.removeAllListeners('session:exit');
+
+    assert.equal(bus.listenerCount('session:output'), 0, 'output listeners cleared');
+    assert.equal(bus.listenerCount('session:exit'), 0, 'exit listeners cleared');
+    assert.equal(bus.listenerCount('session:started'), 1, 'started listener preserved');
+
+    // Re-register for new bridge
+    bus.on('session:output', (_name: string, _data: string) => {});  // new stdout
+    bus.on('session:output', (_name: string, _data: string) => {});  // new bridge forwarding
+    bus.on('session:exit', (_name: string) => {});                   // new bridge unregister
+
+    assert.equal(bus.listenerCount('session:output'), 2, 'exactly 2 output listeners after reconnect');
+    assert.equal(bus.listenerCount('session:exit'), 1, 'exactly 1 exit listener after reconnect');
+  });
+
+  it('listener count does not grow across multiple reconnection cycles', async () => {
+    const { EventBus } = await import('../src/events/bus.js');
+    const bus = new EventBus();
+
+    // Simulate 5 reconnection cycles
+    for (let i = 0; i < 5; i++) {
+      // Cleanup before new bridge
+      bus.removeAllListeners('session:output');
+      bus.removeAllListeners('session:exit');
+
+      // Register new bridge listeners
+      bus.on('session:output', (_name: string, _data: string) => {});
+      bus.on('session:output', (_name: string, _data: string) => {});
+      bus.on('session:exit', (_name: string) => {});
+    }
+
+    // After 5 cycles, counts should be same as after 1 cycle (no accumulation)
+    assert.equal(bus.listenerCount('session:output'), 2, 'output listeners stable after 5 cycles');
+    assert.equal(bus.listenerCount('session:exit'), 1, 'exit listeners stable after 5 cycles');
+  });
+});
+
+// ---- Source verification: becomeNewPrimary uses removeAllListeners ----
+
+describe('Source code verification: listener cleanup calls exist', () => {
+  it('becomeNewPrimary calls bus.removeAllListeners() in src/index.ts', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf-8');
+
+    // Find the becomeNewPrimary function
+    const fnStart = source.indexOf('async function becomeNewPrimary');
+    assert.ok(fnStart > 0, 'becomeNewPrimary function must exist');
+
+    // Find the next function after becomeNewPrimary
+    const fnEnd = source.indexOf('async function attemptReconnect', fnStart);
+    const fnBody = source.slice(fnStart, fnEnd > 0 ? fnEnd : undefined);
+
+    // Must contain removeAllListeners call
+    assert.ok(
+      fnBody.includes('bus.removeAllListeners()'),
+      'becomeNewPrimary must call bus.removeAllListeners()',
+    );
+  });
+
+  it('attemptReconnect clears session:output and session:exit listeners', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf-8');
+
+    // Find the attemptReconnect function
+    const fnStart = source.indexOf('async function attemptReconnect');
+    assert.ok(fnStart > 0, 'attemptReconnect function must exist');
+
+    const fnBody = source.slice(fnStart);
+
+    assert.ok(
+      fnBody.includes("bus.removeAllListeners('session:output')"),
+      'attemptReconnect must clear session:output listeners',
+    );
+    assert.ok(
+      fnBody.includes("bus.removeAllListeners('session:exit')"),
+      'attemptReconnect must clear session:exit listeners',
+    );
+  });
+});
+
 // ---- Race condition: router.switchTo (output sink attach) must happen BEFORE sessionManager.start ----
 
 describe('Startup ordering (BUG-INITIAL-OUTPUT)', () => {
