@@ -74,6 +74,23 @@ const migrations: Migration[] = [
       INSERT INTO settings (key, value) VALUES ('notifications', 'true');
     `,
   },
+  {
+    version: 6,
+    up: `
+      CREATE TABLE automations (
+        id INTEGER PRIMARY KEY,
+        worker_session TEXT NOT NULL,
+        orchestrator_session TEXT NOT NULL,
+        task_description TEXT NOT NULL,
+        engine_state TEXT NOT NULL DEFAULT 'idle',
+        cycle_count INTEGER NOT NULL DEFAULT 0,
+        last_action TEXT,
+        action_log_json TEXT NOT NULL DEFAULT '[]',
+        start_time INTEGER NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
