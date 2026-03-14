@@ -534,7 +534,7 @@ function buildKeyboard(
     const isActive = s.name === activeSession;
     if (isActive) {
       row.push({
-        text: `▶️ Resume ${s.name}`,
+        text: `▶️ ${s.name}`,
         callback_data: 'hub:cli-resume',
       });
     }

@@ -4,6 +4,7 @@ export interface AppConfig {
   dbPath: string;
   commandAllowlist: string | undefined;
   maxSessions: number;
+  runtime: 'sandbox' | 'container';
 }
 
 export function loadConfig(): AppConfig {
@@ -35,5 +36,14 @@ export function loadConfig(): AppConfig {
     }
   }
 
-  return { botToken, ownerId, dbPath, commandAllowlist, maxSessions };
+  const nuggetRuntime = process.env.NUGGET_RUNTIME;
+  let runtime: 'sandbox' | 'container' = 'sandbox';
+  if (nuggetRuntime !== undefined) {
+    if (nuggetRuntime !== 'sandbox' && nuggetRuntime !== 'container') {
+      throw new Error('NUGGET_RUNTIME must be "sandbox" or "container"');
+    }
+    runtime = nuggetRuntime;
+  }
+
+  return { botToken, ownerId, dbPath, commandAllowlist, maxSessions, runtime };
 }
