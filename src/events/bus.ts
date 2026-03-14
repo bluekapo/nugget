@@ -26,4 +26,20 @@ export class EventBus {
   off<K extends keyof BusEvents>(event: K, listener: BusEvents[K]): void {
     this.emitter.off(event, listener as (...args: unknown[]) => void);
   }
+
+  removeAllListeners<K extends keyof BusEvents>(event?: K): void {
+    if (event) {
+      this.emitter.removeAllListeners(event);
+    } else {
+      this.emitter.removeAllListeners();
+    }
+  }
+
+  listenerCount<K extends keyof BusEvents>(event: K): number {
+    return this.emitter.listenerCount(event);
+  }
+
+  once<K extends keyof BusEvents>(event: K, listener: BusEvents[K]): void {
+    this.emitter.once(event, listener as (...args: unknown[]) => void);
+  }
 }
