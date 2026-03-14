@@ -4,13 +4,25 @@ import type { Session } from './types.js';
 import type { PtyOptions } from './pty.js';
 
 // Lazy import to avoid loading node-pty native module when a custom SpawnFn is provided (e.g. tests)
-let _spawnDockerSandbox: ((opts: PtyOptions) => PtyHandle) | null = null;
-async function getDefaultSpawnFn(): Promise<(opts: PtyOptions) => PtyHandle> {
-  if (!_spawnDockerSandbox) {
-    const mod = await import('./pty.js');
-    _spawnDockerSandbox = mod.spawnDockerSandbox as unknown as (opts: PtyOptions) => PtyHandle;
+let _runtimeMode: 'sandbox' | 'container' = 'sandbox';
+let _cachedSpawnFn: ((opts: PtyOptions) => PtyHandle) | null = null;
+
+/** Set the runtime mode for default spawn function selection. */
+export function setRuntimeMode(mode: 'sandbox' | 'container'): void {
+  if (mode !== _runtimeMode) {
+    _runtimeMode = mode;
+    _cachedSpawnFn = null; // Clear cache so next lazy-load picks the right function
   }
-  return _spawnDockerSandbox;
+}
+
+async function getDefaultSpawnFn(): Promise<(opts: PtyOptions) => PtyHandle> {
+  if (!_cachedSpawnFn) {
+    const mod = await import('./pty.js');
+    _cachedSpawnFn = (_runtimeMode === 'container'
+      ? mod.spawnDockerContainer
+      : mod.spawnDockerSandbox) as unknown as (opts: PtyOptions) => PtyHandle;
+  }
+  return _cachedSpawnFn;
 }
 
 /** Minimal interface for a PTY process -- enables dependency injection for testing. */

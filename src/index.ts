@@ -3,7 +3,7 @@ import { openDatabase } from './db/database.js';
 import { runMigrations } from './db/migrations.js';
 import { EventBus } from './events/bus.js';
 import { SessionStore } from './db/sessions.js';
-import { SessionManager } from './session/manager.js';
+import { SessionManager, setRuntimeMode } from './session/manager.js';
 import { SessionRouter } from './session/router.js';
 import {
   createBot,
@@ -96,6 +96,7 @@ async function startPrimary(
   sessionName = resolvedName;
 
   // 6. Create session manager (with maxSessions from config)
+  setRuntimeMode(config.runtime);
   const sessionManager = new SessionManager(bus, store, undefined, config.maxSessions);
 
   // 7. Subscribe to event bus for console logging (filtered to local session only)
@@ -407,6 +408,7 @@ async function startSecondary(
   sessionName = resolvedName;
 
   // 6. Create session manager
+  setRuntimeMode(config.runtime);
   const sessionManager = new SessionManager(bus, store, undefined, config.maxSessions);
 
   // 7. Subscribe to event bus for console logging (named handler for promotion cleanup)
