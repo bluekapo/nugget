@@ -2308,6 +2308,73 @@ describe('AutomationEngine', () => {
     });
   });
 
+  // ========== getSerializableState (LIFE-03) ==========
+
+  describe('getSerializableState', () => {
+    it('returns stopped state, cycleNumber 0, and empty actionLog before start()', () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+
+      const result = engine.getSerializableState();
+
+      assert.equal(result.state, 'stopped', 'state should be stopped before start');
+      assert.equal(result.cycleNumber, 0, 'cycleNumber should be 0 before start');
+      assert.deepEqual(result.actionLog, [], 'actionLog should be empty before start');
+    });
+
+    it('returns idle state and cycleNumber 0 immediately after start()', () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      const result = engine.getSerializableState();
+
+      assert.equal(result.state, 'idle', 'state should be idle after start');
+      assert.equal(result.cycleNumber, 0, 'cycleNumber should still be 0 before any cycle completes');
+    });
+
+    it('returns paused state after pause()', () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+      engine.pause();
+
+      const result = engine.getSerializableState();
+
+      assert.equal(result.state, 'paused', 'state should reflect paused');
+    });
+
+    it('returns cycleNumber 1 and non-empty actionLog after completing one full cycle', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // Trigger first cycle via deferred timer -> clearing-orchestrator
+      timer.advance(1);
+      // Orchestrator /clear completes with (no content)
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); // poll fires, finds (no content)
+      timer.advance(500);  // settling delay -> onClearComplete
+      timer.advance(50);   // delayed Enter -> waiting-response
+
+      // Orchestrator responds with COMMAND directive
+      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: npm test'));
+      timer.advance(1000); // response poll fires -> cycle complete, back to idle
+
+      const result = engine.getSerializableState();
+
+      assert.equal(result.cycleNumber, 1, 'cycleNumber should be 1 after one cycle');
+      assert.ok(result.actionLog.length > 0, 'actionLog should have at least one entry after cycle 1');
+      const lastEntry = result.actionLog[result.actionLog.length - 1];
+      assert.ok(lastEntry.action.includes('COMMAND'), 'actionLog entry should reference the COMMAND directive');
+      assert.ok(typeof lastEntry.timestamp === 'number', 'actionLog entry should have a numeric timestamp');
+      assert.ok(typeof lastEntry.outcome === 'string', 'actionLog entry should have a string outcome');
+    });
+
+    it('actionLog returned by getSerializableState is an array of ActionEntry objects', () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      // Even before start, it should be an array (not undefined/null)
+      const result = engine.getSerializableState();
+      assert.ok(Array.isArray(result.actionLog), 'actionLog should be an array');
+    });
+  });
+
   // ========== writeToSession error handling ==========
 
   describe('writeToSession error handling', () => {

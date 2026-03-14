@@ -38,7 +38,26 @@ describe('AutomationHubRenderer', () => {
       stop() { engineCalls.push('stop'); _state = 'stopped'; },
       pause() { engineCalls.push('pause'); _state = 'paused'; },
       resume() { engineCalls.push('resume'); _state = 'idle'; },
+      getSerializableState() {
+        return { state: _state, cycleNumber: 0, actionLog: [] };
+      },
       engineCalls,
+    };
+  }
+
+  function createMockStore() {
+    const saved: unknown[] = [];
+    let cleared = false;
+    let loadAllResult: unknown[] = [];
+    return {
+      save(record: unknown) { saved.push(record); },
+      clearAll() { cleared = true; saved.length = 0; },
+      loadAll() { return loadAllResult; },
+      remove(_id: number) {},
+      // Test helpers
+      saved,
+      get cleared() { return cleared; },
+      set _loadAllResult(v: unknown[]) { loadAllResult = v; },
     };
   }
 
@@ -48,6 +67,7 @@ describe('AutomationHubRenderer', () => {
       sessions?: string[];
       engineFactory?: (config: unknown, bus: EventBus) => ReturnType<typeof createMockEngine>;
       bus?: EventBus;
+      automationStore?: ReturnType<typeof createMockStore>;
     },
   ) {
     const sessions = opts?.sessions ?? [];
@@ -60,6 +80,7 @@ describe('AutomationHubRenderer', () => {
       () => sessions,
       engineFactory as any,
       bus,
+      opts?.automationStore as any,
     );
     // Wire onRender to trigger hub's own render (simulates parent hub integration)
     hub.onRender = async () => { await hub.render(); };
@@ -897,6 +918,323 @@ describe('AutomationHubRenderer', () => {
       assert.equal(hub.activeAutomationCount, 0, 'should have no automations after dispose');
       assert.ok(engines[0].engineCalls.includes('stop'), 'first engine should be stopped');
       assert.ok(engines[1].engineCalls.includes('stop'), 'second engine should be stopped');
+    });
+  });
+
+  describe('persistState (LIFE-03)', () => {
+    it('persistState() calls automationStore.save() with correct fields when an automation is active', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const mockEng = createMockEngine('idle');
+      const store = createMockStore();
+
+      const { hub } = createHub(api, {
+        sessions: ['w', 'o'],
+        engineFactory: () => mockEng as any,
+        bus,
+        automationStore: store,
+      });
+
+      // Complete creation flow to produce an active automation and trigger persistState()
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.completeCreation('persist this task');
+
+      // persistState() should have been called (at completeCreation end)
+      // The store.saved array should contain exactly one record
+      assert.ok(store.saved.length >= 1, 'persistState should have called store.save() at least once');
+      const record = store.saved[store.saved.length - 1] as any;
+      assert.equal(record.workerSession, 'w', 'saved record should have correct workerSession');
+      assert.equal(record.orchestratorSession, 'o', 'saved record should have correct orchestratorSession');
+      assert.equal(record.taskDescription, 'persist this task', 'saved record should have correct taskDescription');
+      assert.ok(typeof record.engineState === 'string', 'saved record should have engineState string');
+      assert.ok(typeof record.cycleCount === 'number', 'saved record should have numeric cycleCount');
+      assert.ok(Array.isArray(record.actionLog), 'saved record should have actionLog array');
+      assert.ok(typeof record.startTime === 'number', 'saved record should have numeric startTime');
+    });
+
+    it('persistState() calls clearAll() before save() to maintain single-source-of-truth', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const mockEng = createMockEngine('idle');
+      const clearCalls: string[] = [];
+      const store = createMockStore();
+      const origClearAll = store.clearAll.bind(store);
+      (store as any).clearAll = () => { clearCalls.push('clearAll'); origClearAll(); };
+
+      const { hub } = createHub(api, {
+        sessions: ['w', 'o'],
+        engineFactory: () => mockEng as any,
+        bus,
+        automationStore: store as any,
+      });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.completeCreation('test task');
+
+      assert.ok(clearCalls.length >= 1, 'persistState should call clearAll() before saving');
+    });
+
+    it('persistState() is not called (no-op) when automationStore is not provided', async () => {
+      // No store provided -- should not throw
+      const api = createMockApi();
+      const bus = new EventBus();
+      const mockEng = createMockEngine('idle');
+
+      const { hub } = createHub(api, {
+        sessions: ['w', 'o'],
+        engineFactory: () => mockEng as any,
+        bus,
+        // no automationStore
+      });
+
+      // Should not throw
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.completeCreation('no store task');
+
+      // Hub should have active automation despite no store
+      assert.equal(hub.activeAutomationCount, 1, 'hub should still track active automation without store');
+    });
+
+    it('persistState() called on state-change bus event updates the store', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const mockEng = createMockEngine('idle');
+      const store = createMockStore();
+
+      const { hub } = createHub(api, {
+        sessions: ['w', 'o'],
+        engineFactory: () => mockEng as any,
+        bus,
+        automationStore: store,
+      });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.completeCreation('state change task');
+
+      // Record how many times save was called at creation
+      const savesAtCreation = store.saved.length;
+
+      // Simulate engine emitting automation:state-change (which calls persistState() via handler)
+      bus.emit('automation:state-change', 'capturing-worker');
+
+      // save() should have been called again after the state-change event
+      assert.ok(store.saved.length >= savesAtCreation, 'persistState should be called on state-change event');
+    });
+  });
+
+  describe('restoreFromStore (LIFE-03)', () => {
+    it('restoreFromStore() creates engine for each non-stopped persisted automation and calls start()', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const createdEngines: ReturnType<typeof createMockEngine>[] = [];
+      const factory = (_config: unknown, _bus: EventBus) => {
+        const eng = createMockEngine('idle');
+        createdEngines.push(eng);
+        return eng;
+      };
+      const store = createMockStore();
+      store._loadAllResult = [
+        {
+          id: 5,
+          workerSession: 'worker-A',
+          orchestratorSession: 'orch-A',
+          taskDescription: 'resume this task',
+          engineState: 'idle',
+          cycleCount: 3,
+          lastAction: 'COMMAND: npm test',
+          actionLog: [{ action: 'COMMAND: npm test', outcome: '(awaiting result)', timestamp: 1000 }],
+          startTime: 1700000000000,
+        },
+      ];
+
+      const hub = new AutomationHubRenderer(
+        api as any,
+        123,
+        () => [],
+        factory as any,
+        bus,
+        store as any,
+      );
+      hub.onRender = async () => { await hub.render(); };
+
+      const restored = await hub.restoreFromStore();
+
+      assert.equal(restored, 1, 'should restore 1 automation from store');
+      assert.equal(hub.activeAutomationCount, 1, 'hub should have 1 active automation after restore');
+      assert.equal(createdEngines.length, 1, 'engineFactory should have been called once');
+      assert.ok(createdEngines[0].engineCalls.includes('start'), 'restored engine should be started');
+    });
+
+    it('restoreFromStore() skips automations with engineState === stopped', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const createdEngines: ReturnType<typeof createMockEngine>[] = [];
+      const factory = (_config: unknown, _bus: EventBus) => {
+        const eng = createMockEngine('idle');
+        createdEngines.push(eng);
+        return eng;
+      };
+      const store = createMockStore();
+      store._loadAllResult = [
+        {
+          id: 1,
+          workerSession: 'worker-1',
+          orchestratorSession: 'orch-1',
+          taskDescription: 'stopped task',
+          engineState: 'stopped',
+          cycleCount: 5,
+          lastAction: 'DONE',
+          actionLog: [],
+          startTime: 1700000000000,
+        },
+      ];
+
+      const hub = new AutomationHubRenderer(
+        api as any,
+        123,
+        () => [],
+        factory as any,
+        bus,
+        store as any,
+      );
+      hub.onRender = async () => { await hub.render(); };
+
+      const restored = await hub.restoreFromStore();
+
+      assert.equal(restored, 0, 'stopped automation should not be restored');
+      assert.equal(hub.activeAutomationCount, 0, 'hub should have no active automations');
+      assert.equal(createdEngines.length, 0, 'engineFactory should not be called for stopped automation');
+    });
+
+    it('restoreFromStore() restores preserved hub display state: cycleCount and lastAction', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const store = createMockStore();
+      store._loadAllResult = [
+        {
+          id: 7,
+          workerSession: 'worker-B',
+          orchestratorSession: 'orch-B',
+          taskDescription: 'restored task',
+          engineState: 'idle',
+          cycleCount: 12,
+          lastAction: 'COMMAND: deploy',
+          actionLog: [],
+          startTime: 1700000000000,
+        },
+      ];
+
+      const hub = new AutomationHubRenderer(
+        api as any,
+        123,
+        () => [],
+        (() => createMockEngine('idle')) as any,
+        bus,
+        store as any,
+      );
+      hub.onRender = async () => { await hub.render(); };
+
+      await hub.restoreFromStore();
+
+      const info = hub.activeAutomationInfo;
+      assert.ok(info !== null, 'should have active automation info after restore');
+      assert.equal(info!.cycleCount, 12, 'restored automation should have persisted cycleCount');
+      assert.equal(info!.lastAction, 'COMMAND: deploy', 'restored automation should have persisted lastAction');
+      assert.equal(info!.taskDescription, 'restored task', 'restored automation should have persisted taskDescription');
+      assert.equal(info!.workerSession, 'worker-B', 'restored automation should have persisted workerSession');
+      assert.equal(info!.orchestratorSession, 'orch-B', 'restored automation should have persisted orchestratorSession');
+    });
+
+    it('restoreFromStore() registers bus event handlers so state-change events reach the hub', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const store = createMockStore();
+      store._loadAllResult = [
+        {
+          id: 2,
+          workerSession: 'w',
+          orchestratorSession: 'o',
+          taskDescription: 'wired task',
+          engineState: 'idle',
+          cycleCount: 0,
+          lastAction: null,
+          actionLog: [],
+          startTime: 1700000000000,
+        },
+      ];
+
+      const hub = new AutomationHubRenderer(
+        api as any,
+        123,
+        () => [],
+        (() => createMockEngine('idle')) as any,
+        bus,
+        store as any,
+      );
+      let renderCount = 0;
+      hub.onRender = async () => { renderCount++; };
+
+      await hub.restoreFromStore();
+      const renderCountAfterRestore = renderCount;
+
+      // Emitting automation:state-change should trigger onRender (handler was registered)
+      bus.emit('automation:state-change', 'capturing-worker');
+
+      assert.ok(renderCount > renderCountAfterRestore, 'automation:state-change should trigger onRender after restoreFromStore');
+    });
+
+    it('restoreFromStore() returns 0 when no automations are persisted', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const store = createMockStore();
+      // store.loadAll returns [] by default
+
+      const hub = new AutomationHubRenderer(
+        api as any,
+        123,
+        () => [],
+        (() => createMockEngine('idle')) as any,
+        bus,
+        store as any,
+      );
+      hub.onRender = async () => {};
+
+      const restored = await hub.restoreFromStore();
+
+      assert.equal(restored, 0, 'should return 0 when store is empty');
+      assert.equal(hub.activeAutomationCount, 0, 'hub should have no automations');
+    });
+
+    it('restoreFromStore() returns 0 when no automationStore is provided', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+
+      // No store
+      const hub = new AutomationHubRenderer(
+        api as any,
+        123,
+        () => [],
+        (() => createMockEngine('idle')) as any,
+        bus,
+        // no store
+      );
+      hub.onRender = async () => {};
+
+      const restored = await hub.restoreFromStore();
+
+      assert.equal(restored, 0, 'should return 0 without a store');
     });
   });
 
