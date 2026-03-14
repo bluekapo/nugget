@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, mock } from 'node:test';
+import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { RateLimiter } from '../../src/telegram/rate-limiter.js';
 
@@ -8,6 +8,10 @@ describe('RateLimiter', () => {
   beforeEach(() => {
     limiter = new RateLimiter();
     mock.timers.enable({ apis: ['Date'] });
+  });
+
+  afterEach(() => {
+    mock.timers.reset();
   });
 
   it('mandatory send always returns true even immediately after a previous send', () => {
