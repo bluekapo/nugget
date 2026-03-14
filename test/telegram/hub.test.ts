@@ -1276,6 +1276,130 @@ describe('HubRenderer', () => {
     });
   });
 
+  describe('rate limiting', () => {
+    function createMockRateLimiter(canSendResult: boolean) {
+      const calls: { method: string; args?: unknown[] }[] = [];
+      return {
+        canSend(mandatory: boolean): boolean {
+          calls.push({ method: 'canSend', args: [mandatory] });
+          return mandatory ? true : canSendResult;
+        },
+        recordSend(): void {
+          calls.push({ method: 'recordSend' });
+        },
+        calls,
+      };
+    }
+
+    it('render({ mandatory: true }) always calls sendMessage', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([{ name: 'a', status: 'running' }]);
+      const rl = createMockRateLimiter(false); // deferrable would be blocked
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, rl);
+
+      await hub.render({ mandatory: true });
+
+      const sends = api.calls.filter(c => c.method === 'sendMessage');
+      assert.equal(sends.length, 1, 'mandatory render should call sendMessage');
+    });
+
+    it('render() with no opts defaults to mandatory=true and calls API', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([{ name: 'a', status: 'running' }]);
+      const rl = createMockRateLimiter(false); // deferrable would be blocked
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, rl);
+
+      await hub.render(); // no opts -- should default to mandatory=true
+
+      const sends = api.calls.filter(c => c.method === 'sendMessage');
+      assert.equal(sends.length, 1, 'default render should call sendMessage (mandatory by default)');
+    });
+
+    it('render({ mandatory: false }) is skipped when rate limiter says canSend=false', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([{ name: 'a', status: 'running' }]);
+      const rl = createMockRateLimiter(false); // block deferrable
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, rl);
+
+      await hub.render({ mandatory: false });
+
+      const sends = api.calls.filter(c => c.method === 'sendMessage');
+      assert.equal(sends.length, 0, 'deferrable render should be skipped when rate limited');
+    });
+
+    it('render({ mandatory: false }) proceeds when rate limiter says canSend=true', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([{ name: 'a', status: 'running' }]);
+      const rl = createMockRateLimiter(true); // allow deferrable
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, rl);
+
+      await hub.render({ mandatory: false });
+
+      const sends = api.calls.filter(c => c.method === 'sendMessage');
+      assert.equal(sends.length, 1, 'deferrable render should proceed when rate limiter allows');
+    });
+
+    it('successful sendMessage calls recordSend on the rate limiter', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([{ name: 'a', status: 'running' }]);
+      const rl = createMockRateLimiter(true);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, rl);
+
+      await hub.render({ mandatory: true });
+
+      const recordCalls = rl.calls.filter(c => c.method === 'recordSend');
+      assert.equal(recordCalls.length, 1, 'should call recordSend after successful sendMessage');
+    });
+
+    it('successful editMessageText calls recordSend on the rate limiter', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'a', status: 'running' },
+        { name: 'b', status: 'running' },
+      ]);
+      const rl = createMockRateLimiter(true);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, rl);
+
+      // First render: sendMessage (creates hub message)
+      await hub.render({ mandatory: true });
+      rl.calls.length = 0; // reset tracked calls
+
+      // Second render with different data: editMessageText
+      await hub.render({ mandatory: true });
+
+      const recordCalls = rl.calls.filter(c => c.method === 'recordSend');
+      assert.equal(recordCalls.length, 1, 'should call recordSend after successful editMessageText');
+    });
+
+    it('debouncedRender passes mandatory=false to render', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([{ name: 'a', status: 'running' }]);
+      const rl = createMockRateLimiter(false); // block deferrable
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, rl);
+
+      hub.debouncedRender(10); // short delay for testing
+
+      // Wait for debounce to fire
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Since deferrable is blocked, sendMessage should NOT be called
+      const sends = api.calls.filter(c => c.method === 'sendMessage');
+      assert.equal(sends.length, 0, 'debouncedRender should pass mandatory=false (and be blocked by rate limiter)');
+    });
+
+    it('works without rate limiter (backward compat)', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([{ name: 'a', status: 'running' }]);
+      // No rate limiter passed -- all sends should go through
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a');
+
+      await hub.render({ mandatory: false });
+
+      const sends = api.calls.filter(c => c.method === 'sendMessage');
+      assert.equal(sends.length, 1, 'without rate limiter, all renders should proceed');
+    });
+  });
+
   describe('error helpers', () => {
     it('isNotModifiedError detects "not modified" in message', () => {
       assert.equal(isNotModifiedError(new Error('message is not modified')), true);
