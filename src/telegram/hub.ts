@@ -1,6 +1,7 @@
 import type { SessionManager } from '../session/manager.js';
 import type { HubStore } from '../db/hub-store.js';
 import type { AutomationHubRenderer } from './automation-hub.js';
+import type { RateLimiter } from './rate-limiter.js';
 import { engineStateLabel } from '../automation/engine.js';
 import { logError } from '../logging/logger.js';
 import { ACTION_BUTTONS } from './keyboard.js';
@@ -67,14 +68,16 @@ export class HubRenderer {
     return { sessionName: this.cliSessionName, screenText: this.cliScreenText };
   }
 
-  /** Debounced render -- coalesces rapid render requests into one. Use for exec-state changes. */
+  /** Debounced render -- coalesces rapid render requests into one. Use for exec-state changes.
+   *  Always passes mandatory=false since debounced renders are deferrable.
+   */
   debouncedRender(delayMs = 500): void {
     if (this.debounceTimer !== null) {
       clearTimeout(this.debounceTimer);
     }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
-      this.render();
+      this.render({ mandatory: false });
     }, delayMs);
   }
 
@@ -109,6 +112,7 @@ export class HubRenderer {
     private readonly getActiveSession: () => string | null,
     private readonly getAllSessionNames?: () => string[],
     private readonly store?: HubStore,
+    private readonly rateLimiter?: RateLimiter,
   ) {
     // On construction, load persisted hub message ID and attempt to delete it.
     // This handles the case where a secondary promotes and needs to clean up the old hub.
@@ -124,12 +128,19 @@ export class HubRenderer {
   /** Render or re-render the hub message. Sends new or edits existing.
    *  When forceNew is true, deletes the old hub message and sends a fresh one
    *  at the bottom of the chat (used by /hub command to ensure visibility).
+   *  When mandatory is false, the render may be silently dropped if the rate limiter
+   *  says we've sent too recently (deferrable send). Default is true (mandatory).
    *
    *  Serialized via renderQueue to prevent duplicate sendMessage calls when
    *  multiple render() calls fire before the first sendMessage resolves.
    */
-  async render(opts?: { forceNew?: boolean }): Promise<void> {
+  async render(opts?: { forceNew?: boolean; mandatory?: boolean }): Promise<void> {
     const task = this.renderQueue.then(async () => {
+      // Rate limiter gate: deferrable sends can be silently dropped
+      if (this.rateLimiter && !this.rateLimiter.canSend(opts?.mandatory ?? true)) {
+        return;
+      }
+
       if (opts?.forceNew && this.hubMessageId !== null) {
         try {
           await this.api.deleteMessage(this.chatId, this.hubMessageId);
@@ -171,6 +182,7 @@ export class HubRenderer {
           });
           this.hubMessageId = result.message_id;
           if (this.store) this.store.save(result.message_id);
+          this.rateLimiter?.recordSend();
         } catch (err) {
           logError('Hub sendMessage failed:', err);
         }
@@ -181,6 +193,7 @@ export class HubRenderer {
             parse_mode: 'HTML',
             reply_markup: keyboard,
           });
+          this.rateLimiter?.recordSend();
         } catch (err: unknown) {
           if (isNotModifiedError(err)) {
             // Suppress -- content identical
