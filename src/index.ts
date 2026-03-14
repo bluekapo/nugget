@@ -579,6 +579,10 @@ async function becomeNewPrimary(
   stdoutHandler: (name: string, data: string) => void,
 ): Promise<void> {
   try {
+    // Clear ALL listeners from secondary phase to prevent duplicates.
+    // becomeNewPrimary re-registers everything the primary needs below.
+    bus.removeAllListeners();
+
     const bot = await createBot(config.botToken, config.ownerId);
     const settingsStore = new SettingsStore(db);
 
@@ -597,7 +601,11 @@ async function becomeNewPrimary(
       }
     }, { bus, sessionNameFn: () => router.activeSession });
 
-    bus.off('session:output', stdoutHandler);
+    // Re-register session:started logger (cleared by removeAllListeners above)
+    bus.on('session:started', (name: string) => {
+      logInfo('Session started:', name);
+    });
+
     bus.on('session:output', (name: string, data: string) => {
       if (name === sessionName) {
         process.stdout.write(data);
@@ -800,6 +808,14 @@ async function attemptReconnect(
         }
         continue;
       }
+
+      // Clear old output/exit listeners from previous connection to prevent accumulation.
+      // session:started is harmless (just a logger) so we leave it.
+      bus.removeAllListeners('session:output');
+      bus.removeAllListeners('session:exit');
+
+      // Re-register stdout handler for local console output
+      bus.on('session:output', stdoutHandler);
 
       // Re-wire output forwarding to new primary
       bus.on('session:output', (name: string, data: string) => {
