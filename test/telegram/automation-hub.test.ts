@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { AutomationHubRenderer } from '../../src/telegram/automation-hub.js';
+import { AutomationHubRenderer, formatDuration } from '../../src/telegram/automation-hub.js';
 import type { PendingCreation, ActiveAutomation } from '../../src/telegram/automation-hub.js';
 import { EventBus } from '../../src/events/bus.js';
 
@@ -1235,6 +1235,116 @@ describe('AutomationHubRenderer', () => {
       const restored = await hub.restoreFromStore();
 
       assert.equal(restored, 0, 'should return 0 without a store');
+    });
+  });
+
+  describe('formatDuration', () => {
+    it('returns "0s" for 0 milliseconds', () => {
+      assert.equal(formatDuration(0), '0s');
+    });
+
+    it('returns seconds only for durations under 60s', () => {
+      assert.equal(formatDuration(5000), '5s');
+    });
+
+    it('returns minutes and seconds for durations under 1h', () => {
+      assert.equal(formatDuration(65000), '1m 5s');
+    });
+
+    it('returns hours, minutes, and seconds for durations >= 1h', () => {
+      assert.equal(formatDuration(3661000), '1h 1m 1s');
+    });
+
+    it('shows zero minutes and seconds for exact hours', () => {
+      assert.equal(formatDuration(7200000), '2h 0m 0s');
+    });
+  });
+
+  describe('enhanced done notification', () => {
+    it('done notification includes session names, duration, and cycle count', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const mockEng = createMockEngine('idle');
+      const { hub } = createHub(api, {
+        sessions: ['worker-1', 'orch-1'],
+        engineFactory: () => mockEng as any,
+        bus,
+      });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:worker-1');
+      await hub.handleCallback('auto:o:orch-1');
+      await hub.completeCreation('build the thing');
+
+      // Simulate some cycles
+      bus.emit('automation:cycle-complete', 3, 'COMMAND: npm test');
+
+      api.calls.length = 0;
+
+      // Emit done event
+      bus.emit('automation:done', 'All done');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const doneSend = api.calls.find(
+        c => c.method === 'sendMessage' && (c.args[1] as string).includes('Automation complete'),
+      );
+      assert.ok(doneSend, 'should send done notification');
+
+      const text = doneSend!.args[1] as string;
+      assert.ok(text.includes('orch-1'), 'should include orchestrator session name');
+      assert.ok(text.includes('worker-1'), 'should include worker session name');
+      assert.ok(text.includes('Duration:'), 'should include duration label');
+      assert.ok(text.includes('Cycles:'), 'should include cycles label');
+      assert.ok(text.includes('3'), 'should include cycle count');
+    });
+
+    it('restored automation done notification also includes enhanced info', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const store = createMockStore();
+      store._loadAllResult = [
+        {
+          id: 1,
+          workerSession: 'restored-w',
+          orchestratorSession: 'restored-o',
+          taskDescription: 'restored task',
+          engineState: 'idle',
+          cycleCount: 7,
+          lastAction: 'COMMAND: deploy',
+          actionLog: [],
+          startTime: Date.now() - 120000, // 2 minutes ago
+        },
+      ];
+
+      const hub = new AutomationHubRenderer(
+        api as any,
+        123,
+        () => [],
+        (() => createMockEngine('idle')) as any,
+        bus,
+        store as any,
+      );
+      hub.onRender = async () => { await hub.render(); };
+
+      await hub.restoreFromStore();
+      api.calls.length = 0;
+
+      // Emit done event for the restored automation
+      bus.emit('automation:done', 'Restored done');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const doneSend = api.calls.find(
+        c => c.method === 'sendMessage' && (c.args[1] as string).includes('Automation complete'),
+      );
+      assert.ok(doneSend, 'restored automation should send done notification');
+
+      const text = doneSend!.args[1] as string;
+      assert.ok(text.includes('restored-o'), 'should include orchestrator session');
+      assert.ok(text.includes('restored-w'), 'should include worker session');
+      assert.ok(text.includes('Duration:'), 'should include duration');
+      assert.ok(text.includes('Cycles:'), 'should include cycles label');
+      assert.ok(text.includes('7'), 'should include restored cycle count');
     });
   });
 

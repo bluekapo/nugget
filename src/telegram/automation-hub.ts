@@ -42,6 +42,16 @@ export interface ActiveAutomation {
   };
 }
 
+/**
+ * Format a duration in milliseconds into a human-readable string.
+ * - Under 60s: "{s}s"
+ * - Under 1h: "{m}m {s}s"
+ * - 1h+: "{h}h {m}m {s}s"
+ */
+export function formatDuration(_ms: number): string {
+  return '';  // TDD stub — will fail tests
+}
+
 export class AutomationHubRenderer {
   private hubMessageId: number | null = null;
   private renderQueue: Promise<void> = Promise.resolve();
