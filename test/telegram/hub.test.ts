@@ -1035,6 +1035,7 @@ describe('HubRenderer', () => {
       const sentText = api.calls[0].args[1] as string;
       assert.ok(sentText.includes('No automation running'), 'should show no automation message');
       assert.ok(sentText.includes('<b>Automation Hub</b>'), 'should show Automation Hub header');
+      assert.ok(sentText.includes('configurable via /settings'), 'should show cycle limit hint');
 
       const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
       const keyboard = opts?.reply_markup?.inline_keyboard;

@@ -358,6 +358,25 @@ describe('Graceful shutdown (SIGINT/SIGTERM)', () => {
   });
 });
 
+// ---- Version source verification (VER-01) ----
+
+describe('CLI version source (VER-01)', () => {
+  it('version is read from package.json, not hardcoded', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../src/cli/index.ts', import.meta.url), 'utf-8');
+
+    // The CLI source must read version dynamically from package.json
+    assert.ok(
+      source.includes('readFileSync') && source.includes('package.json'),
+      'src/cli/index.ts must use readFileSync to read package.json for version',
+    );
+    assert.ok(
+      !source.includes(".version('0.1.0')"),
+      'src/cli/index.ts must NOT hardcode version 0.1.0',
+    );
+  });
+});
+
 // ---- Listener cleanup during promotion/reconnection (LIFE-01, LIFE-02) ----
 
 describe('Listener cleanup on promotion (becomeNewPrimary)', () => {

@@ -241,6 +241,26 @@ describe('buildPrompt', () => {
     const contextLine = lines.find(l => l.includes('CONTEXT:') && l.includes('--'));
     assert.ok(contextLine, `Expected CONTEXT: modifier documentation in prompt:\n${prompt}`);
   });
+
+  it('GSD pipeline hint includes phase number N in command examples', () => {
+    const packet: ContextPacket = {
+      ...basePacket,
+      taskDescription: 'Execute GSD milestone pipeline',
+    };
+    const prompt = buildPrompt(packet);
+    assert.ok(
+      prompt.includes('/gsd:plan-phase N'),
+      `Expected '/gsd:plan-phase N' with phase number placeholder in prompt:\n${prompt}`,
+    );
+    assert.ok(
+      prompt.includes('/gsd:execute-phase N'),
+      `Expected '/gsd:execute-phase N' with phase number placeholder in prompt:\n${prompt}`,
+    );
+    assert.ok(
+      prompt.includes('/gsd:validate-phase N'),
+      `Expected '/gsd:validate-phase N' with phase number placeholder in prompt:\n${prompt}`,
+    );
+  });
 });
 
 describe('buildConsultationPrompt', () => {
