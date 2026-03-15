@@ -1,5 +1,12 @@
 #!/usr/bin/env node
-import 'dotenv/config';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import { config } from 'dotenv';
+
+// Load .env from the package root, not the caller's cwd
+const __dirname = dirname(fileURLToPath(import.meta.url));
+config({ path: resolve(__dirname, '..', '..', '.env') });
+
 import { Command } from 'commander';
 import { startFramework } from '../index.js';
 import { logInfo, logError } from '../logging/logger.js';
