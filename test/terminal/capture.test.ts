@@ -673,6 +673,59 @@ describe('ScreenCapture', () => {
     assert.equal(completionFired, false, 'should NOT fire while spinner is active on non-completion line');
   });
 
+  // ---------- Spinner guard: bare prompt indicator scenarios ----------
+
+  it('completion detection: fires for "Baked for 40s" with bare prompt indicator on separate line', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 200 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Completion marker on one line, bare prompt indicator (\u273B) on the next
+    await capture.onData('\u273B Baked for 40s\r\n\u273B\r\n');
+    timer.advance(50); // debounce fires, capture runs, crunched=true, idle timer starts
+    timer.advance(200); // idle fires
+    assert.equal(completionFired, true, 'onPromptComplete should fire for "Baked for 40s" with bare prompt indicator');
+  });
+
+  it('completion detection: fires for completion marker with short TUI artifact (non-whitespace) after prompt indicator', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 200 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Completion marker + prompt indicator with a short non-whitespace TUI artifact
+    // (e.g., cursor remnant ">") that survives translateToString(true) trimming.
+    // This is the real bug: the existing regex ^\s*\u273B\s*$ won't match "\u273B >"
+    // because it has non-whitespace after the marker.
+    await capture.onData('\u273B Crafted for 12s\r\n\u273B >\r\n');
+    timer.advance(50); // debounce fires
+    timer.advance(200); // idle fires
+    assert.equal(completionFired, true, 'onPromptComplete should fire for prompt indicator with short TUI artifact');
+  });
+
+  it('completion detection: fires for prompt indicator with single non-ws char after marker', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 200 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Single non-whitespace character after marker (cursor fragment)
+    await capture.onData('\u273B Baked for 40s\r\n\u273B.\r\n');
+    timer.advance(50); // debounce fires
+    timer.advance(200); // idle fires
+    assert.equal(completionFired, true, 'onPromptComplete should fire for prompt indicator with single non-ws char');
+  });
+
+  it('completion detection: guard still blocks real spinners after completion marker (regression)', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 200 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Completion marker + active spinner (substantial text after marker)
+    await capture.onData('\u273B Baked for 40s\r\n\u273B Analyzing code...\r\n');
+    timer.advance(50); // debounce fires
+    timer.advance(200); // idle fires
+    assert.equal(completionFired, false, 'onPromptComplete should NOT fire while real spinner is active');
+  });
+
   // ---------- Prompt-based completion detection (❯) ----------
 
   it('prompt detection: idle ❯ on its own line does NOT trigger onPromptComplete', async () => {
