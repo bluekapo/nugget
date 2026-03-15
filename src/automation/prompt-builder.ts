@@ -69,7 +69,7 @@ export function buildPrompt(ctx: ContextPacket): string {
   if (taskLower.includes('gsd')) {
     lines.push('HINT: When executing a full GSD pipeline for phase N, follow this exact sequence:');
     lines.push('  1. CLEAR the worker');
-    lines.push('  2. Plan the phase (`/gsd:plan-phase` — use no-discussion flag or decline context prompts)');
+    lines.push('  2. Plan the phase (`/gsd:plan-phase` — use no-discussion flag or click through context prompts)');
     lines.push('  3. CLEAR the worker');
     lines.push('  4. Execute the phase (`/gsd:execute-phase`)');
     lines.push('  5. CLEAR the worker');
