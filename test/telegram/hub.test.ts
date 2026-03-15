@@ -272,6 +272,42 @@ describe('HubRenderer', () => {
       assert.equal(close2!.text, '\uD83D\uDC80', 'close button should be just emoji when switch button is present');
     });
 
+    it('skull disconnect buttons have danger style, other buttons do not', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'active-sess', status: 'running' },
+        { name: 'idle-sess', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'active-sess');
+
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'should have inline keyboard');
+
+      const allBtns: Array<{ text: string; callback_data: string; style?: string }> = [];
+      for (const row of keyboard as any[][]) {
+        for (const btn of row) {
+          if (btn.callback_data) allBtns.push(btn);
+        }
+      }
+
+      // All disconnect (skull) buttons should have style: 'danger'
+      const disconnectBtns = allBtns.filter(b => b.callback_data.startsWith('hub:disconnect:'));
+      assert.ok(disconnectBtns.length >= 2, 'should have at least 2 disconnect buttons');
+      for (const btn of disconnectBtns) {
+        assert.equal(btn.style, 'danger', `disconnect button for ${btn.callback_data} should have style: danger`);
+      }
+
+      // Non-disconnect buttons (switch, refresh, details, cli-resume) should NOT have danger style
+      const otherBtns = allBtns.filter(b => !b.callback_data.startsWith('hub:disconnect:'));
+      assert.ok(otherBtns.length >= 1, 'should have at least 1 non-disconnect button');
+      for (const btn of otherBtns) {
+        assert.notEqual(btn.style, 'danger', `non-disconnect button ${btn.callback_data} should not have danger style`);
+      }
+    });
+
     it('callback data format is hub:switch:{name} and hub:disconnect:{name}', async () => {
       const api = createMockApi();
       const sm = createMockSessionManager([
