@@ -48,8 +48,15 @@ export interface ActiveAutomation {
  * - Under 1h: "{m}m {s}s"
  * - 1h+: "{h}h {m}m {s}s"
  */
-export function formatDuration(_ms: number): string {
-  return '';  // TDD stub — will fail tests
+export function formatDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
 }
 
 export class AutomationHubRenderer {
@@ -325,12 +332,16 @@ export class AutomationHubRenderer {
         this.onRender?.();
       },
       done: (_summary: string) => {
-        // Clean up error handler BEFORE cleanup to prevent race condition
+        // Capture automation state BEFORE cleanup
         const auto = this.activeAutomations.get(id);
         if (auto) {
           this.bus.off('automation:error', auto.handlers.error);
         }
-        this.api.sendMessage(this.chatId, '\u2705 Automation complete', {
+        const elapsed = auto ? formatDuration(Date.now() - auto.startTime) : '';
+        const msg = auto
+          ? `\u2705 Automation complete\n\n<b>${auto.orchestratorSession}</b> -> <b>${auto.workerSession}</b>\nDuration: ${elapsed}\nCycles: ${auto.cycleCount}`
+          : '\u2705 Automation complete';
+        this.api.sendMessage(this.chatId, msg, {
           parse_mode: 'HTML',
           reply_markup: {
             inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
@@ -490,11 +501,16 @@ export class AutomationHubRenderer {
           this.onRender?.();
         },
         done: (_summary: string) => {
+          // Capture automation state BEFORE cleanup
           const auto = this.activeAutomations.get(id);
           if (auto) {
             this.bus.off('automation:error', auto.handlers.error);
           }
-          this.api.sendMessage(this.chatId, '\u2705 Automation complete', {
+          const elapsed = auto ? formatDuration(Date.now() - auto.startTime) : '';
+          const msg = auto
+            ? `\u2705 Automation complete\n\n<b>${auto.orchestratorSession}</b> -> <b>${auto.workerSession}</b>\nDuration: ${elapsed}\nCycles: ${auto.cycleCount}`
+            : '\u2705 Automation complete';
+          this.api.sendMessage(this.chatId, msg, {
             parse_mode: 'HTML',
             reply_markup: {
               inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
