@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, isAbsolute } from 'node:path';
 import { config } from 'dotenv';
 
-// Load .env from the package root, not the caller's cwd
+// Resolve paths relative to the package root, not the caller's cwd
 const __dirname = dirname(fileURLToPath(import.meta.url));
-config({ path: resolve(__dirname, '..', '..', '.env') });
+const packageRoot = resolve(__dirname, '..', '..');
+config({ path: resolve(packageRoot, '.env') });
+
+// Resolve relative DB_PATH against package root so it works from any cwd
+const rawDbPath = process.env.DB_PATH ?? './data/nugget.db';
+process.env.DB_PATH = isAbsolute(rawDbPath) ? rawDbPath : resolve(packageRoot, rawDbPath);
 
 import { Command } from 'commander';
 import { startFramework } from '../index.js';
