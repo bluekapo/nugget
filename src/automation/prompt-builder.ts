@@ -54,11 +54,27 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('```');
   lines.push('');
 
-  // Always show CLEAR hint; add extra GSD hint when task mentions "gsd"
+  // Always show CLEAR hint
   lines.push('HINT: Use CLEAR when the human asks you to clear, when a pipeline or workflow execution requires clearing between actions, or when the worker\'s context is stale or cluttered.');
   lines.push('');
-  if (ctx.taskDescription.toLowerCase().includes('gsd')) {
-    lines.push('HINT: It is good practice to ask the worker some questions to get context on the system and the task before sending the task itself, to prompt it better.');
+
+  // Show context-gathering hint for complex or multi-step tasks
+  const taskLower = ctx.taskDescription.toLowerCase();
+  if (/\b(gsd|complex|task|workflow|pipeline)\b/.test(taskLower)) {
+    lines.push('HINT: For complex or multi-step tasks, gather context first. Ask the worker clarifying questions about the system and requirements before sending the actual task — this produces better results.');
+    lines.push('');
+  }
+
+  // Show GSD pipeline sequence hint when task involves GSD
+  if (taskLower.includes('gsd')) {
+    lines.push('HINT: When executing a full GSD pipeline for phase N, follow this exact sequence:');
+    lines.push('  1. CLEAR the worker');
+    lines.push('  2. Plan the phase (`/gsd:plan-phase` — use no-discussion flag or decline context prompts)');
+    lines.push('  3. CLEAR the worker');
+    lines.push('  4. Execute the phase (`/gsd:execute-phase`)');
+    lines.push('  5. CLEAR the worker');
+    lines.push('  6. Validate the phase (`/gsd:validate-phase` — not verify)');
+    lines.push('  7. CLEAR the worker before issuing any further GSD commands');
     lines.push('');
   }
 

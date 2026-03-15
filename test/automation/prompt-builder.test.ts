@@ -166,28 +166,60 @@ describe('buildPrompt', () => {
     );
   });
 
-  it('includes both CLEAR hint and GSD hint when taskDescription contains gsd', () => {
+  it('includes all 3 hints when taskDescription contains gsd', () => {
     const packet: ContextPacket = {
       ...basePacket,
       taskDescription: 'Run gsd workflow on the project',
     };
     const prompt = buildPrompt(packet);
     const hints = prompt.split('\n').filter(l => l.startsWith('HINT:'));
-    assert.equal(hints.length, 2, `Expected 2 HINT lines when task contains "gsd", got ${hints.length}`);
+    assert.equal(hints.length, 3, `Expected 3 HINT lines when task contains "gsd", got ${hints.length}`);
     assert.ok(
       hints.some(h => h.includes('CLEAR')),
       `Expected CLEAR hint in prompt:\n${prompt}`
     );
     assert.ok(
-      hints.some(h => h.includes('good practice to ask the worker some questions')),
-      `Expected GSD hint in prompt:\n${prompt}`
+      hints.some(h => h.includes('context first') || h.includes('clarifying questions')),
+      `Expected context-gathering hint in prompt:\n${prompt}`
+    );
+    assert.ok(
+      hints.some(h => h.includes('GSD pipeline')),
+      `Expected GSD pipeline sequence hint in prompt:\n${prompt}`
     );
   });
 
-  it('includes only CLEAR hint when taskDescription lacks gsd', () => {
+  it('includes context-gathering hint for complex/task/workflow/pipeline keywords', () => {
+    for (const keyword of ['complex', 'task', 'workflow', 'pipeline']) {
+      const packet: ContextPacket = {
+        ...basePacket,
+        taskDescription: `Handle this ${keyword} for me`,
+      };
+      const prompt = buildPrompt(packet);
+      const hints = prompt.split('\n').filter(l => l.startsWith('HINT:'));
+      assert.equal(hints.length, 2, `Expected 2 HINT lines for keyword "${keyword}", got ${hints.length}`);
+      assert.ok(
+        hints.some(h => h.includes('context first') || h.includes('clarifying questions')),
+        `Expected context-gathering hint for keyword "${keyword}":\n${prompt}`
+      );
+    }
+  });
+
+  it('GSD pipeline hint includes correct command sequence', () => {
+    const packet: ContextPacket = {
+      ...basePacket,
+      taskDescription: 'Run gsd for phase 5',
+    };
+    const prompt = buildPrompt(packet);
+    assert.ok(prompt.includes('/gsd:plan-phase'), `Expected plan-phase in GSD pipeline hint:\n${prompt}`);
+    assert.ok(prompt.includes('/gsd:execute-phase'), `Expected execute-phase in GSD pipeline hint:\n${prompt}`);
+    assert.ok(prompt.includes('/gsd:validate-phase'), `Expected validate-phase in GSD pipeline hint:\n${prompt}`);
+    assert.ok(!prompt.includes('/gsd:verify-phase'), `Should NOT mention verify-phase:\n${prompt}`);
+  });
+
+  it('includes only CLEAR hint when taskDescription has no trigger keywords', () => {
     const prompt = buildPrompt(basePacket);
     const hints = prompt.split('\n').filter(l => l.startsWith('HINT:'));
-    assert.equal(hints.length, 1, `Expected exactly 1 HINT line when task lacks "gsd", got ${hints.length}`);
+    assert.equal(hints.length, 1, `Expected exactly 1 HINT line when task lacks trigger keywords, got ${hints.length}`);
     assert.ok(
       hints[0].includes('CLEAR'),
       `Expected the single hint to be about CLEAR:\n${prompt}`
