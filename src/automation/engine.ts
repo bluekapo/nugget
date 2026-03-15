@@ -24,7 +24,10 @@ import { executeDirective } from './action-executor.js';
 import { ActionLog } from './action-log.js';
 import type { ActionEntry } from './types.js';
 
-const LOG_FILE = 'nugget.log';
+import { join } from 'node:path';
+import { logDir } from '../config/paths.js';
+
+const LOG_FILE = join(logDir, 'nugget.log');
 function debugLog(msg: string): void {
   const ts = new Date().toISOString();
   try { appendFileSync(LOG_FILE, `[${ts}] ${msg}\n`); } catch { /* ignore */ }

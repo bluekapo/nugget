@@ -5,10 +5,11 @@
  * This prevents interleaving with PTY data that corrupts the terminal display.
  */
 
-import { appendFileSync } from 'fs';
-import { join } from 'path';
+import { appendFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { logDir } from '../config/paths.js';
 
-const LOG_PATH = join(process.cwd(), 'nugget.log');
+const LOG_PATH = join(logDir, 'nugget.log');
 
 function ts(): string {
   return new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm

@@ -1,11 +1,9 @@
 #!/usr/bin/env node
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve, isAbsolute } from 'node:path';
+import { resolve, isAbsolute } from 'node:path';
 import { config } from 'dotenv';
+import { packageRoot } from '../config/paths.js';
 
 // Resolve paths relative to the package root, not the caller's cwd
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const packageRoot = resolve(__dirname, '..', '..');
 config({ path: resolve(packageRoot, '.env') });
 
 // Resolve relative DB_PATH against package root so it works from any cwd
