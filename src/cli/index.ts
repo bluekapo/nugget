@@ -21,6 +21,7 @@ program
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       logError(`Error: ${message}`);
+      console.error(`Error: ${message}`);
       process.exit(1);
     }
   });
