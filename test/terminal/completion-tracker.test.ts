@@ -28,7 +28,10 @@ class ManualTimer implements TimerProvider {
 
   advance(ms: number): void {
     const target = this._now + ms;
-    while (this._now < target) {
+    // Fire all timers at or before target, in chronological order.
+    // Use a loop that continues as long as there are due timers (handles
+    // multiple timers at the exact same fireAt time).
+    for (;;) {
       let earliest: { id: number; entry: { callback: () => void; fireAt: number } } | null = null;
       for (const [id, entry] of this._timers) {
         if (entry.fireAt <= target) {
@@ -37,14 +40,15 @@ class ManualTimer implements TimerProvider {
           }
         }
       }
-      if (earliest && earliest.entry.fireAt <= target) {
+      if (earliest) {
         this._now = earliest.entry.fireAt;
         this._timers.delete(earliest.id);
         earliest.entry.callback();
       } else {
-        this._now = target;
+        break;
       }
     }
+    this._now = target;
   }
 
   get pendingCount(): number {
