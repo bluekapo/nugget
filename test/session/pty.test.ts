@@ -212,3 +212,29 @@ describe('spawnDockerSandbox', () => {
     assert.equal(result.pid, 99999, 'returned handle must have the pid from the spawned process');
   });
 });
+
+describe('containerName passthrough (SESS-02)', () => {
+  it('spawnDockerSandbox uses containerName for docker args when provided', () => {
+    spawnCalls.length = 0;
+    ptyModule.spawnDockerSandbox({ name: 'sess-2', containerName: 'sess' });
+    const call = spawnCalls[spawnCalls.length - 1];
+
+    assert.equal(call.args[2], 'sess', 'docker args must use containerName, not name');
+  });
+
+  it('spawnDockerContainer uses containerName for docker args when provided', () => {
+    spawnCalls.length = 0;
+    ptyModule.spawnDockerContainer({ name: 'sess-2', containerName: 'sess' });
+    const call = spawnCalls[spawnCalls.length - 1];
+
+    assert.equal(call.args[2], 'sess', 'docker args must use containerName, not name');
+  });
+
+  it('spawnDockerSandbox falls back to name when containerName undefined', () => {
+    spawnCalls.length = 0;
+    ptyModule.spawnDockerSandbox({ name: 'my-name' });
+    const call = spawnCalls[spawnCalls.length - 1];
+
+    assert.equal(call.args[2], 'my-name', 'docker args must fall back to name when containerName is undefined');
+  });
+});

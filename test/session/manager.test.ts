@@ -370,4 +370,65 @@ describe('SessionManager', () => {
       assert.ok(true, 'pause/resume did not throw after session exit');
     });
   });
+
+  describe('deleteSession (SESS-01)', () => {
+    it('deleteSession() removes session from store', async () => {
+      const { fakeSpawn, handles } = createFakePtySpawner();
+      const manager = new SessionManager(bus, store, fakeSpawn);
+
+      await manager.start('del-test');
+
+      // Trigger exit so activePtys is clean
+      const handle = handles.get('del-test')!;
+      handle.onExitCallback!({ exitCode: 0 });
+
+      // Session record still exists (status: stopped)
+      assert.ok(store.findByName('del-test'), 'session should exist before deleteSession');
+
+      manager.deleteSession('del-test');
+
+      assert.equal(store.findByName('del-test'), null, 'session should be null after deleteSession');
+    });
+
+    it('deleteSession() allows restart with same name', async () => {
+      const { fakeSpawn, handles } = createFakePtySpawner();
+      const manager = new SessionManager(bus, store, fakeSpawn);
+
+      await manager.start('restart-test');
+
+      // Trigger exit to clean activePtys
+      const handle = handles.get('restart-test')!;
+      handle.onExitCallback!({ exitCode: 0 });
+
+      manager.deleteSession('restart-test');
+
+      // Should succeed -- no stale record blocking
+      const session = await manager.start('restart-test');
+      assert.equal(session.name, 'restart-test');
+      assert.equal(session.status, 'running');
+    });
+  });
+
+  describe('containerName forwarding (SESS-02)', () => {
+    it('start() forwards containerName to spawnFn', async () => {
+      let receivedOpts: PtyOptions | null = null;
+      const capturingSpawn = (opts: PtyOptions) => {
+        receivedOpts = opts;
+        return {
+          pid: 12345,
+          onData: (_cb: (data: string) => void) => ({ dispose() {} }),
+          onExit: (_cb: (e: { exitCode: number; signal?: number }) => void) => ({ dispose() {} }),
+          kill() {},
+          write() {},
+          resize() {},
+        };
+      };
+
+      const manager = new SessionManager(bus, store, capturingSpawn);
+      await manager.start('sess-2', { containerName: 'sess' });
+
+      assert.ok(receivedOpts, 'spawnFn should have been called');
+      assert.equal(receivedOpts!.containerName, 'sess', 'containerName must be forwarded to spawnFn');
+    });
+  });
 });
