@@ -60,7 +60,7 @@ export class SessionManager {
     this.maxSessions = maxSessions;
   }
 
-  async start(name: string, opts?: { cols?: number; rows?: number }): Promise<Session> {
+  async start(name: string, opts?: { cols?: number; rows?: number; containerName?: string }): Promise<Session> {
     // Check MAX_SESSIONS limit
     if (this.activePtys.size >= this.maxSessions) {
       throw new Error(`Maximum ${this.maxSessions} concurrent sessions reached`);
@@ -83,7 +83,7 @@ export class SessionManager {
 
     // Spawn PTY (lazy-load default spawnFn if none was provided)
     const spawnFn = this.spawnFn ?? await getDefaultSpawnFn();
-    const ptyProcess = spawnFn({ name, cols: opts?.cols, rows: opts?.rows });
+    const ptyProcess = spawnFn({ name, containerName: opts?.containerName, cols: opts?.cols, rows: opts?.rows });
 
     const disposables: Array<{ dispose(): void }> = [];
 
@@ -165,6 +165,11 @@ export class SessionManager {
     const active = this.activePtys.get(name);
     if (!active) return;
     active.pty.resume?.();
+  }
+
+  /** Delete a session record from the store. Used by disconnect to prevent stale records. */
+  deleteSession(name: string): void {
+    this.store.delete(name);
   }
 
   getActive(): Session[] {

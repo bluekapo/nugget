@@ -253,6 +253,7 @@ export function registerCallbackHandlers(
         // Session may have already exited
       }
       router.remove(name);
+      sessionManager.deleteSession(name);
     }
     await safeAnswer(ctx, { text: `Disconnected ${name}` });
 

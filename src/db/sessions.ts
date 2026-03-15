@@ -28,6 +28,7 @@ export class SessionStore {
   private updatePidStmt: Database.Statement;
   private getActiveStmt: Database.Statement;
   private deleteStmt: Database.Statement;
+  private cleanupStaleStmt: Database.Statement;
 
   constructor(private db: Database.Database) {
     this.insertStmt = db.prepare(
@@ -52,6 +53,10 @@ export class SessionStore {
 
     this.deleteStmt = db.prepare(
       `DELETE FROM sessions WHERE name = ?`
+    );
+
+    this.cleanupStaleStmt = db.prepare(
+      `DELETE FROM sessions WHERE status IN ('starting', 'running', 'stopping')`
     );
   }
 
@@ -80,5 +85,11 @@ export class SessionStore {
 
   delete(name: string): void {
     this.deleteStmt.run(name);
+  }
+
+  /** Delete all records with status starting/running/stopping (crash recovery). Returns count of deleted rows. */
+  cleanupStale(): number {
+    const result = this.cleanupStaleStmt.run();
+    return result.changes;
   }
 }

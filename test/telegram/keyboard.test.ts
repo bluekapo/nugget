@@ -587,6 +587,7 @@ describe('InlineKeyboard', () => {
       const mockSm = {
         writeToSession(_name: string, _data: string) {},
         async stop(_name: string) {},
+        deleteSession(_name: string) {},
       };
 
       let switchedTo = '';
@@ -635,9 +636,11 @@ describe('InlineKeyboard', () => {
 
       let stoppedName = '';
       let removedName = '';
+      let deletedName = '';
       const mockSm = {
         writeToSession(_name: string, _data: string) {},
         async stop(name: string) { stoppedName = name; },
+        deleteSession(name: string) { deletedName = name; },
       };
 
       const mockRouter = {
@@ -671,6 +674,7 @@ describe('InlineKeyboard', () => {
 
       assert.equal(stoppedName, 'project-b');
       assert.equal(removedName, 'project-b');
+      assert.equal(deletedName, 'project-b', 'deleteSession should be called with session name');
       assert.ok(answerText.includes('project-b'), 'answer should mention the session name');
     });
 
@@ -691,6 +695,7 @@ describe('InlineKeyboard', () => {
       const mockSm = {
         writeToSession(_name: string, _data: string) {},
         async stop(name: string) { stoppedName = name; },
+        deleteSession(_name: string) {},
       };
 
       const mockRouter = {
@@ -1114,6 +1119,7 @@ describe('InlineKeyboard', () => {
       const mockSm = {
         writeToSession(_name: string, _data: string) {},
         async stop(_name: string) {},
+        deleteSession(_name: string) {},
       };
 
       const mockRouter = {
@@ -1493,6 +1499,7 @@ describe('InlineKeyboard', () => {
       const mockSm = {
         writeToSession(_name: string, _data: string) {},
         async stop(_name: string) {},
+        deleteSession(_name: string) {},
       };
 
       const mockRouter = {
@@ -1821,9 +1828,11 @@ describe('InlineKeyboard', () => {
         on(_filter: string, _handler: unknown) {},
       };
 
+      let deletedName = '';
       const mockSm = {
         writeToSession(_name: string, _data: string) {},
         async stop(name: string) { stoppedName = name; },
+        deleteSession(name: string) { deletedName = name; },
       };
 
       const mockRouter = {
@@ -1854,6 +1863,7 @@ describe('InlineKeyboard', () => {
 
       assert.equal(stoppedName, 'test-session', 'sessionManager.stop should be called with session name');
       assert.equal(removedName, 'test-session', 'router.remove should be called immediately for local sessions');
+      assert.equal(deletedName, 'test-session', 'sessionManager.deleteSession should be called with session name');
     });
   });
 });

@@ -4,12 +4,13 @@ import { TERMINAL_COLS, TERMINAL_ROWS } from '../terminal/constants.js';
 
 export interface PtyOptions {
   name: string;
+  containerName?: string;
   cols?: number;
   rows?: number;
 }
 
 export function spawnDockerSandbox(opts: PtyOptions): IPty {
-  const args = ['sandbox', 'run', opts.name];
+  const args = ['sandbox', 'run', opts.containerName ?? opts.name];
 
   return pty.spawn('docker', args, {
     name: 'xterm-256color',
@@ -21,7 +22,7 @@ export function spawnDockerSandbox(opts: PtyOptions): IPty {
 }
 
 export function spawnDockerContainer(opts: PtyOptions): IPty {
-  const args = ['start', '-ai', opts.name];
+  const args = ['start', '-ai', opts.containerName ?? opts.name];
 
   return pty.spawn('docker', args, {
     name: 'xterm-256color',

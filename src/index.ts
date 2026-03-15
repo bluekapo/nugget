@@ -89,7 +89,14 @@ async function startPrimary(
   // 5. Create session store
   const store = new SessionStore(db);
 
+  // 5a. Clean up stale session records from previous crashed processes (SESS-03)
+  const cleaned = store.cleanupStale();
+  if (cleaned > 0) {
+    logInfo(`Cleaned up ${cleaned} stale session record(s) from previous run`);
+  }
+
   // 5b. Auto-suffix if a running session with the same name already exists
+  const originalName = sessionName;
   const resolvedName = resolveSessionName(sessionName, store);
   if (resolvedName !== sessionName) {
     logInfo(`Session '${sessionName}' already exists -- using '${resolvedName}'`);
@@ -350,7 +357,12 @@ async function startPrimary(
   router.switchTo(sessionName);
 
   // 19. Start the first session (PTY output now captured by output sink)
-  const session = await sessionManager.start(sessionName, { cols: ptyCols, rows: ptyRows });
+  // Pass original name as containerName when suffix was applied (SESS-02)
+  const session = await sessionManager.start(sessionName, {
+    cols: ptyCols,
+    rows: ptyRows,
+    ...(resolvedName !== originalName ? { containerName: originalName } : {}),
+  });
 
   // 20. Log session status
   logInfo(`Session '${sessionName}' running (PID: ${session.pid})`);
@@ -427,7 +439,14 @@ async function startSecondary(
   // 5. Create session store
   const store = new SessionStore(db);
 
+  // 5a. Clean up stale session records from previous crashed processes (SESS-03)
+  const cleanedSecondary = store.cleanupStale();
+  if (cleanedSecondary > 0) {
+    logInfo(`Cleaned up ${cleanedSecondary} stale session record(s) from previous run`);
+  }
+
   // 5b. Auto-suffix if a running session with the same name already exists
+  const originalSecondaryName = sessionName;
   const resolvedName = resolveSessionName(sessionName, store);
   if (resolvedName !== sessionName) {
     logInfo(`Session '${sessionName}' already exists -- using '${resolvedName}'`);
@@ -456,7 +475,12 @@ async function startSecondary(
   const ptyRows = process.stdout.rows ?? TERMINAL_ROWS;
 
   // 18. Start the session locally
-  const session = await sessionManager.start(sessionName, { cols: ptyCols, rows: ptyRows });
+  // Pass original name as containerName when suffix was applied (SESS-02)
+  const session = await sessionManager.start(sessionName, {
+    cols: ptyCols,
+    rows: ptyRows,
+    ...(resolvedName !== originalSecondaryName ? { containerName: originalSecondaryName } : {}),
+  });
 
   // 19. Connect to primary instance's IPC for Telegram visibility
   const ipcBridge = connectToPrimary(config.botToken, sessionName);
@@ -614,6 +638,13 @@ async function becomeNewPrimary(
     // Clear ALL listeners from secondary phase to prevent duplicates.
     // becomeNewPrimary re-registers everything the primary needs below.
     bus.removeAllListeners();
+
+    // Clean up stale session records from the crashed primary (SESS-03)
+    const promotedStore = new SessionStore(db);
+    const cleanedPromoted = promotedStore.cleanupStale();
+    if (cleanedPromoted > 0) {
+      logInfo(`Cleaned up ${cleanedPromoted} stale session record(s) from crashed primary`);
+    }
 
     const bot = await createBot(config.botToken, config.ownerId);
     const settingsStore = new SettingsStore(db);
