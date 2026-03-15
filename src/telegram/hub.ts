@@ -414,8 +414,8 @@ function buildKeyboard(
   hubView: HubViewState = 'sessions',
   cliScrollLocked = true,
   cliEnterConfirmation = false,
-): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
-  const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
+): { inline_keyboard: Array<Array<{ text: string; callback_data: string; style?: string }>> } {
+  const keyboard: Array<Array<{ text: string; callback_data: string; style?: string }>> = [];
 
   const activeAuto = automationHub?.activeAutomationInfo ?? null;
   const autoCount = automationHub?.activeAutomationCount ?? 0;
@@ -519,7 +519,7 @@ function buildKeyboard(
 
   // Session rows (only when no automation is active/pending)
   for (const s of sessions) {
-    const row: Array<{ text: string; callback_data: string }> = [];
+    const row: Array<{ text: string; callback_data: string; style?: string }> = [];
 
     // Switch button only for non-active sessions
     if (s.name !== activeSession) {
@@ -541,6 +541,7 @@ function buildKeyboard(
     row.push({
       text: isActive ? '💀' : `💀`,
       callback_data: `hub:disconnect:${s.name}`,
+      style: 'danger',
     });
 
     keyboard.push(row);
