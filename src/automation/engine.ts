@@ -893,29 +893,37 @@ export class AutomationEngine {
     this.cancelClearPolling();
     debugLog(`[startClearPolling] scheduling poll in 1000ms, bufferLen=${this.clearingBuffer.length}`);
     this.clearPollTimer = this.timer.setTimeout(() => {
-      if (this._state !== 'clearing-orchestrator') {
-        debugLog(`[clear-poll] SKIPPED — state changed to ${this._state}`);
-        return;
-      }
+      try {
+        if (this._state !== 'clearing-orchestrator') {
+          debugLog(`[clear-poll] SKIPPED — state changed to ${this._state}`);
+          return;
+        }
 
-      // Check raw PTY buffer instead of emulator screen text.
-      const stripped = this.clearingBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-      debugLog(`[clear-poll] rawBufferLen=${this.clearingBuffer.length} strippedLen=${stripped.length} stripped=${JSON.stringify(stripped.slice(-300))}`);
-      if (stripped.includes('(no content)')) {
-        debugLog(`[clear-poll] FOUND "(no content)" — scheduling ${this.consultationMode ? 'onConsultationClearComplete' : 'onClearComplete'} in 500ms`);
-        this.clearPollTimer = null;
-        // 500ms settling delay so TUI finishes rendering before prompt text is typed
-        this.timer.setTimeout(() => {
-          if (this.consultationMode) {
-            this.onConsultationClearComplete();
-          } else {
-            this.onClearComplete();
-          }
-        }, 500);
-      } else {
-        debugLog(`[clear-poll] "(no content)" NOT found — re-polling`);
-        // Poll again in 1 second
-        this.startClearPolling();
+        // Check raw PTY buffer instead of emulator screen text.
+        const stripped = this.clearingBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+        debugLog(`[clear-poll] rawBufferLen=${this.clearingBuffer.length} strippedLen=${stripped.length} stripped=${JSON.stringify(stripped.slice(-300))}`);
+        if (stripped.includes('(no content)')) {
+          debugLog(`[clear-poll] FOUND "(no content)" — scheduling ${this.consultationMode ? 'onConsultationClearComplete' : 'onClearComplete'} in 500ms`);
+          this.clearPollTimer = null;
+          // 500ms settling delay so TUI finishes rendering before prompt text is typed
+          this.timer.setTimeout(() => {
+            if (this.consultationMode) {
+              this.onConsultationClearComplete();
+            } else {
+              this.onClearComplete();
+            }
+          }, 500);
+        } else {
+          debugLog(`[clear-poll] "(no content)" NOT found — re-polling`);
+          // Poll again in 1 second
+          this.startClearPolling();
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debugLog(`[clear-poll] EXCEPTION: ${msg}`);
+        this.actionLog.add('EXEC_FAILURE', `Clear polling error: ${msg}`);
+        this.bus.emit('automation:error', `Clear polling failed: ${msg}`);
+        this.stop();
       }
     }, 1000);
   }
@@ -931,45 +939,53 @@ export class AutomationEngine {
     this.cancelResponsePolling();
     debugLog(`[startResponsePolling] scheduling poll in 1000ms (consultationMode=${this.consultationMode})`);
     this.responsePollTimer = this.timer.setTimeout(() => {
-      const expectedState = this.consultationMode ? 'waiting-consultation' : 'waiting-response';
-      if (this._state !== expectedState) {
-        debugLog(`[response-poll] SKIPPED — state changed to ${this._state} (expected ${expectedState})`);
-        return;
-      }
+      try {
+        const expectedState = this.consultationMode ? 'waiting-consultation' : 'waiting-response';
+        if (this._state !== expectedState) {
+          debugLog(`[response-poll] SKIPPED — state changed to ${this._state} (expected ${expectedState})`);
+          return;
+        }
 
-      // Parse directives from the raw PTY buffer. The emulator viewport (40 rows)
-      // is too small for the prompt echo + response, and Ink redraws in-place
-      // so scrollback doesn't accumulate. The raw buffer captures everything.
-      const stripped = stripAnsi(this.responseBuffer);
-      const { directive, context: parsedContext } = parseDirectiveWithContext(stripped);
-      debugLog(`[response-poll] bufLen=${this.responseBuffer.length} strippedLen=${stripped.length} hasDirective=${!!directive} hasContext=${!!parsedContext} tail300=${JSON.stringify(stripped.slice(-300))}`);
+        // Parse directives from the raw PTY buffer. The emulator viewport (40 rows)
+        // is too small for the prompt echo + response, and Ink redraws in-place
+        // so scrollback doesn't accumulate. The raw buffer captures everything.
+        const stripped = stripAnsi(this.responseBuffer);
+        const { directive, context: parsedContext } = parseDirectiveWithContext(stripped);
+        debugLog(`[response-poll] bufLen=${this.responseBuffer.length} strippedLen=${stripped.length} hasDirective=${!!directive} hasContext=${!!parsedContext} tail300=${JSON.stringify(stripped.slice(-300))}`);
 
-      if (directive) {
-        debugLog(`[response-poll] directive found: ${directive.type} => ${JSON.stringify(directive)}`);
-        this.responsePollTimer = null;
-        if (this.consultationMode) {
-          this.onConsultationResponse();
+        if (directive) {
+          debugLog(`[response-poll] directive found: ${directive.type} => ${JSON.stringify(directive)}`);
+          this.responsePollTimer = null;
+          if (this.consultationMode) {
+            this.onConsultationResponse();
+          } else {
+            this.onResponseReady();
+          }
+        } else if (hasOrchestratorResponse(stripped) && hasCompletionMarker(stripped)) {
+          debugLog(`[response-poll] completion marker found with ● response but no directive — triggering retry`);
+          this.responsePollTimer = null;
+          if (this.consultationMode) {
+            this.onConsultationResponse();
+          } else {
+            this.onResponseReady();
+          }
         } else {
-          this.onResponseReady();
+          // If buffer hasn't grown since last poll, request a redraw to flush
+          // any output stuck in TCP/Nagle buffering or Ink's idle state.
+          if (this.responseBuffer.length === this.lastResponseBufLen && this.config.requestOrchestratorRedraw) {
+            debugLog(`[response-poll] buffer stale (${this.lastResponseBufLen}), requesting redraw`);
+            this.config.requestOrchestratorRedraw();
+          }
+          this.lastResponseBufLen = this.responseBuffer.length;
+          debugLog(`[response-poll] no directive yet — re-polling`);
+          this.startResponsePolling();
         }
-      } else if (hasOrchestratorResponse(stripped) && hasCompletionMarker(stripped)) {
-        debugLog(`[response-poll] completion marker found with ● response but no directive — triggering retry`);
-        this.responsePollTimer = null;
-        if (this.consultationMode) {
-          this.onConsultationResponse();
-        } else {
-          this.onResponseReady();
-        }
-      } else {
-        // If buffer hasn't grown since last poll, request a redraw to flush
-        // any output stuck in TCP/Nagle buffering or Ink's idle state.
-        if (this.responseBuffer.length === this.lastResponseBufLen && this.config.requestOrchestratorRedraw) {
-          debugLog(`[response-poll] buffer stale (${this.lastResponseBufLen}), requesting redraw`);
-          this.config.requestOrchestratorRedraw();
-        }
-        this.lastResponseBufLen = this.responseBuffer.length;
-        debugLog(`[response-poll] no directive yet — re-polling`);
-        this.startResponsePolling();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debugLog(`[response-poll] EXCEPTION: ${msg}`);
+        this.actionLog.add('EXEC_FAILURE', `Response polling error: ${msg}`);
+        this.bus.emit('automation:error', `Response polling failed: ${msg}`);
+        this.stop();
       }
     }, 1000);
   }
@@ -985,39 +1001,47 @@ export class AutomationEngine {
     this.cancelWorkerClearPolling();
     debugLog(`[startWorkerClearPolling] scheduling poll in 1000ms, bufferLen=${this.workerClearBuffer.length}`);
     this.workerClearPollTimer = this.timer.setTimeout(() => {
-      if (this._state !== 'clearing-worker') {
-        debugLog(`[worker-clear-poll] SKIPPED — state changed to ${this._state}`);
-        return;
-      }
-
-      const stripped = this.workerClearBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-      debugLog(`[worker-clear-poll] rawBufferLen=${this.workerClearBuffer.length} strippedLen=${stripped.length}`);
-      if (stripped.includes('(no content)')) {
-        debugLog(`[worker-clear-poll] FOUND "(no content)" — completing CLEAR`);
-        this.workerClearPollTimer = null;
-        this.workerClearBuffer = '';
-        this.actionLog.updateLastOutcome('Worker context cleared');
-        this.bus.emit('automation:cycle-complete', this.cycleNumber, 'CLEAR');
-
-        // Reset worker monitor for next cycle
-        if (this.workerMonitor) {
-          this.workerMonitor.capture.resetBaseline();
-          this.workerMonitor.capture.markInputSent();
-          this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
+      try {
+        if (this._state !== 'clearing-worker') {
+          debugLog(`[worker-clear-poll] SKIPPED — state changed to ${this._state}`);
+          return;
         }
 
-        // 500ms settling delay so TUI finishes rendering before next cycle
-        // (matches orchestrator startClearPolling pattern)
-        // /clear produces no completion marker, so onPromptComplete never fires.
-        // We call onWorkerIdle() directly to continue the automation cycle.
-        this.timer.setTimeout(() => {
-          this.setState('idle');
-          this.cancelStagnationTimer();
-          this.onWorkerIdle();
-        }, 500);
-      } else {
-        debugLog(`[worker-clear-poll] "(no content)" NOT found — re-polling`);
-        this.startWorkerClearPolling();
+        const stripped = this.workerClearBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+        debugLog(`[worker-clear-poll] rawBufferLen=${this.workerClearBuffer.length} strippedLen=${stripped.length}`);
+        if (stripped.includes('(no content)')) {
+          debugLog(`[worker-clear-poll] FOUND "(no content)" — completing CLEAR`);
+          this.workerClearPollTimer = null;
+          this.workerClearBuffer = '';
+          this.actionLog.updateLastOutcome('Worker context cleared');
+          this.bus.emit('automation:cycle-complete', this.cycleNumber, 'CLEAR');
+
+          // Reset worker monitor for next cycle
+          if (this.workerMonitor) {
+            this.workerMonitor.capture.resetBaseline();
+            this.workerMonitor.capture.markInputSent();
+            this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
+          }
+
+          // 500ms settling delay so TUI finishes rendering before next cycle
+          // (matches orchestrator startClearPolling pattern)
+          // /clear produces no completion marker, so onPromptComplete never fires.
+          // We call onWorkerIdle() directly to continue the automation cycle.
+          this.timer.setTimeout(() => {
+            this.setState('idle');
+            this.cancelStagnationTimer();
+            this.onWorkerIdle();
+          }, 500);
+        } else {
+          debugLog(`[worker-clear-poll] "(no content)" NOT found — re-polling`);
+          this.startWorkerClearPolling();
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        debugLog(`[worker-clear-poll] EXCEPTION: ${msg}`);
+        this.actionLog.add('EXEC_FAILURE', `Worker clear polling error: ${msg}`);
+        this.bus.emit('automation:error', `Worker clear polling failed: ${msg}`);
+        this.stop();
       }
     }, 1000);
   }
