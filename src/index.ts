@@ -25,6 +25,7 @@ import { registerCommands, EphemeralTracker } from './telegram/commands.js';
 import { CommandAllowlist } from './security/allowlist.js';
 import { TerminalEmulator } from './terminal/emulator.js';
 import { ScreenCapture } from './terminal/capture.js';
+import { CompletionTracker } from './terminal/completion-tracker.js';
 import { TERMINAL_COLS, TERMINAL_ROWS } from './terminal/constants.js';
 import { AutomationHubRenderer } from './telegram/automation-hub.js';
 import { AutomationEngine } from './automation/engine.js';
@@ -213,6 +214,30 @@ async function startPrimary(
     }
   });
 
+  // 12c-2. Wire CompletionTracker for non-active session completion notifications
+  const completionTracker = new CompletionTracker();
+  completionTracker.onComplete = (sessionName: string) => {
+    if (!settingsStore.get('notifications')) return;
+    // Skip active session -- ScreenCapture handles it with full spinner guard
+    if (sessionName === router.activeSession) return;
+    // Skip automated worker sessions
+    if (automationHub.isAutomatedSession(sessionName)) return;
+    const label = `Session "${sessionName}" prompt completed.`;
+    bot.api.sendMessage(config.ownerId, label, {
+      disable_notification: false,
+      reply_markup: {
+        inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
+      },
+    }).catch((err) => logError('Notification failed:', err));
+  };
+
+  // Feed all non-active session output to CompletionTracker
+  bus.on('session:output', (name: string, data: string) => {
+    if (name !== router.activeSession) {
+      completionTracker.onData(name, data);
+    }
+  });
+
   // 12c. Wire completion detection: send Telegram notification when "Crunched for" is detected and output settles
   screenCapture.onPromptComplete = () => {
     if (settingsStore.get('notifications')) {
@@ -237,6 +262,7 @@ async function startPrimary(
     const wasActive = router.activeSession === name;
     router.remove(name);
     hubRenderer.clearExecState(name);
+    completionTracker.removeSession(name);
     // Auto-switch to next available session if the killed one was active
     if (wasActive && router.activeSession === null && router.getAll().length > 0) {
       router.switchTo(router.getAll()[0]);
@@ -263,6 +289,7 @@ async function startPrimary(
   const originalWrite = sessionManager.writeToSession.bind(sessionManager);
   sessionManager.writeToSession = (name: string, data: string) => {
     screenCapture.markInputSent();
+    completionTracker.markInputSent(name);
     const bridge = router.getRemoteBridge(name);
     if (bridge) {
       bridge.sendInput(data);
@@ -696,6 +723,27 @@ async function becomeNewPrimary(
       }
     };
 
+    // Wire CompletionTracker for non-active session completion notifications (promoted primary)
+    const promotedCompletionTracker = new CompletionTracker();
+    promotedCompletionTracker.onComplete = (sessionName: string) => {
+      if (!settingsStore.get('notifications')) return;
+      if (sessionName === router.activeSession) return;
+      if (promotedAutomationHub.isAutomatedSession(sessionName)) return;
+      const label = `Session "${sessionName}" prompt completed.`;
+      bot.api.sendMessage(config.ownerId, label, {
+        disable_notification: false,
+        reply_markup: {
+          inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
+        },
+      }).catch((err) => logError('Notification failed:', err));
+    };
+
+    bus.on('session:output', (name: string, data: string) => {
+      if (name !== router.activeSession) {
+        promotedCompletionTracker.onData(name, data);
+      }
+    });
+
     const allowlist = new CommandAllowlist(config.commandAllowlist);
     const inputHandler = new TelegramInputHandler(
       sessionManager, () => router.activeSession, allowlist, promotedAutomationHub,
@@ -704,6 +752,7 @@ async function becomeNewPrimary(
     const originalWrite = sessionManager.writeToSession.bind(sessionManager);
     sessionManager.writeToSession = (name: string, data: string) => {
       capture.markInputSent();
+      promotedCompletionTracker.markInputSent(name);
       const bridge = router.getRemoteBridge(name);
       if (bridge) {
         bridge.sendInput(data);
@@ -727,6 +776,7 @@ async function becomeNewPrimary(
       const wasActive = router.activeSession === name;
       router.remove(name);
       hubRenderer.clearExecState(name);
+      promotedCompletionTracker.removeSession(name);
       // Auto-switch to next available session if the killed one was active
       if (wasActive && router.activeSession === null && router.getAll().length > 0) {
         router.switchTo(router.getAll()[0]);
