@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 import { resolve, isAbsolute } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { config } from 'dotenv';
 import { packageRoot } from '../config/paths.js';
+
+// Read version dynamically from package.json (not hardcoded)
+const pkg = JSON.parse(readFileSync(resolve(packageRoot, 'package.json'), 'utf8'));
 
 // Resolve paths relative to the package root, not the caller's cwd
 config({ path: resolve(packageRoot, '.env') });
@@ -19,7 +23,7 @@ const program = new Command();
 program
   .name('nugget')
   .description('Nugget — Run Claude Code sessions from Telegram')
-  .version('0.1.0');
+  .version(pkg.version);
 
 program
   .command('start')

@@ -66,12 +66,14 @@ describe('CLI start command (SESS-01)', () => {
 
   it('program has a "start" subcommand', async () => {
     const { Command } = await import('commander');
+    const { readFileSync } = await import('node:fs');
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8'));
     const program = new Command();
 
     program
       .name('nugget')
       .description('Nugget — Run Claude Code sessions from Telegram')
-      .version('0.1.0');
+      .version(pkg.version);
 
     program
       .command('start')
