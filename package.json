@@ -16,7 +16,7 @@
   "dependencies": {
     "@grammyjs/auto-retry": "^2.0.2",
     "@xterm/headless": "^6.0.0",
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "^12.8.0",
     "commander": "^14.0.0",
     "dotenv": "^17.3.1",
     "fastify": "^5.8.2",
