@@ -2529,6 +2529,128 @@ describe('AutomationEngine', () => {
     });
   });
 
+  // ========== ENG-04: CLEAR poll timeout ==========
+
+  describe('CLEAR poll timeout (ENG-04)', () => {
+    it('times out after 30s when worker does not produce "(no content)"', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      const warningEvents: string[] = [];
+      bus.on('automation:warning', (msg: string) => warningEvents.push(msg));
+      const cycleEvents: Array<{ cycle: number; action: string }> = [];
+      bus.on('automation:cycle-complete', (cycle: number, action: string) => {
+        cycleEvents.push({ cycle, action });
+      });
+
+      engine.start();
+      timer.advance(1); // deferred start
+
+      // Complete orchestrator clear + prompt + CLEAR directive
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('CLEAR'));
+      timer.advance(1000); // response poll finds CLEAR
+
+      assert.equal(engine.state, 'clearing-worker');
+
+      // Worker produces output that is NOT "(no content)"
+      await emitOutput(bus, 'worker', 'some random output\r\n');
+
+      // Advance 30 seconds — poll fires ~30 times finding nothing, then deadline fires
+      timer.advance(30_000);
+      timer.advance(500); // settling delay
+
+      // Verify timeout path executed
+      assert.ok(warningEvents.some(e => e.includes('timed out')), 'should emit warning containing "timed out"');
+      assert.ok(cycleEvents.some(e => e.action === 'CLEAR'), 'should emit cycle-complete with CLEAR action');
+      assert.notEqual(engine.state, 'clearing-worker', 'should transition out of clearing-worker');
+    });
+
+    it('normal "(no content)" success cancels deadline timer — no warning fires later', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      const warningEvents: string[] = [];
+      bus.on('automation:warning', (msg: string) => warningEvents.push(msg));
+
+      engine.start();
+      timer.advance(1);
+
+      // Get to clearing-worker
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('CLEAR'));
+      timer.advance(1000);
+
+      assert.equal(engine.state, 'clearing-worker');
+
+      // Worker produces "(no content)" normally
+      await emitOutput(bus, 'worker', clearOutput());
+      timer.advance(1000); // poll finds it
+      timer.advance(500);  // settling
+
+      // Now advance past where deadline would have fired
+      timer.advance(30_000);
+
+      // No warning should have fired
+      assert.equal(warningEvents.length, 0, 'deadline timer should have been cancelled — no warning');
+    });
+
+    it('no double cycle-complete when both poll-success and deadline could fire', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      const cycleEvents: Array<{ cycle: number; action: string }> = [];
+      bus.on('automation:cycle-complete', (cycle: number, action: string) => {
+        cycleEvents.push({ cycle, action });
+      });
+
+      engine.start();
+      timer.advance(1);
+
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('CLEAR'));
+      timer.advance(1000);
+
+      assert.equal(engine.state, 'clearing-worker');
+
+      // Emit "(no content)" right at the same time window as the deadline
+      // by first advancing almost to 30s, then emitting content, then advancing past 30s
+      await emitOutput(bus, 'worker', clearOutput());
+      timer.advance(1000); // poll at 1s finds it -> success path fires
+      timer.advance(500);  // settling
+
+      // Now advance to ensure no double execution from a stale deadline timer
+      timer.advance(30_000);
+
+      // Only one CLEAR cycle-complete should have fired
+      const clearCycles = cycleEvents.filter(e => e.action === 'CLEAR');
+      assert.equal(clearCycles.length, 1, 'exactly one CLEAR cycle-complete should fire — no double execution');
+    });
+
+    it('action log reads "Worker context cleared (timeout)" on timeout path', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+
+      engine.start();
+      timer.advance(1);
+
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('CLEAR'));
+      timer.advance(1000);
+
+      assert.equal(engine.state, 'clearing-worker');
+
+      // Don't emit "(no content)" — let it timeout
+      timer.advance(30_000);
+      timer.advance(500); // settling
+
+      // Check action log contains the timeout outcome
+      const { actionLog } = engine.getSerializableState();
+      const lastEntry = actionLog[actionLog.length - 1];
+      assert.ok(
+        lastEntry.outcome?.includes('timeout'),
+        `action log should contain "timeout", got: ${lastEntry.outcome}`,
+      );
+    });
+  });
+
   // ========== AUTO-03: hub cycle count sync ==========
 
   describe('AUTO-03: hub cycle count sync', () => {
