@@ -415,9 +415,11 @@ export class AutomationHubRenderer {
     auto.lastAction = action;
   }
 
-  /** Returns true if the given session is the worker in ANY active automation. */
+  /** Returns true if the given session is the worker or orchestrator in ANY active automation. */
   isAutomatedSession(sessionName: string): boolean {
-    return [...this.activeAutomations.values()].some(a => a.workerSession === sessionName);
+    return [...this.activeAutomations.values()].some(
+      a => a.workerSession === sessionName || a.orchestratorSession === sessionName
+    );
   }
 
   /** Returns true iff currently in the enter-task creation step. */

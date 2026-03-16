@@ -552,7 +552,7 @@ describe('AutomationHubRenderer', () => {
       assert.equal(hub.isAutomatedSession('other'), false);
     });
 
-    it('returns false for the orchestrator session name when automation is active', async () => {
+    it('returns true for the orchestrator session name when automation is active', async () => {
       const api = createMockApi();
       const bus = new EventBus();
       const mockEng = createMockEngine('idle');
@@ -568,7 +568,7 @@ describe('AutomationHubRenderer', () => {
       await hub.handleCallback('auto:o:orchestrator');
       await hub.completeCreation('do stuff');
 
-      assert.equal(hub.isAutomatedSession('orchestrator'), false);
+      assert.equal(hub.isAutomatedSession('orchestrator'), true);
     });
   });
 
@@ -849,8 +849,8 @@ describe('AutomationHubRenderer', () => {
       const { hub } = await setupTwoAutomations();
       assert.equal(hub.isAutomatedSession('w1'), true);
       assert.equal(hub.isAutomatedSession('w2'), true);
-      assert.equal(hub.isAutomatedSession('o1'), false);
-      assert.equal(hub.isAutomatedSession('o2'), false);
+      assert.equal(hub.isAutomatedSession('o1'), true);
+      assert.equal(hub.isAutomatedSession('o2'), true);
     });
 
     it('auto:details:N sets detail view, auto:back returns to list', async () => {
