@@ -2696,6 +2696,109 @@ describe('AutomationEngine', () => {
     });
   });
 
+  // ---------- Response poll false positives (ENG-01) ----------
+
+  describe('response poll false positives (ENG-01)', () => {
+
+    it('echoed prompt markers do not trigger false positive onResponseReady', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // First cycle via deferred timer -> clearing-orchestrator
+      timer.advance(1);
+      assert.equal(engine.state, 'clearing-orchestrator');
+
+      // Orchestrator clears
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); // poll fires, finds "(no content)"
+      timer.advance(500);  // settling delay -> onClearComplete
+      timer.advance(50);   // delayed Enter -> waiting-response
+
+      assert.equal(engine.state, 'waiting-response', 'should be waiting for response');
+
+      // Emit orchestrator output simulating echoed prompt containing worker's
+      // completion marker (✻) BEFORE the ● line — this is an echo of the prompt
+      // that was sent, not an actual response. The ✻ appears above ● because it's
+      // from the worker screen echo, and the stale ● is from prior Ink repaint.
+      await emitOutput(bus, 'orchestrator',
+        '## Worker Terminal Output\r\n```\r\ntest results\r\n\u273B Crunched for 1m 22s\r\n```\r\n\r\n\u25CF COMMAND: npm test\r\n'
+      );
+
+      // Poll fires — should NOT trigger onResponseReady because ✻ is before ●
+      timer.advance(1000);
+
+      assert.equal(engine.state, 'waiting-response',
+        'echoed prompt markers (✻ before ●) should NOT trigger false positive onResponseReady');
+    });
+
+    it('stripSpinners consistency: spinner lines between directive lines are stripped in poll', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      const cycleEvents: Array<{ cycle: number; action: string }> = [];
+      bus.on('automation:cycle-complete', (cycle, action) => {
+        cycleEvents.push({ cycle, action });
+      });
+
+      engine.start();
+
+      // First cycle via deferred timer -> clearing-orchestrator
+      timer.advance(1);
+      assert.equal(engine.state, 'clearing-orchestrator');
+
+      // Orchestrator clears
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); // poll fires, finds "(no content)"
+      timer.advance(500);  // settling delay -> onClearComplete
+      timer.advance(50);   // delayed Enter -> waiting-response
+
+      assert.equal(engine.state, 'waiting-response', 'should be waiting for response');
+
+      // Emit orchestrator output with spinner lines interleaved
+      await emitOutput(bus, 'orchestrator',
+        '\u2736 Scurrying...\r\n\u25CF COMMAND: npm test\r\n\u273D Analyzing...\r\n\u273B Crunched for 5s\r\n'
+      );
+
+      // Poll fires — stripSpinners should remove spinner lines so directive is found
+      timer.advance(1000);
+
+      // Engine should process the directive (spinner lines stripped)
+      const cmdWrite = writes.find(w => w.name === 'worker' && w.data.includes('npm test'));
+      assert.ok(cmdWrite, 'poll should detect COMMAND directive after stripping spinner lines');
+      assert.equal(engine.state, 'idle', 'should return to idle after executing COMMAND');
+    });
+
+    it('legitimate response with ● followed by ✻ still triggers onResponseReady', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // First cycle via deferred timer -> clearing-orchestrator
+      timer.advance(1);
+      assert.equal(engine.state, 'clearing-orchestrator');
+
+      // Orchestrator clears
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); // poll fires, finds "(no content)"
+      timer.advance(500);  // settling delay -> onClearComplete
+      timer.advance(50);   // delayed Enter -> waiting-response
+
+      assert.equal(engine.state, 'waiting-response', 'should be waiting for response');
+
+      // Emit orchestrator output with an unparseable ● response followed by ✻
+      // This is a legitimate response (● before ✻) but unparseable as a directive
+      await emitOutput(bus, 'orchestrator',
+        '\u25CF I think we should run tests\r\n\u273B Crunched for 5s\r\n'
+      );
+
+      // Poll fires — should trigger onResponseReady via completion marker fallback
+      timer.advance(1000);
+
+      // Engine should have triggered onResponseReady and attempted to parse.
+      // Since the directive is unparseable, it should retry (prompting-orchestrator)
+      assert.notEqual(engine.state, 'waiting-response',
+        'legitimate response (● then ✻) should trigger onResponseReady');
+    });
+
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------
