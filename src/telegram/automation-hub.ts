@@ -319,7 +319,8 @@ export class AutomationHubRenderer {
           auto.cycleCount = cycleNumber;
           auto.lastAction = action;
         }
-        this.onRender?.();
+        // onRender NOT called here — stateChange always follows cycle-complete
+        // and will trigger the render with both updated cycle count and state
         this.persistState();
       },
       escalation: (reason: string) => {
@@ -488,7 +489,8 @@ export class AutomationHubRenderer {
             auto.cycleCount = cycleNumber;
             auto.lastAction = action;
           }
-          this.onRender?.();
+          // onRender NOT called here — stateChange always follows cycle-complete
+          // and will trigger the render with both updated cycle count and state
           this.persistState();
         },
         escalation: (reason: string) => {

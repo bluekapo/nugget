@@ -1026,6 +1026,7 @@ export class AutomationEngine {
           // Reset worker monitor for next cycle
           if (this.workerMonitor) {
             this.workerMonitor.capture.resetBaseline();
+            this.workerMonitor.capture.requireMarker = false;  // /clear has no ✻ marker
             this.workerMonitor.capture.markInputSent();
             this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
           }
