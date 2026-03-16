@@ -5,7 +5,7 @@ import type { Directive, ParseResult } from './types.js';
  * Prevents CONTEXT continuation from swallowing COMMAND/ESCALATE/DONE/etc. text
  * when rendered under a single ● bullet in Claude Code TUI.
  */
-const DIRECTIVE_KEYWORD_RE = /^(COMMAND|ESCALATE|DONE|SELECT|CONTEXT):\s|^(ENTER|CLEAR|RESET|YES|NO)$/;
+const DIRECTIVE_KEYWORD_RE = /^(COMMAND|ESCALATE|DONE|SELECT|CONTEXT):\s|^(ENTER|CLEAR|RESET|YES|NO)\s*$/;
 
 /**
  * Split lines where terminal wrapping placed a directive keyword mid-line.
@@ -24,7 +24,7 @@ function splitMidLineDirectives(text: string): string {
   // Handles both colon-directives (COMMAND: ...) and bare keywords (CLEAR, ENTER, etc.)
   // at end of line — bare keywords appear at line-end when terminal wrapping places them
   // after padding spaces following CONTEXT continuation text.
-  const midLineRe = /\s{2,}(?=(?:COMMAND|ESCALATE|DONE|SELECT|CONTEXT):\s|(?:ENTER|CLEAR|RESET|YES|NO)$)/;
+  const midLineRe = /\s{2,}(?=(?:COMMAND|ESCALATE|DONE|SELECT|CONTEXT):\s|(?:ENTER|CLEAR|RESET|YES|NO)\s*$)/;
 
   return text.split('\n').flatMap(line => {
     const trimmed = line.trim();
@@ -129,33 +129,33 @@ function matchSingleLine(line: string): Directive | null {
     return null;
   }
 
-  // ENTER (exact match)
-  if (line === 'ENTER') {
+  // ENTER (tolerates trailing whitespace/NBSP from Ink TUI cursor artifacts)
+  if (/^ENTER[\s\u00A0]*$/.test(line)) {
     return { type: 'ENTER' };
   }
 
-  // YES (exact match)
-  if (line === 'YES') {
+  // YES (tolerates trailing whitespace/NBSP)
+  if (/^YES[\s\u00A0]*$/.test(line)) {
     return { type: 'YES' };
   }
 
-  // NO (exact match)
-  if (line === 'NO') {
+  // NO (tolerates trailing whitespace/NBSP)
+  if (/^NO[\s\u00A0]*$/.test(line)) {
     return { type: 'NO' };
   }
 
-  // CLEAR (exact match, no parameters)
-  if (line === 'CLEAR') {
+  // CLEAR (tolerates trailing whitespace/NBSP)
+  if (/^CLEAR[\s\u00A0]*$/.test(line)) {
     return { type: 'CLEAR' };
   }
 
-  // RESET (exact match, no parameters)
-  if (line === 'RESET') {
+  // RESET (tolerates trailing whitespace/NBSP)
+  if (/^RESET[\s\u00A0]*$/.test(line)) {
     return { type: 'RESET' };
   }
 
   // WAIT (removed directive -- return null so it triggers normal retry/parse-failure flow)
-  if (line === 'WAIT') return null;
+  if (/^WAIT[\s\u00A0]*$/.test(line)) return null;
   if (/^WAIT:\s+\d+$/.test(line)) return null;
 
   return null;

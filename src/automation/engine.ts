@@ -46,12 +46,15 @@ export function stripAnsi(raw: string): string {
 }
 
 /** Strip Claude Code spinner lines and blank whitespace-only lines from screen text. */
-function stripSpinners(text: string): string {
+export function stripSpinners(text: string): string {
   return text
     .split('\n')
     .filter(line => {
       // Strip lines matching Claude Code spinner patterns: "  · Catapulting..."
       if (/^\s*[·.]\s+\w+.*\.{3}\s*$/.test(line)) return false;
+      // Strip Unicode spinner lines from Ink TUI: "✶ Scurrying...", "✽ Analyzing..."
+      // Note: Do NOT add ✻ — it's used for completion markers (✻ Crunched for 1m 22s)
+      if (/^\s*[✶✽✢]\s+\w+.*\.{3}\s*$/.test(line)) return false;
       // Strip lines that are just whitespace
       if (/^\s*$/.test(line)) return false;
       return true;
@@ -604,7 +607,8 @@ export class AutomationEngine {
     this.setState('executing');
 
     // Parse directive and context from raw PTY buffer (emulator viewport is too small, Ink redraws in-place)
-    const stripped = stripAnsi(this.responseBuffer);
+    // stripSpinners removes Unicode spinner lines (✶, ✽, ✢) that interleave between COMMAND and its continuation
+    const stripped = stripSpinners(stripAnsi(this.responseBuffer));
     debugLog(`[onResponseReady] bufLen=${this.responseBuffer.length} strippedLen=${stripped.length} tail300=${JSON.stringify(stripped.slice(-300))}`);
     const parseResult = parseDirectiveWithContext(stripped);
     const directive = parseResult.directive;
