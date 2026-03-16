@@ -1348,6 +1348,102 @@ describe('AutomationHubRenderer', () => {
     });
   });
 
+  describe('warning vs error event handling', () => {
+    // Helper: create an automation and return { api, bus, hub }
+    async function setupAutomation() {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const mockEng = createMockEngine('idle');
+      const hub = new AutomationHubRenderer(
+        api as any,
+        123,
+        () => ['w', 'o'],
+        (() => mockEng) as any,
+        bus,
+      );
+      hub.onRender = async () => { await hub.render(); };
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.completeCreation('test task');
+
+      // Clear setup calls
+      api.calls.length = 0;
+
+      return { api, bus, hub };
+    }
+
+    it('automation:warning does not delete automation from Map', async () => {
+      const { bus, hub } = await setupAutomation();
+      assert.equal(hub.activeAutomationCount, 1, 'should have 1 automation before warning');
+
+      bus.emit('automation:warning', 'Failed to parse directive, retrying');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      assert.equal(hub.activeAutomationCount, 1, 'should still have 1 automation after warning');
+      assert.ok(hub.activeAutomationInfo, 'activeAutomationInfo should still be accessible');
+    });
+
+    it('automation:warning does not send error notification', async () => {
+      const { api, bus } = await setupAutomation();
+
+      bus.emit('automation:warning', 'parse retry message');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const errorSend = api.calls.find(
+        c => c.method === 'sendMessage' && (c.args[1] as string).includes('Automation error'),
+      );
+      assert.equal(errorSend, undefined, 'should NOT send error notification for warnings');
+    });
+
+    it('automation:error still deletes automation from Map', async () => {
+      const { bus, hub } = await setupAutomation();
+      assert.equal(hub.activeAutomationCount, 1, 'should have 1 automation before error');
+
+      bus.emit('automation:error', 'fatal failure');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      assert.equal(hub.activeAutomationCount, 0, 'should have 0 automations after error');
+    });
+
+    it('automation:done after prior warning includes full details', async () => {
+      const { api, bus } = await setupAutomation();
+
+      bus.emit('automation:warning', 'parse retry warning');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Clear calls, then emit done
+      api.calls.length = 0;
+      bus.emit('automation:done', 'Completed');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const completeSend = api.calls.find(
+        c => c.method === 'sendMessage' && (c.args[1] as string).includes('Automation complete'),
+      );
+      assert.ok(completeSend, 'should send completion notification');
+      const text = completeSend!.args[1] as string;
+      assert.ok(text.includes('w'), 'should include worker session name');
+      assert.ok(text.includes('o'), 'should include orchestrator session name');
+      assert.ok(text.includes('Cycles:'), 'should include cycle count');
+    });
+
+    it('automation:done unsubscribes warning handler', async () => {
+      const { api, bus } = await setupAutomation();
+
+      bus.emit('automation:done', 'Completed');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const callsBefore = api.calls.length;
+      bus.emit('automation:warning', 'ghost warning');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // No new calls should appear
+      assert.equal(api.calls.length, callsBefore, 'warning after done should produce no side effects');
+    });
+  });
+
   describe('render serialization', () => {
     it('concurrent render() calls produce exactly 1 sendMessage', async () => {
       const calls: { method: string; args: unknown[] }[] = [];
