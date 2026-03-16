@@ -111,6 +111,7 @@ export class HubRenderer {
     private readonly sessionManager: Pick<SessionManager, 'getActive'>,
     private readonly getActiveSession: () => string | null,
     private readonly getAllSessionNames?: () => string[],
+    private readonly isRemote?: (name: string) => boolean,
     private readonly store?: HubStore,
     private readonly rateLimiter?: RateLimiter,
   ) {
@@ -163,9 +164,12 @@ export class HubRenderer {
         const dbEntry = dbMap.get(name);
         if (dbEntry) {
           sessions.push({ name: dbEntry.name, status: dbEntry.status, pid: (dbEntry as any).pid, createdAt: (dbEntry as any).createdAt });
-        } else {
-          // Remote session -- not in local DB
+        } else if (this.isRemote?.(name)) {
+          // Truly remote session -- PTY lives in another process
           sessions.push({ name, status: 'remote' });
+        } else {
+          // Local session missing from DB (race condition / cleanup mismatch)
+          sessions.push({ name, status: 'running' });
         }
       }
 

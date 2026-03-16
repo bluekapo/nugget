@@ -155,6 +155,7 @@ async function startPrimary(
     sessionManager,
     () => router.activeSession,
     () => router.getAll(),
+    (name: string) => router.isRemote(name),
     hubStore,
     rateLimiter,
   );
@@ -687,6 +688,7 @@ async function becomeNewPrimary(
       bot.api, config.ownerId, sessionManager,
       () => router.activeSession,
       () => router.getAll(),
+      (name: string) => router.isRemote(name),
       hubStore,
       rateLimiter,
     );

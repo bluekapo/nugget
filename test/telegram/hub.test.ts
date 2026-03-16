@@ -570,7 +570,7 @@ describe('HubRenderer', () => {
       const store = createMockStore(999);
 
       // Creating HubRenderer with a store that has an old message ID should trigger delete
-      const _hub = new HubRenderer(api as any, 123, sm as any, () => null, undefined, store as any);
+      const _hub = new HubRenderer(api as any, 123, sm as any, () => null, undefined, undefined, store as any);
 
       // Wait for the deleteMessage promise to resolve
       await new Promise(resolve => setTimeout(resolve, 10));
@@ -586,7 +586,7 @@ describe('HubRenderer', () => {
       const sm = createMockSessionManager([]);
       const store = createMockStore(null);
 
-      const _hub = new HubRenderer(api as any, 123, sm as any, () => null, undefined, store as any);
+      const _hub = new HubRenderer(api as any, 123, sm as any, () => null, undefined, undefined, store as any);
 
       await new Promise(resolve => setTimeout(resolve, 10));
 
@@ -599,7 +599,7 @@ describe('HubRenderer', () => {
       const sm = createMockSessionManager([]);
       const store = createMockStore(null);
 
-      const hub = new HubRenderer(api as any, 123, sm as any, () => null, undefined, store as any);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => null, undefined, undefined, store as any);
       await hub.render();
 
       const saveCalls = store.storeCalls.filter(c => c.method === 'save');
@@ -612,7 +612,7 @@ describe('HubRenderer', () => {
       const sm = createMockSessionManager([]);
       const store = createMockStore(null);
 
-      const hub = new HubRenderer(api as any, 123, sm as any, () => null, undefined, store as any);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => null, undefined, undefined, store as any);
       await hub.render(); // first render creates message
 
       // Force new render should clear store, then save new ID
@@ -1361,7 +1361,7 @@ describe('HubRenderer', () => {
       const api = createMockApi();
       const sm = createMockSessionManager([{ name: 'a', status: 'running' }]);
       const rl = createMockRateLimiter(false); // deferrable would be blocked
-      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, rl);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, undefined, rl);
 
       await hub.render({ mandatory: true });
 
@@ -1373,7 +1373,7 @@ describe('HubRenderer', () => {
       const api = createMockApi();
       const sm = createMockSessionManager([{ name: 'a', status: 'running' }]);
       const rl = createMockRateLimiter(false); // deferrable would be blocked
-      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, rl);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, undefined, rl);
 
       await hub.render(); // no opts -- should default to mandatory=true
 
@@ -1385,7 +1385,7 @@ describe('HubRenderer', () => {
       const api = createMockApi();
       const sm = createMockSessionManager([{ name: 'a', status: 'running' }]);
       const rl = createMockRateLimiter(false); // block deferrable
-      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, rl);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, undefined, rl);
 
       await hub.render({ mandatory: false });
 
@@ -1397,7 +1397,7 @@ describe('HubRenderer', () => {
       const api = createMockApi();
       const sm = createMockSessionManager([{ name: 'a', status: 'running' }]);
       const rl = createMockRateLimiter(true); // allow deferrable
-      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, rl);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, undefined, rl);
 
       await hub.render({ mandatory: false });
 
@@ -1409,7 +1409,7 @@ describe('HubRenderer', () => {
       const api = createMockApi();
       const sm = createMockSessionManager([{ name: 'a', status: 'running' }]);
       const rl = createMockRateLimiter(true);
-      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, rl);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, undefined, rl);
 
       await hub.render({ mandatory: true });
 
@@ -1424,7 +1424,7 @@ describe('HubRenderer', () => {
         { name: 'b', status: 'running' },
       ]);
       const rl = createMockRateLimiter(true);
-      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, rl);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, undefined, rl);
 
       // First render: sendMessage (creates hub message)
       await hub.render({ mandatory: true });
@@ -1441,7 +1441,7 @@ describe('HubRenderer', () => {
       const api = createMockApi();
       const sm = createMockSessionManager([{ name: 'a', status: 'running' }]);
       const rl = createMockRateLimiter(false); // block deferrable
-      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, rl);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'a', undefined, undefined, undefined, rl);
 
       hub.debouncedRender(10); // short delay for testing
 
