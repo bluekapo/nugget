@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseDirective, parseContextBlock, parseDirectiveWithContext } from '../../src/automation/directive-parser.js';
-import { stripAnsi } from '../../src/automation/engine.js';
+import { stripAnsi, stripSpinners } from '../../src/automation/engine.js';
 
 describe('parseDirective', () => {
   describe('COMMAND directive', () => {
@@ -946,5 +946,80 @@ describe('parseDirective spinner isolation', () => {
       `Should start with first line, got: ${result?.command}`);
     assert.ok(result?.command.includes('src/session/pty.ts'),
       `Should include continuation, got: ${result?.command}`);
+  });
+});
+
+describe('AUTO-01: bare directive trailing artifact tolerance', () => {
+  it('CLEAR with trailing space', () => {
+    const result = parseDirective('some output\n● CLEAR \n...');
+    assert.deepStrictEqual(result, { type: 'CLEAR' });
+  });
+
+  it('CLEAR with trailing tab', () => {
+    const result = parseDirective('some output\n● CLEAR\t\n...');
+    assert.deepStrictEqual(result, { type: 'CLEAR' });
+  });
+
+  it('CLEAR with trailing NBSP (\\u00A0)', () => {
+    const result = parseDirective('some output\n● CLEAR\u00A0\n...');
+    assert.deepStrictEqual(result, { type: 'CLEAR' });
+  });
+
+  it('RESET with trailing whitespace', () => {
+    const result = parseDirective('some output\n● RESET \n...');
+    assert.deepStrictEqual(result, { type: 'RESET' });
+  });
+
+  it('ENTER with trailing spaces', () => {
+    const result = parseDirective('some output\n● ENTER  \n...');
+    assert.deepStrictEqual(result, { type: 'ENTER' });
+  });
+
+  it('YES with trailing space', () => {
+    const result = parseDirective('some output\n● YES \n...');
+    assert.deepStrictEqual(result, { type: 'YES' });
+  });
+
+  it('NO with trailing space', () => {
+    const result = parseDirective('some output\n● NO \n...');
+    assert.deepStrictEqual(result, { type: 'NO' });
+  });
+});
+
+describe('AUTO-02: spinner interleaving in COMMAND continuation', () => {
+  it('COMMAND with spinner line between directive and numeric continuation', () => {
+    // Spinner line ✶ interleaves between COMMAND line and its phase number continuation
+    // After stripSpinners removes the spinner line, parseDirective should find the full command
+    const raw = '● COMMAND: /gsd:execute-phase\n✶ Scurrying...\n3\n❯ ';
+    const cleaned = stripSpinners(stripAnsi(raw));
+    const result = parseDirective(cleaned);
+    assert.deepStrictEqual(result, { type: 'COMMAND', command: '/gsd:execute-phase 3' });
+  });
+
+  it('COMMAND with different spinner variant between directive and continuation', () => {
+    const raw = '● COMMAND: /gsd:plan-phase\n✽ Analyzing...\n5\n❯ ';
+    const cleaned = stripSpinners(stripAnsi(raw));
+    const result = parseDirective(cleaned);
+    assert.deepStrictEqual(result, { type: 'COMMAND', command: '/gsd:plan-phase 5' });
+  });
+});
+
+describe('AUTO-02: stripSpinners extension for Unicode spinners', () => {
+  it('strips Unicode spinner line with ✶', () => {
+    const text = '● COMMAND: /gsd:execute-phase\n✶ Scurrying...\n3\n❯ ';
+    const result = stripSpinners(text);
+    assert.ok(!result.includes('Scurrying'), `should strip ✶ spinner line, got: ${result}`);
+  });
+
+  it('strips Unicode spinner line with ✽', () => {
+    const text = 'some output\n✽ Analyzing...\nprompt';
+    const result = stripSpinners(text);
+    assert.ok(!result.includes('Analyzing'), `should strip ✽ spinner line, got: ${result}`);
+  });
+
+  it('still strips middle-dot spinner lines', () => {
+    const text = 'some output\n  · Catapulting...\nprompt';
+    const result = stripSpinners(text);
+    assert.ok(!result.includes('Catapulting'), `should strip middle-dot spinner, got: ${result}`);
   });
 });
