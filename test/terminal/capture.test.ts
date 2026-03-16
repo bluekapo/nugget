@@ -85,6 +85,7 @@ describe('ScreenCapture', () => {
     burstWindow?: number;
     maxWait?: number;
     idleDelay?: number;
+    redrawDelay?: number;
   }): ScreenCapture {
     capture = new ScreenCapture(emulator, (e) => events.push(e), {
       ...opts,
@@ -876,5 +877,92 @@ describe('ScreenCapture', () => {
       events.length >= 2,
       `maxWait=200ms over 500ms should yield >= 2 captures, got ${events.length}`,
     );
+  });
+
+  // ---------- OUT-01: Redraw-aware debounce ----------
+
+  describe('OUT-01: Redraw-aware debounce', () => {
+    it('OUT-01a: REDRAW_RE matches cursor-positioning sequences', () => {
+      // Access the private static regex via bracket notation
+      const REDRAW_RE = (ScreenCapture as any).REDRAW_RE as RegExp;
+
+      assert.ok(REDRAW_RE.test('\x1b[1A'), 'should match cursor up ESC[1A');
+      assert.ok(REDRAW_RE.test('\x1b[2K'), 'should match erase line ESC[2K');
+      assert.ok(REDRAW_RE.test('\x1b[H'), 'should match cursor home ESC[H');
+      assert.ok(REDRAW_RE.test('\x1b[3;5H'), 'should match cursor position ESC[3;5H');
+      assert.ok(REDRAW_RE.test('\x1b[2J'), 'should match erase display ESC[2J');
+      assert.ok(REDRAW_RE.test('\x1b[5B'), 'should match cursor down ESC[5B');
+    });
+
+    it('OUT-01b: REDRAW_RE does NOT match color/SGR codes', () => {
+      const REDRAW_RE = (ScreenCapture as any).REDRAW_RE as RegExp;
+
+      assert.equal(REDRAW_RE.test('\x1b[31m'), false, 'should NOT match red ESC[31m');
+      assert.equal(REDRAW_RE.test('\x1b[0m'), false, 'should NOT match reset ESC[0m');
+      assert.equal(REDRAW_RE.test('\x1b[1;32m'), false, 'should NOT match bold green ESC[1;32m');
+      assert.equal(REDRAW_RE.test('hello world'), false, 'should NOT match plain text');
+    });
+
+    it('OUT-01c: cursor-positioning data uses redrawDelay instead of baseDelay', async () => {
+      createCapture({ baseDelay: 50, redrawDelay: 400, burstThreshold: 100 });
+
+      await capture.onData('\x1b[2K\x1b[1Anew content');
+
+      // At 50ms (baseDelay), no event should fire because redrawDelay=400 is active
+      timer.advance(50);
+      assert.equal(events.length, 0, 'No event at baseDelay when redraw detected');
+
+      // At 400ms (redrawDelay), event should fire
+      timer.advance(350);
+      assert.equal(events.length, 1, 'Event fires at redrawDelay');
+    });
+
+    it('OUT-01d: normal text without cursor escapes uses baseDelay', async () => {
+      createCapture({ baseDelay: 50, redrawDelay: 400, burstThreshold: 100 });
+
+      await capture.onData('normal text');
+
+      // At 50ms (baseDelay), event should fire
+      timer.advance(50);
+      assert.equal(events.length, 1, 'Event fires at baseDelay for normal text');
+    });
+
+    it('OUT-01e: redrawDetected resets after capture fires', async () => {
+      createCapture({ baseDelay: 50, redrawDelay: 400, burstThreshold: 100 });
+
+      // Send redraw data
+      await capture.onData('\x1b[2Kredraw data');
+      timer.advance(400); // capture fires, flag should reset
+      assert.equal(events.length, 1, 'First capture fires at redrawDelay');
+
+      // Now send normal text — should use baseDelay (50ms), not redrawDelay (400ms)
+      await capture.onData('normal text after redraw');
+      timer.advance(50);
+      assert.equal(events.length, 2, 'Second capture fires at baseDelay after flag reset');
+    });
+
+    it('OUT-01f: simulated Ink redraw produces clean capture', async () => {
+      createCapture({ baseDelay: 50, redrawDelay: 400, burstThreshold: 100 });
+
+      // Write initial content and let it capture
+      await capture.onData('old line 1\r\nold line 2\r\nold line 3');
+      timer.advance(50);
+      assert.equal(events.length, 1, 'Initial capture');
+
+      // Simulate Ink redraw: erase 3 lines (ESC[2K+ESC[1A repeated) then write new content
+      await capture.onData('\x1b[2K\x1b[1A\x1b[2K\x1b[1A\x1b[2K\x1b[Gnew clean content\r\nsecond line');
+      timer.advance(400); // wait for redrawDelay
+
+      assert.equal(events.length, 2, 'Should produce second capture after redraw');
+      const lastEvent = events[events.length - 1];
+      assert.ok(
+        lastEvent.text.includes('new clean content'),
+        `Capture should contain "new clean content", got: "${lastEvent.text}"`,
+      );
+      assert.ok(
+        lastEvent.text.includes('second line'),
+        `Capture should contain "second line", got: "${lastEvent.text}"`,
+      );
+    });
   });
 });
