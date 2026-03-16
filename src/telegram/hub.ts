@@ -323,7 +323,7 @@ function buildText(
       ];
       return lines.join('\n');
     }
-    return ['<b>Automation Hub</b>', '', 'No automation running.', 'Tap New Automation to start.', '', '<i>Tip: Max cycle limit is configurable via /settings</i>'].join('\n');
+    return ['<b>Automation Hub</b>', '', 'No automation running.', 'Tap New Automation to start.'].join('\n');
   }
 
   if (sessions.length === 0) {

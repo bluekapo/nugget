@@ -678,6 +678,8 @@ export class AutomationHubRenderer {
             `<i>${this.pendingCreation.taskDescription}</i>`,
             '',
             'Review and confirm to start.',
+            '',
+            '<i>Tip: Change max cycle limit in /settings</i>',
           ].join('\n');
       }
     }
