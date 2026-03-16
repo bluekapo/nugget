@@ -2639,14 +2639,14 @@ describe('AutomationEngine', () => {
 
       // Don't emit "(no content)" — let it timeout
       timer.advance(30_000);
-      timer.advance(500); // settling
-
-      // Check action log contains the timeout outcome
+      // Check action log BEFORE settling delay fires onWorkerIdle
+      // (onWorkerIdle overwrites the last outcome with worker screen text)
       const { actionLog } = engine.getSerializableState();
-      const lastEntry = actionLog[actionLog.length - 1];
+      const clearEntry = actionLog.find(e => e.action === 'CLEAR');
+      assert.ok(clearEntry, 'should have a CLEAR action log entry');
       assert.ok(
-        lastEntry.outcome?.includes('timeout'),
-        `action log should contain "timeout", got: ${lastEntry.outcome}`,
+        clearEntry!.outcome?.includes('timeout'),
+        `action log CLEAR entry should contain "timeout", got: ${clearEntry!.outcome}`,
       );
     });
   });

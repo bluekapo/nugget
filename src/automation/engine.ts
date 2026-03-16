@@ -33,6 +33,9 @@ function debugLog(msg: string): void {
   try { appendFileSync(LOG_FILE, `[${ts}] ${msg}\n`); } catch { /* ignore */ }
 }
 
+/** Maximum time (ms) to wait for worker "(no content)" after /clear before treating CLEAR as succeeded. */
+const CLEAR_TIMEOUT_MS = 30_000;
+
 /** Strip all ANSI escape sequences from raw PTY data. */
 export function stripAnsi(raw: string): string {
   return raw
@@ -180,6 +183,7 @@ export class AutomationEngine {
   private persistentContext: string[] = [];
   private workerClearBuffer = '';
   private workerClearPollTimer: unknown = null;
+  private workerClearDeadlineTimer: unknown = null;
   private resetMode = false;
   private needsFullPrompt = true;
   private readonly maxConsultationRetries = 3;
@@ -1006,6 +1010,39 @@ export class AutomationEngine {
 
   private startWorkerClearPolling(): void {
     this.cancelWorkerClearPolling();
+    this.scheduleWorkerClearPoll();
+
+    // Deadline timer — fires once after CLEAR_TIMEOUT_MS to prevent indefinite stall
+    this.workerClearDeadlineTimer = this.timer.setTimeout(() => {
+      if (this._state !== 'clearing-worker') return;  // state guard: poll-success already ran
+
+      debugLog(`[worker-clear-timeout] TIMEOUT after ${CLEAR_TIMEOUT_MS}ms — forcing CLEAR completion`);
+      this.workerClearDeadlineTimer = null;
+      this.cancelWorkerClearPolling();  // stop further polling
+      this.workerClearBuffer = '';
+
+      this.actionLog.updateLastOutcome('Worker context cleared (timeout)');
+      this.bus.emit('automation:warning', `Worker CLEAR poll timed out after ${CLEAR_TIMEOUT_MS / 1000}s — continuing`);
+      this.bus.emit('automation:cycle-complete', this.cycleNumber, 'CLEAR');
+
+      // Same post-CLEAR continuation as the normal success path
+      if (this.workerMonitor) {
+        this.workerMonitor.capture.resetBaseline();
+        this.workerMonitor.capture.requireMarker = false;
+        this.workerMonitor.capture.markInputSent();
+        this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
+      }
+
+      this.timer.setTimeout(() => {
+        this.setState('idle');
+        this.cancelStagnationTimer();
+        this.onWorkerIdle();
+      }, 500);
+    }, CLEAR_TIMEOUT_MS);
+  }
+
+  /** Schedule a single worker CLEAR poll tick (does NOT touch the deadline timer). */
+  private scheduleWorkerClearPoll(): void {
     debugLog(`[startWorkerClearPolling] scheduling poll in 1000ms, bufferLen=${this.workerClearBuffer.length}`);
     this.workerClearPollTimer = this.timer.setTimeout(() => {
       try {
@@ -1018,7 +1055,7 @@ export class AutomationEngine {
         debugLog(`[worker-clear-poll] rawBufferLen=${this.workerClearBuffer.length} strippedLen=${stripped.length}`);
         if (stripped.includes('(no content)')) {
           debugLog(`[worker-clear-poll] FOUND "(no content)" — completing CLEAR`);
-          this.workerClearPollTimer = null;
+          this.cancelWorkerClearPolling();  // cancel both poll timer and deadline timer
           this.workerClearBuffer = '';
           this.actionLog.updateLastOutcome('Worker context cleared');
           this.bus.emit('automation:cycle-complete', this.cycleNumber, 'CLEAR');
@@ -1042,7 +1079,7 @@ export class AutomationEngine {
           }, 500);
         } else {
           debugLog(`[worker-clear-poll] "(no content)" NOT found — re-polling`);
-          this.startWorkerClearPolling();
+          this.scheduleWorkerClearPoll();  // re-poll without resetting deadline timer
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1058,6 +1095,10 @@ export class AutomationEngine {
     if (this.workerClearPollTimer !== null) {
       this.timer.clearTimeout(this.workerClearPollTimer);
       this.workerClearPollTimer = null;
+    }
+    if (this.workerClearDeadlineTimer !== null) {
+      this.timer.clearTimeout(this.workerClearDeadlineTimer);
+      this.workerClearDeadlineTimer = null;
     }
   }
 
