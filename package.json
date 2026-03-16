@@ -1,6 +1,6 @@
 {
   "name": "nugget",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "type": "module",
   "description": "Nugget — Run Claude Code sessions from Telegram",
   "bin": {
@@ -31,6 +31,6 @@
     "typescript": "^5.7.0"
   },
   "optionalDependencies": {
-    "@esbuild/linux-x64": "^0.27.3"
+    "@esbuild/linux-x64": "^0.27.4"
   }
 }
