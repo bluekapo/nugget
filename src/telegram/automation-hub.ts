@@ -621,6 +621,7 @@ export class AutomationHubRenderer {
         if (a.lastAction) {
           lines.push(`Last: ${a.lastAction}`);
         }
+        lines.push('', '<i>Tip: Change max cycle limit in /settings</i>');
         return lines.join('\n');
       }
       // Automation was removed while viewing -- fall through to list/idle
@@ -637,6 +638,7 @@ export class AutomationHubRenderer {
       for (const [id, a] of this.activeAutomations) {
         lines.push(`${id}. ${a.workerSession} -> ${a.orchestratorSession} (${this.formatElapsed(a.startTime)})`);
       }
+      lines.push('', '<i>Tip: Change max cycle limit in /settings</i>');
       return lines.join('\n');
     }
 
@@ -647,6 +649,8 @@ export class AutomationHubRenderer {
             '<b>Automation Hub</b>',
             '',
             'Select worker session:',
+            '',
+            '<i>Tip: Change max cycle limit in /settings</i>',
           ].join('\n');
 
         case 'select-orchestrator':
@@ -655,6 +659,8 @@ export class AutomationHubRenderer {
             '',
             `Worker: <b>${this.pendingCreation.workerSession}</b>`,
             'Select orchestrator session:',
+            '',
+            '<i>Tip: Change max cycle limit in /settings</i>',
           ].join('\n');
 
         case 'enter-task':
