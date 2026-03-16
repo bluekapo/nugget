@@ -114,6 +114,7 @@ export class HubRenderer {
     private readonly isRemote?: (name: string) => boolean,
     private readonly store?: HubStore,
     private readonly rateLimiter?: RateLimiter,
+    private readonly getRemoteMetadata?: (name: string) => { pid?: number | null; createdAt?: string } | undefined,
   ) {
     // On construction, load persisted hub message ID and attempt to delete it.
     // This handles the case where a secondary promotes and needs to clean up the old hub.
@@ -166,7 +167,8 @@ export class HubRenderer {
           sessions.push({ name: dbEntry.name, status: dbEntry.status, pid: (dbEntry as any).pid, createdAt: (dbEntry as any).createdAt });
         } else if (this.isRemote?.(name)) {
           // Truly remote session -- PTY lives in another process
-          sessions.push({ name, status: 'remote' });
+          const meta = this.getRemoteMetadata?.(name);
+          sessions.push({ name, status: 'remote', pid: meta?.pid, createdAt: meta?.createdAt });
         } else {
           // Local session missing from DB (race condition / cleanup mismatch)
           sessions.push({ name, status: 'running' });

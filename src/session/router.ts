@@ -1,11 +1,12 @@
 import type { EventBus } from '../events/bus.js';
-import type { RemoteSessionBridge } from '../telegram/bot.js';
+import type { RemoteSessionBridge, RemoteSessionMeta } from '../telegram/bot.js';
 import { logInfo } from '../logging/logger.js';
 
 export class SessionRouter {
   private _activeSession: string | null = null;
   private sessions: Set<string> = new Set();
   private remoteSessions: Map<string, RemoteSessionBridge> = new Map();
+  private remoteMetadata: Map<string, RemoteSessionMeta> = new Map();
 
   /** Callback to trigger a local session redraw (resize PTY -> SIGWINCH). */
   onLocalRedraw: ((name: string) => void) | null = null;
@@ -38,15 +39,24 @@ export class SessionRouter {
   }
 
   /** Register a remote session (PTY lives in another process). */
-  addRemote(name: string, bridge: RemoteSessionBridge): void {
+  addRemote(name: string, bridge: RemoteSessionBridge, meta?: RemoteSessionMeta): void {
     this.sessions.add(name);
     this.remoteSessions.set(name, bridge);
+    if (meta) {
+      this.remoteMetadata.set(name, meta);
+    }
   }
 
   /** Unregister a remote session. */
   removeRemote(name: string): void {
     this.remoteSessions.delete(name);
+    this.remoteMetadata.delete(name);
     this.remove(name);
+  }
+
+  /** Get metadata for a remote session (pid, createdAt). */
+  getRemoteMetadata(name: string): RemoteSessionMeta | undefined {
+    return this.remoteMetadata.get(name);
   }
 
   /** Check if a session is remote (bridged via IPC). */

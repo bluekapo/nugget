@@ -213,6 +213,12 @@ let ipcServer: Server | null = null;
 
 // ── Bidirectional IPC Protocol ──────────────────────────────────────────
 
+/** Metadata for a remote session, sent over IPC during registration. */
+export interface RemoteSessionMeta {
+  pid?: number | null;
+  createdAt?: string;
+}
+
 /**
  * Bridge for a remote session living in another process.
  * Primary sends input to secondary; secondary sends output to primary.
@@ -237,7 +243,7 @@ export interface IpcCallbacks {
   /** Fire-and-forget: spawn a session in the primary process (legacy). */
   onSpawn: (sessionName: string) => Promise<void>;
   /** A secondary process registered a remote session. */
-  onRegister: (sessionName: string, bridge: RemoteSessionBridge) => void;
+  onRegister: (sessionName: string, bridge: RemoteSessionBridge, meta?: RemoteSessionMeta) => void;
   /** A secondary process unregistered (session exited or disconnected). */
   onUnregister: (sessionName: string) => void;
 }
@@ -310,7 +316,21 @@ export function startIpcServer(
           if (!socket.destroyed) socket.end();
         } else if (msg.startsWith('register:')) {
           // Persistent connection: register remote session
-          const name = msg.slice(9);
+          // Payload is either plain name or JSON: {"name":"...","pid":...,"createdAt":"..."}
+          const payload = msg.slice(9);
+          let name: string;
+          let meta: RemoteSessionMeta | undefined;
+          if (payload.startsWith('{')) {
+            try {
+              const parsed = JSON.parse(payload);
+              name = parsed.name;
+              meta = { pid: parsed.pid, createdAt: parsed.createdAt };
+            } catch {
+              name = payload; // Fallback: treat as plain name
+            }
+          } else {
+            name = payload;
+          }
           registeredSession = name;
 
           const bridge: RemoteSessionBridge = {
@@ -332,7 +352,7 @@ export function startIpcServer(
             },
           };
 
-          callbacks.onRegister(name, bridge);
+          callbacks.onRegister(name, bridge, meta);
           safeWrite('ok\n');
         } else if (msg.startsWith('unregister:')) {
           const name = msg.slice(11);
@@ -388,6 +408,7 @@ export function startIpcServer(
 export function connectToPrimary(
   token: string,
   sessionName: string,
+  metadata?: RemoteSessionMeta,
 ): { sendOutput(data: string): void; onInput(cb: (data: string) => void): void; onRedraw(cb: () => void): void; onDisconnect(cb: () => void): void; onPromote(cb: () => void): void; onExit(cb: () => void): void; onConnect(cb: () => void): void; unregister(): void } {
   const port = ipcPort(token);
   let inputCallback: ((data: string) => void) | null = null;
@@ -399,7 +420,9 @@ export function connectToPrimary(
   let buffer = '';
 
   const client = connect({ port, host: '127.0.0.1' }, () => {
-    client.write(`register:${sessionName}\n`);
+    // Send registration with metadata as JSON payload
+    const payload = JSON.stringify({ name: sessionName, pid: metadata?.pid, createdAt: metadata?.createdAt });
+    client.write(`register:${payload}\n`);
   });
 
   client.on('data', (data) => {

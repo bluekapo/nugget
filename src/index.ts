@@ -158,6 +158,7 @@ async function startPrimary(
     (name: string) => router.isRemote(name),
     hubStore,
     rateLimiter,
+    (name: string) => router.getRemoteMetadata(name),
   );
 
   // 11c. Create AutomationHubRenderer with engine factory and persistence store
@@ -331,9 +332,9 @@ async function startPrimary(
       await hubRenderer.render();
       logInfo(`IPC: Session '${name}' spawned (in-process)`);
     },
-    onRegister: (name, bridge) => {
+    onRegister: (name, bridge, meta) => {
       // Remote session from another CLI process
-      router.addRemote(name, bridge);
+      router.addRemote(name, bridge, meta);
       logInfo(`IPC: Remote session '${name}' registered`);
       hubRenderer.render();
 
@@ -484,7 +485,10 @@ async function startSecondary(
   });
 
   // 19. Connect to primary instance's IPC for Telegram visibility
-  const ipcBridge = connectToPrimary(config.botToken, sessionName);
+  const ipcBridge = connectToPrimary(config.botToken, sessionName, {
+    pid: session.pid,
+    createdAt: session.createdAt,
+  });
 
   // Forward PTY output to primary so Telegram can see it
   bus.on('session:output', (name: string, data: string) => {
@@ -691,6 +695,7 @@ async function becomeNewPrimary(
       (name: string) => router.isRemote(name),
       hubStore,
       rateLimiter,
+      (name: string) => router.getRemoteMetadata(name),
     );
 
     // Create AutomationHubRenderer for promoted primary with persistence store
@@ -832,8 +837,8 @@ async function becomeNewPrimary(
         router.switchTo(name);
         await sessionManager.start(name, { cols: ptyCols, rows: ptyRows });
       },
-      onRegister: (name, bridge) => {
-        router.addRemote(name, bridge);
+      onRegister: (name, bridge, meta) => {
+        router.addRemote(name, bridge, meta);
         hubRenderer.render();
         bridge.onOutput((data: string) => {
           bus.emit('session:output', name, data);
@@ -878,11 +883,18 @@ async function attemptReconnect(
   const MAX_ATTEMPTS = 10;
   const BASE_DELAY = 3000;
 
+  // Look up session metadata to send to the new primary
+  const reconnectStore = new SessionStore(db);
+  const reconnectSession = reconnectStore.findByName(sessionName);
+  const reconnectMeta = reconnectSession
+    ? { pid: reconnectSession.pid, createdAt: reconnectSession.createdAt }
+    : undefined;
+
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     logInfo(`Reconnecting to new primary (attempt ${attempt}/${MAX_ATTEMPTS})...`);
 
     try {
-      const newBridge = connectToPrimary(config.botToken, sessionName);
+      const newBridge = connectToPrimary(config.botToken, sessionName, reconnectMeta);
 
       const connected = await new Promise<boolean>((resolve) => {
         let settled = false;

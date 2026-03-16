@@ -479,6 +479,53 @@ describe('HubRenderer', () => {
       assert.ok(lastRow[0].text.includes('Simple'), 'toggle button should show Simple when in advanced mode');
       assert.equal(lastRow[0].callback_data, 'hub:advanced', 'callback should still be hub:advanced');
     });
+
+    it('advanced view shows PID and createdAt for remote session with metadata', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([]);
+      // Remote session not in DB, but metadata provided via getRemoteMetadata
+      const hub = new HubRenderer(
+        api as any, 123, sm as any,
+        () => 'remote-sess',
+        () => ['remote-sess'],
+        () => true, // isRemote
+        undefined,
+        undefined,
+        (name: string) => name === 'remote-sess' ? { pid: 7777, createdAt: '2026-03-16T08:00:00' } : undefined,
+      );
+
+      hub.toggleAdvanced();
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(sentText.includes('PID: 7777'), 'advanced view should show remote PID from metadata');
+      const expectedTime = new Date('2026-03-16T08:00:00Z').toLocaleString('en-GB', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit',
+      });
+      assert.ok(sentText.includes(expectedTime), `advanced view should show locale-formatted time for remote session (${expectedTime})`);
+    });
+
+    it('remote session without metadata shows ? | ? in advanced view', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([]);
+      const hub = new HubRenderer(
+        api as any, 123, sm as any,
+        () => 'remote-no-meta',
+        () => ['remote-no-meta'],
+        () => true, // isRemote
+        undefined,
+        undefined,
+        () => undefined, // no metadata
+      );
+
+      hub.toggleAdvanced();
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(sentText.includes('PID: ?'), 'remote session without metadata should show ? PID');
+      assert.ok(sentText.includes('| ?'), 'remote session without metadata should show ? timestamp');
+    });
   });
 
   describe('render()', () => {

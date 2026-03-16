@@ -29,23 +29,46 @@ describe('SessionStore.cleanupStale', () => {
     }
   });
 
-  it('deletes starting/running/stopping records and returns count', () => {
-    // Create 3 sessions with stale statuses
+  it('deletes rows with null PID (no PID recorded)', () => {
+    // Create sessions without assigning PIDs — cleanupStale should delete them
     store.create('sess-starting');
-    // status defaults to 'starting' on create, no need to update
-
     store.create('sess-running');
     store.updateStatus('sess-running', 'running');
-
     store.create('sess-stopping');
     store.updateStatus('sess-stopping', 'stopping');
 
     const count = store.cleanupStale();
 
-    assert.equal(count, 3, 'should delete 3 stale records');
-    assert.equal(store.findByName('sess-starting'), null, 'starting session should be deleted');
-    assert.equal(store.findByName('sess-running'), null, 'running session should be deleted');
-    assert.equal(store.findByName('sess-stopping'), null, 'stopping session should be deleted');
+    assert.equal(count, 3, 'should delete 3 null-PID stale records');
+    assert.equal(store.findByName('sess-starting'), null);
+    assert.equal(store.findByName('sess-running'), null);
+    assert.equal(store.findByName('sess-stopping'), null);
+  });
+
+  it('preserves rows for alive PIDs', () => {
+    // Use current process PID — guaranteed to be alive
+    store.create('alive-session');
+    store.updateStatus('alive-session', 'running');
+    store.updatePid('alive-session', process.pid);
+
+    const count = store.cleanupStale();
+
+    assert.equal(count, 0, 'should not delete rows for alive PIDs');
+    const session = store.findByName('alive-session');
+    assert.ok(session, 'alive session should still exist');
+    assert.equal(session.pid, process.pid);
+  });
+
+  it('deletes rows for dead PIDs', () => {
+    // Use a PID that is (almost certainly) not alive
+    store.create('dead-session');
+    store.updateStatus('dead-session', 'running');
+    store.updatePid('dead-session', 999999);
+
+    const count = store.cleanupStale();
+
+    assert.equal(count, 1, 'should delete row for dead PID');
+    assert.equal(store.findByName('dead-session'), null);
   });
 
   it('leaves stopped records untouched', () => {

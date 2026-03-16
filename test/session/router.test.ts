@@ -182,4 +182,26 @@ describe('SessionRouter', () => {
     router.remove('ghost'); // should not throw
     assert.equal(hubUpdateCount, 0);
   });
+
+  it('addRemote() stores metadata and getRemoteMetadata() retrieves it', () => {
+    const bridge = { sendInput() {}, onOutput() {}, requestRedraw() {}, sendPromote() {}, sendExit() {} };
+    router.addRemote('remote-1', bridge as any, { pid: 42, createdAt: '2026-03-16T10:00:00' });
+
+    const meta = router.getRemoteMetadata('remote-1');
+    assert.deepEqual(meta, { pid: 42, createdAt: '2026-03-16T10:00:00' });
+  });
+
+  it('removeRemote() clears metadata', () => {
+    const bridge = { sendInput() {}, onOutput() {}, requestRedraw() {}, sendPromote() {}, sendExit() {} };
+    router.addRemote('remote-2', bridge as any, { pid: 99 });
+
+    router.removeRemote('remote-2');
+
+    assert.equal(router.getRemoteMetadata('remote-2'), undefined);
+    assert.equal(router.has('remote-2'), false);
+  });
+
+  it('getRemoteMetadata() returns undefined for unknown sessions', () => {
+    assert.equal(router.getRemoteMetadata('nonexistent'), undefined);
+  });
 });

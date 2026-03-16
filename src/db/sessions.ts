@@ -21,6 +21,16 @@ function rowToSession(row: SessionRow): Session {
   };
 }
 
+/** Check if a PID is alive using signal 0 probe. */
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class SessionStore {
   private insertStmt: Database.Statement;
   private findByNameStmt: Database.Statement;
@@ -28,7 +38,8 @@ export class SessionStore {
   private updatePidStmt: Database.Statement;
   private getActiveStmt: Database.Statement;
   private deleteStmt: Database.Statement;
-  private cleanupStaleStmt: Database.Statement;
+  private getStaleStmt: Database.Statement;
+  private deleteByIdStmt: Database.Statement;
 
   constructor(private db: Database.Database) {
     this.insertStmt = db.prepare(
@@ -55,8 +66,12 @@ export class SessionStore {
       `DELETE FROM sessions WHERE name = ?`
     );
 
-    this.cleanupStaleStmt = db.prepare(
-      `DELETE FROM sessions WHERE status IN ('starting', 'running', 'stopping')`
+    this.getStaleStmt = db.prepare(
+      `SELECT * FROM sessions WHERE status IN ('starting', 'running', 'stopping')`
+    );
+
+    this.deleteByIdStmt = db.prepare(
+      `DELETE FROM sessions WHERE id = ?`
     );
   }
 
@@ -87,9 +102,19 @@ export class SessionStore {
     this.deleteStmt.run(name);
   }
 
-  /** Delete all records with status starting/running/stopping (crash recovery). Returns count of deleted rows. */
+  /** Delete stale session records (crash recovery). Only deletes rows whose PID is dead or null.
+   *  Preserves rows for PIDs that are still alive (e.g. another running instance). */
   cleanupStale(): number {
-    const result = this.cleanupStaleStmt.run();
-    return result.changes;
+    const rows = this.getStaleStmt.all() as SessionRow[];
+    let deleted = 0;
+    for (const row of rows) {
+      if (row.pid != null && isPidAlive(row.pid)) {
+        // PID is alive — this session belongs to another running process, skip it
+        continue;
+      }
+      this.deleteByIdStmt.run(row.id);
+      deleted++;
+    }
+    return deleted;
   }
 }
