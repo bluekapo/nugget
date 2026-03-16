@@ -126,17 +126,46 @@ describe('HubRenderer', () => {
       assert.ok(!sentText.includes('idle'), 'should not show idle when busy');
     });
 
-    it('shows "idle" for remote sessions (not "remote")', async () => {
+    it('shows globe emoji and idle for truly remote sessions (isRemote returns true)', async () => {
       const api = createMockApi();
       const sm = createMockSessionManager([]);
       // Provide getAllSessionNames that includes a remote session not in DB
-      const hub = new HubRenderer(api as any, 123, sm as any, () => 'remote-one', () => ['remote-one']);
+      // Pass isRemote callback that returns true for 'remote-one'
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'remote-one', () => ['remote-one'], (name: string) => name === 'remote-one');
 
       await hub.render();
 
       const sentText = api.calls[0].args[1] as string;
       assert.ok(sentText.includes('idle'), 'remote session should show idle execution state');
+      assert.ok(sentText.includes('\uD83C\uDF10'), 'truly remote session should show globe emoji');
       assert.ok(!sentText.includes('\u00B7 remote'), 'remote session should NOT show "remote" as execution state');
+    });
+
+    it('shows running status for local session missing from DB (not globe emoji)', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([]);
+      // Session in router but NOT in DB, isRemote returns false (local orphan)
+      const hub = new HubRenderer(api as any, 123, sm as any, () => null, () => ['local-orphan'], (name: string) => false);
+
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(!sentText.includes('\uD83C\uDF10'), 'local-no-DB session should NOT show globe emoji');
+      assert.ok(sentText.includes('idle'), 'local-no-DB session should show idle (from execStateMap default)');
+    });
+
+    it('advanced view for local session missing from DB shows ? PID without globe', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([]);
+      // Session in router but NOT in DB, isRemote returns false
+      const hub = new HubRenderer(api as any, 123, sm as any, () => null, () => ['local-orphan'], (name: string) => false);
+      hub.toggleAdvanced();
+
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(sentText.includes('PID: ?'), 'should show ? PID for session missing from DB');
+      assert.ok(!sentText.includes('\uD83C\uDF10'), 'local-no-DB session should NOT show globe emoji even in advanced mode');
     });
 
     it('shows non-running status for inactive sessions', async () => {
