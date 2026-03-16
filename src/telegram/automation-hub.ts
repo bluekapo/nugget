@@ -39,6 +39,7 @@ export interface ActiveAutomation {
     escalation: (reason: string) => void;
     done: (summary: string) => void;
     error: (error: string) => void;
+    warning: (message: string) => void;
   };
 }
 
@@ -337,6 +338,7 @@ export class AutomationHubRenderer {
         const auto = this.activeAutomations.get(id);
         if (auto) {
           this.bus.off('automation:error', auto.handlers.error);
+          this.bus.off('automation:warning', auto.handlers.warning);
         }
         const elapsed = auto ? formatDuration(Date.now() - auto.startTime) : '';
         const msg = auto
@@ -365,6 +367,10 @@ export class AutomationHubRenderer {
         this.onRender?.();
         this.persistState();
       },
+      warning: (_message: string) => {
+        // Non-destructive: engine handles retries internally.
+        // Do NOT delete automation from Map or clear detailViewId.
+      },
     };
 
     const automation: ActiveAutomation = {
@@ -389,6 +395,7 @@ export class AutomationHubRenderer {
     this.bus.on('automation:escalation', handlers.escalation);
     this.bus.on('automation:done', handlers.done);
     this.bus.on('automation:error', handlers.error);
+    this.bus.on('automation:warning', handlers.warning);
 
     this.pendingCreation = null;
     engine.start();
@@ -509,6 +516,7 @@ export class AutomationHubRenderer {
           const auto = this.activeAutomations.get(id);
           if (auto) {
             this.bus.off('automation:error', auto.handlers.error);
+            this.bus.off('automation:warning', auto.handlers.warning);
           }
           const elapsed = auto ? formatDuration(Date.now() - auto.startTime) : '';
           const msg = auto
@@ -537,6 +545,9 @@ export class AutomationHubRenderer {
           this.onRender?.();
           this.persistState();
         },
+        warning: (_message: string) => {
+          // Non-destructive: engine handles retries internally.
+        },
       };
 
       const automation: ActiveAutomation = {
@@ -558,6 +569,7 @@ export class AutomationHubRenderer {
       this.bus.on('automation:escalation', handlers.escalation);
       this.bus.on('automation:done', handlers.done);
       this.bus.on('automation:error', handlers.error);
+      this.bus.on('automation:warning', handlers.warning);
 
       // Start the engine fresh -- it will re-enter idle monitoring loop.
       // Internal engine state (buffers, timers) is not restored; only the hub-level
@@ -591,6 +603,7 @@ export class AutomationHubRenderer {
     this.bus.off('automation:escalation', auto.handlers.escalation);
     this.bus.off('automation:done', auto.handlers.done);
     this.bus.off('automation:error', auto.handlers.error);
+    this.bus.off('automation:warning', auto.handlers.warning);
 
     auto.engine.stop();
     this.activeAutomations.delete(id);

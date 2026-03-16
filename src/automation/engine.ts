@@ -621,7 +621,7 @@ export class AutomationEngine {
     // SAF-02: Parse retry logic
     if (!directive && !this.retryAttempted) {
       this.retryAttempted = true;
-      this.bus.emit('automation:error', 'Failed to parse directive from orchestrator response, retrying');
+      this.bus.emit('automation:warning', 'Failed to parse directive from orchestrator response, retrying');
 
       // Send clarifying re-prompt text (without Enter), then submit after delay
       try {
@@ -669,7 +669,7 @@ export class AutomationEngine {
       debugLog(`[onResponseReady] parse failed after retry — retrying again`);
       this.retryAttempted = false;  // Reset so the retry-prompt block above fires again
       this.actionLog.add('PARSE_FAILURE', stripped.slice(0, 200));
-      this.bus.emit('automation:error', 'Failed to parse orchestrator response, retrying again');
+      this.bus.emit('automation:warning', 'Failed to parse orchestrator response, retrying again');
 
       try {
         this.sessionManager.writeToSession(this.config.orchestratorSession, RETRY_PROMPT);
@@ -1337,7 +1337,7 @@ export class AutomationEngine {
     // Retry already attempted — retry again (unlimited)
     debugLog(`[onConsultationResponse] parse failed after retry — retrying again`);
     this.retryAttempted = false;  // Reset so the retry block above fires again
-    this.bus.emit('automation:error', 'Failed to parse consultation response, retrying again');
+    this.bus.emit('automation:warning', 'Failed to parse consultation response, retrying again');
 
     try {
       this.sessionManager.writeToSession(this.config.orchestratorSession, CONSULTATION_RETRY_PROMPT);
