@@ -20,7 +20,7 @@ import { RateLimiter } from './telegram/rate-limiter.js';
 import { HubStore } from './db/hub-store.js';
 import { SettingsStore } from './db/settings-store.js';
 import { AutomationStore } from './db/automation-store.js';
-import { registerCallbackHandlers, buildControlsKeyboard } from './telegram/keyboard.js';
+import { registerCallbackHandlers } from './telegram/keyboard.js';
 import { registerCommands, EphemeralTracker } from './telegram/commands.js';
 import { CommandAllowlist } from './security/allowlist.js';
 import { TerminalEmulator } from './terminal/emulator.js';
@@ -311,11 +311,6 @@ async function startPrimary(
   let shutdownFn: ((signal: string) => Promise<void>) | null = null;
   const ephemeralTracker = new EphemeralTracker(bot.api, config.ownerId);
   registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore);
-  bot.command('controls', async (ctx) => {
-    const result = await ctx.reply('Session controls:', { reply_markup: buildControlsKeyboard(true, settingsStore.get('enter_confirmation')) });
-    await ephemeralTracker.track((result as { message_id: number }).message_id);
-    try { await ctx.deleteMessage(); } catch { /* ignore */ }
-  });
   bot.on('message:text', inputHandler.handler());
   registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), screenCapture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { shutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, async (view: 'sessions' | 'automationHub' | 'automationDetails' | 'cli') => { hubRenderer.setHubView(view); await hubRenderer.render(); }, automationHub, settingsStore, (locked: boolean) => { hubRenderer.setCliScrollState(locked, settingsStore.get('enter_confirmation')); });
 
@@ -802,11 +797,6 @@ async function becomeNewPrimary(
     let promotedShutdownFn: ((signal: string) => Promise<void>) | null = null;
     const ephemeralTracker = new EphemeralTracker(bot.api, config.ownerId);
     registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore);
-    bot.command('controls', async (ctx) => {
-      const result = await ctx.reply('Session controls:', { reply_markup: buildControlsKeyboard(true, settingsStore.get('enter_confirmation')) });
-      await ephemeralTracker.track((result as { message_id: number }).message_id);
-      try { await ctx.deleteMessage(); } catch { /* ignore */ }
-    });
     bot.on('message:text', inputHandler.handler());
     registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), capture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { promotedShutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, async (view: 'sessions' | 'automationHub' | 'automationDetails' | 'cli') => { hubRenderer.setHubView(view); await hubRenderer.render(); }, promotedAutomationHub, settingsStore, (locked: boolean) => { hubRenderer.setCliScrollState(locked, settingsStore.get('enter_confirmation')); });
 

@@ -149,7 +149,7 @@ describe('registerCommands', () => {
       assert.ok(text.includes('/start'), 'should list /start');
       assert.ok(text.includes('/hub'), 'should list /hub');
       assert.ok(!text.includes('/sessions'), '/sessions should NOT be in help text');
-      assert.ok(text.includes('/controls'), 'should list /controls');
+      assert.ok(!text.includes('/controls'), '/controls should NOT be in help text');
       assert.ok(text.includes('/help'), 'should list /help');
       assert.ok(text.includes('<b>Inline buttons</b>'), 'should have inline buttons section');
       assert.ok(text.includes('<b>Text input</b>'), 'should have text input section');

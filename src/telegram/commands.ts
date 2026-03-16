@@ -5,7 +5,7 @@ import { isNotModifiedError } from './hub.js';
 
 /**
  * Tracks the last ephemeral bot message so it can be deleted when a new command is issued.
- * Prevents old /start, /help, /controls replies from piling up in the chat.
+ * Prevents old /start, /help replies from piling up in the chat.
  */
 export class EphemeralTracker {
   private lastMessageId: number | null = null;
@@ -86,7 +86,6 @@ export function registerCommands(
       '',
       '/start - Welcome message and quick start guide',
       '/hub - Show sessions hub with switch/disconnect buttons',
-      '/controls - Show session control buttons',
       '/help - This help message',
       '',
       '<b>Inline buttons</b>',
