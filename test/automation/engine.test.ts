@@ -2717,11 +2717,13 @@ describe('AutomationEngine', () => {
       assert.equal(engine.state, 'waiting-response', 'should be waiting for response');
 
       // Emit orchestrator output simulating echoed prompt containing worker's
-      // completion marker (✻) BEFORE the ● line — this is an echo of the prompt
-      // that was sent, not an actual response. The ✻ appears above ● because it's
-      // from the worker screen echo, and the stale ● is from prior Ink repaint.
+      // completion marker (✻) BEFORE a non-directive ● line. The ✻ is from the
+      // worker screen echo (above), and the ● is a stale Ink repaint fragment
+      // that is NOT a parseable directive (no COMMAND/SELECT/ENTER/etc keyword).
+      // Old code: hasOrchestratorResponse(●) && hasCompletionMarker(✻) => true (false positive)
+      // New code: hasCompletionMarkerAfterResponse checks ✻ is AFTER ● => false (correct)
       await emitOutput(bus, 'orchestrator',
-        '## Worker Terminal Output\r\n```\r\ntest results\r\n\u273B Crunched for 1m 22s\r\n```\r\n\r\n\u25CF COMMAND: npm test\r\n'
+        '## Worker Terminal Output\r\n```\r\ntest results\r\n\u273B Crunched for 1m 22s\r\n```\r\n\r\n\u25CF Here is my analysis of the worker output\r\n'
       );
 
       // Poll fires — should NOT trigger onResponseReady because ✻ is before ●

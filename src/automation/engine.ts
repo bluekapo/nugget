@@ -65,16 +65,20 @@ export function stripSpinners(text: string): string {
     .join('\n');
 }
 
-/** Check if the buffer contains a ● line at column 0 (proof the orchestrator responded).
- *  Requires ● at start of line — echoed worker screen content is indented, so
- *  indented ● lines (from prompt echo) won't match. */
-function hasOrchestratorResponse(text: string): boolean {
-  return text.split('\n').some(line => /^●/.test(line));
-}
-
-/** Check if the buffer contains a ✻ completion marker at column 0 (not indented/echoed). */
-function hasCompletionMarker(text: string): boolean {
-  return text.split('\n').some(line => /^\u273B\s+.+ for/.test(line));
+/** Check if buffer has both an orchestrator response (●) and a completion marker (✻)
+ *  where the marker appears AFTER the last ● line. Prevents matching echoed prompt markers
+ *  that appear before (above) the orchestrator's actual response. */
+function hasCompletionMarkerAfterResponse(text: string): boolean {
+  const lines = text.split('\n');
+  let lastBulletIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^●/.test(lines[i])) lastBulletIdx = i;
+  }
+  if (lastBulletIdx === -1) return false;
+  for (let i = lastBulletIdx + 1; i < lines.length; i++) {
+    if (/^\u273B\s+.+ for/.test(lines[i])) return true;
+  }
+  return false;
 }
 
 const RETRY_PROMPT = 'Your previous response could not be parsed as a valid directive. '
@@ -960,7 +964,7 @@ export class AutomationEngine {
         // Parse directives from the raw PTY buffer. The emulator viewport (40 rows)
         // is too small for the prompt echo + response, and Ink redraws in-place
         // so scrollback doesn't accumulate. The raw buffer captures everything.
-        const stripped = stripAnsi(this.responseBuffer);
+        const stripped = stripSpinners(stripAnsi(this.responseBuffer));
         const { directive, context: parsedContext } = parseDirectiveWithContext(stripped);
         debugLog(`[response-poll] bufLen=${this.responseBuffer.length} strippedLen=${stripped.length} hasDirective=${!!directive} hasContext=${!!parsedContext} tail300=${JSON.stringify(stripped.slice(-300))}`);
 
@@ -972,7 +976,7 @@ export class AutomationEngine {
           } else {
             this.onResponseReady();
           }
-        } else if (hasOrchestratorResponse(stripped) && hasCompletionMarker(stripped)) {
+        } else if (hasCompletionMarkerAfterResponse(stripped)) {
           debugLog(`[response-poll] completion marker found with ● response but no directive — triggering retry`);
           this.responsePollTimer = null;
           if (this.consultationMode) {
