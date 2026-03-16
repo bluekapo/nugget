@@ -151,8 +151,9 @@ describe('ScreenCapture', () => {
     assert.equal(events.length, 1, 'Initial event');
 
     // Full-screen redraw: cursor home + clear screen + new content
+    // Advance 800ms to account for redraw-aware debounce (cursor-positioning detected)
     await capture.onData('\x1b[H\x1b[2Jnew screen content\r\nfully replaced');
-    timer.advance(200);
+    timer.advance(800);
 
     assert.equal(events.length, 2, 'Should emit second event after redraw');
     assert.equal(events[1].mode, 'replace', 'Redraw should be replace mode');
@@ -351,8 +352,9 @@ describe('ScreenCapture', () => {
     assert.equal(events.length, 1, 'Initial event');
 
     // Write completely different content (clear and replace)
+    // Advance 800ms to account for redraw-aware debounce (cursor-positioning detected)
     await capture.onData('\x1b[H\x1b[2Jtotally different');
-    timer.advance(200);
+    timer.advance(800);
 
     assert.equal(events.length, 2, 'Should emit replace event');
     assert.equal(events[1].mode, 'replace', 'Should be replace mode');

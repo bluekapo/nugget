@@ -43,9 +43,17 @@ const defaultTimer: TimerProvider = {
 };
 
 export class ScreenCapture {
+  /**
+   * Regex for cursor-positioning / erase sequences that indicate terminal redraw.
+   * Matches: cursor up/down (A/B), cursor home/position (H), erase display (J), erase line (K).
+   * Does NOT match: SGR/color (m), mode set/reset (h/l), cursor forward/back (C/D).
+   */
+  private static readonly REDRAW_RE = /\x1b\[(?:\d*[ABH]|\d+;\d+H|[012]?[JK])/;
+
   private lastSnapshot = '';
   private debounceTimer: unknown = null;
   private pendingCapture = false;
+  private redrawDetected = false;
   private captureCount = 0;
   private _scrollLocked = true;
 
@@ -56,6 +64,7 @@ export class ScreenCapture {
   private readonly burstWindow: number;
   private readonly baseDelay: number;
   private readonly burstDelay: number;
+  private readonly redrawDelay: number;
 
   // maxWait cap: prevents sustained bursts from starving capture indefinitely.
   // When the first write of a burst arrives, burstStartTime records that moment.
@@ -96,6 +105,7 @@ export class ScreenCapture {
       burstWindow?: number;
       baseDelay?: number;
       burstDelay?: number;
+      redrawDelay?: number;
       maxWait?: number;
       idleDelay?: number;
       execIdleDelay?: number;
@@ -108,6 +118,7 @@ export class ScreenCapture {
     this.burstWindow = opts?.burstWindow ?? 500;
     this.baseDelay = opts?.baseDelay ?? 150;
     this.burstDelay = opts?.burstDelay ?? 800;
+    this.redrawDelay = opts?.redrawDelay ?? opts?.burstDelay ?? 800;
     this.maxWait = opts?.maxWait ?? 3000;
     this.idleDelay = opts?.idleDelay ?? 5000;
     this.execIdleDelay = opts?.execIdleDelay ?? 3000;
@@ -144,6 +155,12 @@ export class ScreenCapture {
    * Returns a Promise that resolves when the write is processed.
    */
   async onData(data: string): Promise<void> {
+    // Detect cursor-positioning escape sequences before feeding to emulator
+    // (sequences are consumed by emulator.write and not visible afterward)
+    if (ScreenCapture.REDRAW_RE.test(data)) {
+      this.redrawDetected = true;
+    }
+
     await this.emulator.write(data);
     this.pendingCapture = true;
     this.recordWrite();
@@ -231,6 +248,7 @@ export class ScreenCapture {
     this.cancelIdleTimer();
     this.cancelExecIdleTimer();
     this.pendingCapture = false;
+    this.redrawDetected = false;
     this.emulator.reset();
     this.lastSnapshot = '';
     this.captureCount = 0;
@@ -297,6 +315,11 @@ export class ScreenCapture {
   }
 
   private getAdaptiveDelay(): number {
+    // Redraw in progress: use extended delay to let Ink finish
+    if (this.redrawDetected) {
+      return this.redrawDelay;
+    }
+
     const now = this.timer.now();
     // Count recent writes within burst window
     const recentCount = this.writeTimestamps.filter(
@@ -318,6 +341,7 @@ export class ScreenCapture {
     if (!this.pendingCapture) return;
     this.pendingCapture = false;
     this.burstStartTime = null;
+    this.redrawDetected = false;
 
     // When scroll is unlocked, user is browsing history -- don't update Telegram.
     // Data is already in the emulator from onData(). Re-locking via toggleLock()
