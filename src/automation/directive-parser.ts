@@ -1,4 +1,5 @@
 import type { Directive, ParseResult } from './types.js';
+import { logDebug } from '../logging/logger.js';
 
 /**
  * Regex matching directive keyword lines that should terminate continuation collection.
@@ -53,6 +54,7 @@ function splitMidLineDirectives(text: string): string {
  * Returns null if no valid directive is found (never throws).
  */
 export function parseDirective(text: string): Directive | null {
+  logDebug(`[directive-parser] parseDirective(${text.length} chars)`);
   const lines = text.split('\n');
 
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -258,6 +260,7 @@ function parseDirectiveRelaxed(text: string): Directive | null {
  * TUI rendering both CONTEXT and COMMAND under a single ● bullet.
  */
 export function parseDirectiveWithContext(text: string): ParseResult {
+  logDebug(`[directive-parser] parseDirectiveWithContext(${text.length} chars)`);
   // Normalize mid-line directive keywords caused by terminal wrapping before
   // any parsing. This ensures COMMAND:/ESCALATE:/DONE: start their own lines
   // even when the TUI wrapped them after CONTEXT continuation text.

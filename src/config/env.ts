@@ -5,6 +5,7 @@ export interface AppConfig {
   commandAllowlist: string | undefined;
   maxSessions: number;
   runtime: 'sandbox' | 'container';
+  logTtlHours: number;
 }
 
 export function loadConfig(): AppConfig {
@@ -45,5 +46,14 @@ export function loadConfig(): AppConfig {
     runtime = nuggetRuntime;
   }
 
-  return { botToken, ownerId, dbPath, commandAllowlist, maxSessions, runtime };
+  const logTtlStr = process.env.LOG_TTL_HOURS;
+  let logTtlHours = 24;
+  if (logTtlStr !== undefined) {
+    logTtlHours = parseInt(logTtlStr, 10);
+    if (isNaN(logTtlHours) || logTtlHours < 1) {
+      throw new Error('LOG_TTL_HOURS must be a positive integer');
+    }
+  }
+
+  return { botToken, ownerId, dbPath, commandAllowlist, maxSessions, runtime, logTtlHours };
 }

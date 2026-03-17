@@ -10,6 +10,7 @@
  */
 
 import type { TimerProvider } from './capture.js';
+import { logDebug } from '../logging/logger.js';
 
 /** Default timer using real global setTimeout/clearTimeout/Date.now */
 const defaultTimer: TimerProvider = {
@@ -89,6 +90,7 @@ export class CompletionTracker {
    * Reset detection state for a session (called when user sends input).
    */
   markInputSent(sessionName: string): void {
+    logDebug(`[completion-tracker] markInputSent('${sessionName}')`);
     const state = this.sessions.get(sessionName);
     if (!state) return;
     state.crunched = false;
@@ -99,6 +101,7 @@ export class CompletionTracker {
    * Clean up timers and state for a session (called on session exit).
    */
   removeSession(sessionName: string): void {
+    logDebug(`[completion-tracker] removeSession('${sessionName}')`);
     const state = this.sessions.get(sessionName);
     if (!state) return;
     this.cancelIdleTimer(state);

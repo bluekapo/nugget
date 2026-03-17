@@ -1,4 +1,5 @@
 import type { ActionEntry, CompressedActionLog } from './types.js';
+import { logDebug } from '../logging/logger.js';
 
 export class ActionLog {
   private entries: ActionEntry[] = [];
@@ -9,6 +10,7 @@ export class ActionLog {
   }
 
   add(action: string, outcome: string): void {
+    logDebug(`[action-log] add(action='${action.slice(0, 60)}', outcome='${outcome.slice(0, 60)}')`);
     this.entries.push({ action, outcome, timestamp: Date.now() });
     // No hard cap -- compression via getCompressed() handles scaling
   }
@@ -92,6 +94,7 @@ export class ActionLog {
   }
 
   clear(): void {
+    logDebug(`[action-log] clear() — removing ${this.entries.length} entries`);
     this.entries = [];
   }
 }

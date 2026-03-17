@@ -3,6 +3,7 @@ import type { Bot } from 'grammy';
 import type { SessionManager } from '../session/manager.js';
 import type { SessionRouter } from '../session/router.js';
 import type { SettingsStore } from '../db/settings-store.js';
+import { logDebug, logInfo, logWarn } from '../logging/logger.js';
 
 /** Safely answer a callback query, ignoring "query is too old" and "query ID invalid" errors.
  *  These occur when a user clicks an inline button after Telegram's ~30s window expires. */
@@ -109,6 +110,8 @@ export function registerCallbackHandlers(
   // Enter confirmation: double-press state
   let enterPendingConfirm = false;
   let enterConfirmTimer: ReturnType<typeof setTimeout> | null = null;
+  logDebug('[keyboard] Registering callback handlers');
+
   // Delete button -- removes the bot message it's attached to (no session required)
   bot.callbackQuery('action:delete', async (ctx) => {
     try {
@@ -203,6 +206,7 @@ export function registerCallbackHandlers(
   // Hub: switch session
   bot.callbackQuery(/^hub:switch:(.+)$/, async (ctx) => {
     const name = ctx.match![1];
+    logInfo(`[keyboard] Switch session to '${name}'`);
     router.switchTo(name);
     await safeAnswer(ctx, { text: `Switched to ${name}` });
   });
@@ -210,6 +214,7 @@ export function registerCallbackHandlers(
   // Hub: disconnect session
   bot.callbackQuery(/^hub:disconnect:(.+)$/, async (ctx) => {
     const name = ctx.match![1];
+    logInfo(`[keyboard] Disconnect session '${name}'`);
     if (router.isRemote(name)) {
       // Remote session: send exit command to kill the secondary, then remove from router
       const bridge = router.getRemoteBridge(name);

@@ -11,6 +11,7 @@ import { createRequire } from 'node:module';
 import type { Terminal as TerminalType, IBufferLine } from '@xterm/headless';
 
 import { TERMINAL_COLS, TERMINAL_ROWS } from './constants.js';
+import { logDebug } from '../logging/logger.js';
 
 // @xterm/headless is CJS-only; use createRequire for ESM compatibility
 const require = createRequire(import.meta.url);
@@ -24,6 +25,7 @@ export class TerminalEmulator {
    * Defaults to TERMINAL_COLS x TERMINAL_ROWS from shared constants.
    */
   constructor(cols: number = TERMINAL_COLS, rows: number = TERMINAL_ROWS) {
+    logDebug(`[emulator] Creating terminal ${cols}x${rows}`);
     this.terminal = new Terminal({
       cols,
       rows,
@@ -247,6 +249,7 @@ export class TerminalEmulator {
    * Both PTY and emulator must stay in sync via shared constants.
    */
   resize(cols: number, rows: number): void {
+    logDebug(`[emulator] resize(${cols}x${rows})`);
     this.terminal.resize(cols, rows);
   }
 
@@ -267,6 +270,7 @@ export class TerminalEmulator {
    * Use on session switch so the emulator doesn't carry stale content from the previous session.
    */
   reset(): void {
+    logDebug('[emulator] reset()');
     this.terminal.reset();
   }
 
@@ -275,6 +279,7 @@ export class TerminalEmulator {
    * The emulator should not be used after calling this.
    */
   dispose(): void {
+    logDebug('[emulator] dispose()');
     this.terminal.dispose();
   }
 }

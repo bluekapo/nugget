@@ -1,3 +1,5 @@
+import { logDebug } from '../logging/logger.js';
+
 /**
  * Escape HTML special characters for safe embedding in Telegram HTML mode.
  * Order matters: & must be escaped first to avoid double-escaping.
@@ -14,6 +16,7 @@ function escapeHtml(text: string): string {
  * Optionally prepend a bold header line above the <pre> block.
  */
 export function wrapPre(text: string, header?: string | null): string {
+  logDebug(`[html] wrapPre(${text.length} chars, header=${header ? `'${header}'` : 'none'})`);
   const pre = `<pre>${escapeHtml(text)}</pre>`;
   if (header) return `<b>${escapeHtml(header)}</b>\n${pre}`;
   return pre;

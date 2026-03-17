@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { logDebug } from '../logging/logger.js';
 
 export interface MessageRow {
   id: number;
@@ -35,18 +36,23 @@ export class MessageStore {
   }
 
   save(sessionName: string, telegramMessageId: number, content: string, sequenceNum: number): void {
+    logDebug(`[messages] save(session='${sessionName}', msgId=${telegramMessageId}, seq=${sequenceNum}, len=${content.length})`);
     this.insertStmt.run(sessionName, telegramMessageId, content, sequenceNum);
   }
 
   getBySession(sessionName: string): MessageRow[] {
-    return this.getBySessionStmt.all(sessionName) as MessageRow[];
+    const rows = this.getBySessionStmt.all(sessionName) as MessageRow[];
+    logDebug(`[messages] getBySession('${sessionName}'): ${rows.length} message(s)`);
+    return rows;
   }
 
   deleteBySession(sessionName: string): void {
+    logDebug(`[messages] deleteBySession('${sessionName}')`);
     this.deleteBySessionStmt.run(sessionName);
   }
 
   updateStatus(sessionName: string, status: string): void {
+    logDebug(`[messages] updateStatus('${sessionName}', '${status}')`);
     this.updateStatusStmt.run(status, sessionName);
   }
 }

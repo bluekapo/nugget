@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { logDebug } from '../logging/logger.js';
 
 export interface BusEvents {
   'session:output': (sessionName: string, data: string) => void;
@@ -21,6 +22,10 @@ export class EventBus {
   }
 
   emit<K extends keyof BusEvents>(event: K, ...args: Parameters<BusEvents[K]>): void {
+    // Log all events except high-frequency session:output to avoid log spam
+    if (event !== 'session:output') {
+      logDebug(`[bus] emit('${event}', ${args.map(a => typeof a === 'string' ? `'${a}'` : String(a)).join(', ')})`);
+    }
     this.emitter.emit(event, ...args);
   }
 

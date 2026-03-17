@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { logDebug } from '../logging/logger.js';
 
 /** Persists user settings (key-value) in SQLite. */
 export class SettingsStore {
@@ -9,11 +10,14 @@ export class SettingsStore {
     const row = this.db.prepare(
       'SELECT value FROM settings WHERE key = ?'
     ).get(key) as { value: string } | undefined;
-    return row?.value === 'true';
+    const result = row?.value === 'true';
+    logDebug(`[settings] get('${key}'): ${result}`);
+    return result;
   }
 
   /** Set a boolean setting by key. */
   set(key: string, value: boolean): void {
+    logDebug(`[settings] set('${key}', ${value})`);
     const now = new Date().toISOString();
     this.db.prepare(
       'INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at'
@@ -25,13 +29,19 @@ export class SettingsStore {
     const row = this.db.prepare(
       'SELECT value FROM settings WHERE key = ?'
     ).get(key) as { value: string } | undefined;
-    if (!row) return defaultValue;
+    if (!row) {
+      logDebug(`[settings] getNumber('${key}'): not found, using default ${defaultValue}`);
+      return defaultValue;
+    }
     const parsed = parseInt(row.value, 10);
-    return Number.isNaN(parsed) ? defaultValue : parsed;
+    const result = Number.isNaN(parsed) ? defaultValue : parsed;
+    logDebug(`[settings] getNumber('${key}'): ${result}`);
+    return result;
   }
 
   /** Set a numeric setting by key. */
   setNumber(key: string, value: number): void {
+    logDebug(`[settings] setNumber('${key}', ${value})`);
     const now = new Date().toISOString();
     this.db.prepare(
       'INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at'

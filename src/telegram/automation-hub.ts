@@ -15,7 +15,7 @@ import type { AutomationEngine, EngineConfig } from '../automation/engine.js';
 import { engineStateLabel } from '../automation/engine.js';
 import type { EventBus } from '../events/bus.js';
 import { isNotModifiedError, isMessageNotFoundError } from './hub.js';
-import { logError } from '../logging/logger.js';
+import { logDebug, logInfo, logError } from '../logging/logger.js';
 import type { AutomationStore } from '../db/automation-store.js';
 
 export interface PendingCreation {
@@ -168,6 +168,7 @@ export class AutomationHubRenderer {
    * Returns a string suitable for answerCallbackQuery text.
    */
   async handleCallback(data: string): Promise<string> {
+    logDebug(`[automation-hub] handleCallback('${data}')`);
     if (data === 'auto:new') {
       this.pendingCreation = { step: 'select-worker' };
       await this.onRender?.();
@@ -296,6 +297,7 @@ export class AutomationHubRenderer {
    * bus events, starts engine, transitions to active automation state.
    */
   async completeCreation(taskDescription: string): Promise<void> {
+    logInfo(`[automation-hub] completeCreation(worker='${this.pendingCreation?.workerSession}', orch='${this.pendingCreation?.orchestratorSession}')`);
     if (!this.pendingCreation || (this.pendingCreation.step !== 'enter-task' && this.pendingCreation.step !== 'confirm-task')) return;
     if (!this.pendingCreation.workerSession || !this.pendingCreation.orchestratorSession) return;
 
@@ -436,6 +438,7 @@ export class AutomationHubRenderer {
 
   /** Clean up bus listeners and stop all engines. */
   dispose(): void {
+    logInfo(`[automation-hub] dispose() — stopping ${this.activeAutomations.size} automation(s)`);
     for (const [id] of this.activeAutomations) {
       this.removeAutomation(id);
     }
@@ -467,6 +470,7 @@ export class AutomationHubRenderer {
 
   /** Restore automations from SQLite after promotion. Returns count of restored automations. */
   async restoreFromStore(): Promise<number> {
+    logInfo('[automation-hub] restoreFromStore()');
     if (!this.automationStore) return 0;
     const persisted = this.automationStore.loadAll();
     let restored = 0;

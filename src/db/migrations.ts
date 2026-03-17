@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { logDebug, logInfo } from '../logging/logger.js';
 
 interface Migration {
   version: number;
@@ -95,11 +96,21 @@ const migrations: Migration[] = [
 
 export function runMigrations(db: Database.Database): void {
   const currentVersion = db.pragma('user_version', { simple: true }) as number;
+  logDebug(`[migrations] Current schema version: ${currentVersion}, latest: ${migrations[migrations.length - 1]?.version ?? 0}`);
 
+  let applied = 0;
   for (const migration of migrations) {
     if (migration.version > currentVersion) {
+      logInfo(`[migrations] Applying migration v${migration.version}`);
       db.exec(migration.up);
       db.pragma(`user_version = ${migration.version}`);
+      applied++;
     }
+  }
+
+  if (applied > 0) {
+    logInfo(`[migrations] Applied ${applied} migration(s), now at v${db.pragma('user_version', { simple: true })}`);
+  } else {
+    logDebug('[migrations] Schema up to date, no migrations needed');
   }
 }

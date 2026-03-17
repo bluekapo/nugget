@@ -1,6 +1,7 @@
 import type { Context, NextFunction } from 'grammy';
 import type { SessionManager } from '../session/manager.js';
 import type { CommandAllowlist } from '../security/allowlist.js';
+import { logDebug, logInfo, logWarn } from '../logging/logger.js';
 
 /**
  * Handles text messages from Telegram and forwards them to the active PTY session.
@@ -30,18 +31,22 @@ export class TelegramInputHandler {
       const text = ctx.message?.text;
       if (!text) return next();
 
+      logDebug(`[input] Received text message: ${text.slice(0, 80)}${text.length > 80 ? '...' : ''}`);
+
       // Only let grammY handle known bot commands; forward everything else to PTY
       if (text.startsWith('/')) {
         const match = text.match(/^\/([a-zA-Z0-9_]+)/);
         const command = match?.[1];
         if (command && TelegramInputHandler.BOT_COMMANDS.has(command)) {
+          logDebug(`[input] Delegating bot command /${command} to grammY`);
           return next(); // Let grammY handle this bot command
         }
-        // Not a bot command — fall through to forward to PTY
+        logDebug(`[input] Non-bot command '${text.slice(0, 40)}' — forwarding to PTY`);
       }
 
       // Intercept text input for automation hub task description
       if (this.automationHub?.isAwaitingTaskInput()) {
+        logInfo(`[input] Intercepting text for automation task input`);
         await this.automationHub.submitTaskForReview(text);
         try { await ctx.deleteMessage(); } catch { /* ignore */ }
         return;
@@ -49,16 +54,19 @@ export class TelegramInputHandler {
 
       const sessionName = this.getActiveSession();
       if (sessionName === null) {
+        logWarn('[input] No active session for text message');
         await ctx.reply('No active session. Use /hub to see available sessions.');
         return;
       }
 
       if (!this.allowlist.isAllowed(text)) {
+        logWarn(`[input] Command blocked by allowlist: ${text.slice(0, 50)}`);
         await ctx.reply(`Command not allowed. Allowed: ${this.allowlist.describe()}`);
         try { await ctx.deleteMessage(); } catch { /* ignore */ }
         return;
       }
 
+      logDebug(`[input] Forwarding to session '${sessionName}': ${text.slice(0, 50)}`);
       this.sessionManager.writeToSession(sessionName, text);
       // Auto-delete the user's message to keep chat clean
       try {

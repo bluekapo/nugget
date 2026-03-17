@@ -1,6 +1,6 @@
 import type { EventBus } from '../events/bus.js';
 import type { RemoteSessionBridge, RemoteSessionMeta } from '../telegram/bot.js';
-import { logInfo } from '../logging/logger.js';
+import { logDebug, logInfo } from '../logging/logger.js';
 
 export class SessionRouter {
   private _activeSession: string | null = null;
@@ -24,11 +24,13 @@ export class SessionRouter {
   }
 
   add(name: string): void {
+    logDebug(`[router] add('${name}')`);
     this.sessions.add(name);
   }
 
   remove(name: string): void {
     if (!this.sessions.has(name)) return;
+    logDebug(`[router] remove('${name}')`);
     this.sessions.delete(name);
 
     if (this._activeSession === name) {
@@ -40,6 +42,7 @@ export class SessionRouter {
 
   /** Register a remote session (PTY lives in another process). */
   addRemote(name: string, bridge: RemoteSessionBridge, meta?: RemoteSessionMeta): void {
+    logInfo(`[router] addRemote('${name}', pid=${meta?.pid})`);
     this.sessions.add(name);
     this.remoteSessions.set(name, bridge);
     if (meta) {
@@ -49,6 +52,7 @@ export class SessionRouter {
 
   /** Unregister a remote session. */
   removeRemote(name: string): void {
+    logInfo(`[router] removeRemote('${name}')`);
     this.remoteSessions.delete(name);
     this.remoteMetadata.delete(name);
     this.remove(name);

@@ -1,4 +1,5 @@
 import type { ContextPacket, ConsultationPacket, FollowUpPacket, CompressedActionLog } from './types.js';
+import { logDebug } from '../logging/logger.js';
 
 /** Render the action log section (shared between buildPrompt and buildConsultationPrompt). */
 function renderActionLog(lines: string[], actionLog: CompressedActionLog, cycleNumber: number): void {
@@ -32,6 +33,7 @@ function renderActionLog(lines: string[], actionLog: CompressedActionLog, cycleN
 }
 
 export function buildPrompt(ctx: ContextPacket): string {
+  logDebug(`[prompt-builder] buildPrompt(cycle=${ctx.cycleNumber}, workerScreen=${ctx.workerScreen.length} chars)`);
   const lines: string[] = [];
 
   // Role explanation — must be extremely explicit to prevent the orchestrator
@@ -126,6 +128,7 @@ export function buildPrompt(ctx: ContextPacket): string {
 }
 
 export function buildFollowUpPrompt(ctx: FollowUpPacket): string {
+  logDebug(`[prompt-builder] buildFollowUpPrompt(cycle=${ctx.cycleNumber})`);
   const lines: string[] = [];
 
   lines.push(`## Cycle ${ctx.cycleNumber}`);
@@ -154,6 +157,7 @@ export function buildFollowUpPrompt(ctx: FollowUpPacket): string {
 }
 
 export function buildConsultationPrompt(ctx: ConsultationPacket): string {
+  logDebug(`[prompt-builder] buildConsultationPrompt(cycle=${ctx.cycleNumber}, idleDuration=${ctx.idleDurationMs}ms)`);
   const lines: string[] = [];
 
   lines.push('## Your Role');

@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { Session, SessionStatus } from '../session/types.js';
+import { logDebug, logInfo, logWarn } from '../logging/logger.js';
 
 interface SessionRow {
   id: number;
@@ -76,29 +77,36 @@ export class SessionStore {
   }
 
   create(name: string): Session {
+    logDebug(`[sessions] Creating session record: ${name}`);
     const row = this.insertStmt.get(name) as SessionRow;
+    logInfo(`[sessions] Session record created: ${name} (id=${row.id})`);
     return rowToSession(row);
   }
 
   findByName(name: string): Session | null {
     const row = this.findByNameStmt.get(name) as SessionRow | undefined;
+    logDebug(`[sessions] findByName('${name}'): ${row ? `found (status=${row.status})` : 'not found'}`);
     return row ? rowToSession(row) : null;
   }
 
   updateStatus(name: string, status: SessionStatus): void {
+    logDebug(`[sessions] updateStatus('${name}', '${status}')`);
     this.updateStatusStmt.run(status, name);
   }
 
   updatePid(name: string, pid: number): void {
+    logDebug(`[sessions] updatePid('${name}', ${pid})`);
     this.updatePidStmt.run(pid, name);
   }
 
   getActive(): Session[] {
     const rows = this.getActiveStmt.all() as SessionRow[];
+    logDebug(`[sessions] getActive(): ${rows.length} active session(s)`);
     return rows.map(rowToSession);
   }
 
   delete(name: string): void {
+    logDebug(`[sessions] Deleting session record: ${name}`);
     this.deleteStmt.run(name);
   }
 
@@ -106,12 +114,14 @@ export class SessionStore {
    *  Preserves rows for PIDs that are still alive (e.g. another running instance). */
   cleanupStale(): number {
     const rows = this.getStaleStmt.all() as SessionRow[];
+    logDebug(`[sessions] cleanupStale(): checking ${rows.length} potentially stale record(s)`);
     let deleted = 0;
     for (const row of rows) {
       if (row.pid != null && isPidAlive(row.pid)) {
-        // PID is alive — this session belongs to another running process, skip it
+        logDebug(`[sessions] Skipping stale check for '${row.name}' — PID ${row.pid} is alive`);
         continue;
       }
+      logWarn(`[sessions] Removing stale session '${row.name}' (pid=${row.pid}, status=${row.status})`);
       this.deleteByIdStmt.run(row.id);
       deleted++;
     }

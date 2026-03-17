@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { logDebug, logInfo } from '../logging/logger.js';
 
 export interface PersistedAutomation {
   id: number;
@@ -18,6 +19,8 @@ export class AutomationStore {
 
   /** Insert or update an automation record (upsert by id). */
   save(auto: PersistedAutomation): void {
+    logDebug(`[automation-store] save(id=${auto.id}, worker='${auto.workerSession}', state='${auto.engineState}', cycles=${auto.cycleCount})`);
+
     this.db.prepare(
       `INSERT INTO automations (id, worker_session, orchestrator_session, task_description, engine_state, cycle_count, last_action, action_log_json, start_time, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
@@ -46,6 +49,8 @@ export class AutomationStore {
 
   /** Load all persisted automation records. */
   loadAll(): PersistedAutomation[] {
+    logDebug('[automation-store] loadAll()');
+
     const rows = this.db.prepare('SELECT * FROM automations').all() as Array<{
       id: number;
       worker_session: string;
@@ -58,6 +63,7 @@ export class AutomationStore {
       start_time: number;
     }>;
 
+    logInfo(`[automation-store] Loaded ${rows.length} persisted automation(s)`);
     return rows.map((row) => ({
       id: row.id,
       workerSession: row.worker_session,
@@ -73,11 +79,13 @@ export class AutomationStore {
 
   /** Remove a single automation record by id. */
   remove(id: number): void {
+    logDebug(`[automation-store] remove(id=${id})`);
     this.db.prepare('DELETE FROM automations WHERE id = ?').run(id);
   }
 
   /** Remove all automation records. */
   clearAll(): void {
+    logDebug('[automation-store] clearAll()');
     this.db.prepare('DELETE FROM automations').run();
   }
 }

@@ -4,6 +4,8 @@
  * Patterns are comma-separated strings, optionally containing `*` for glob matching.
  * When disabled (undefined or '*'), all commands are allowed.
  */
+import { logDebug, logInfo, logWarn } from '../logging/logger.js';
+
 export class CommandAllowlist {
   private enabled: boolean;
   private patterns: RegExp[];
@@ -11,6 +13,7 @@ export class CommandAllowlist {
 
   constructor(allowlistConfig: string | undefined) {
     if (allowlistConfig === undefined || allowlistConfig === '*') {
+      logDebug('[allowlist] Disabled (all commands allowed)');
       this.enabled = false;
       this.patterns = [];
       this.patternSources = [];
@@ -30,6 +33,7 @@ export class CommandAllowlist {
       return new RegExp(`^${regexStr}$`, 'i');
     });
     this.enabled = true;
+    logInfo(`[allowlist] Enabled with ${this.patterns.length} pattern(s): ${this.patternSources.join(', ')}`);
   }
 
   /** Returns true if the input command is allowed (passes allowlist check). */
@@ -38,7 +42,11 @@ export class CommandAllowlist {
       return true;
     }
     const trimmed = input.trim();
-    return this.patterns.some((re) => re.test(trimmed));
+    const allowed = this.patterns.some((re) => re.test(trimmed));
+    if (!allowed) {
+      logWarn(`[allowlist] Blocked command: ${trimmed.slice(0, 50)}`);
+    }
+    return allowed;
   }
 
   /** Returns a human-readable description of the allowlist configuration. */

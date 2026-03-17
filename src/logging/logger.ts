@@ -5,7 +5,7 @@
  * This prevents interleaving with PTY data that corrupts the terminal display.
  */
 
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { logDir } from '../config/paths.js';
 
@@ -25,6 +25,10 @@ function fmt(...args: unknown[]): string {
   }).join(' ');
 }
 
+export function logDebug(...args: unknown[]): void {
+  try { appendFileSync(LOG_PATH, `${ts()} DEBUG ${fmt(...args)}\n`); } catch { /* ignore */ }
+}
+
 export function logInfo(...args: unknown[]): void {
   try { appendFileSync(LOG_PATH, `${ts()} INFO  ${fmt(...args)}\n`); } catch { /* ignore */ }
 }
@@ -35,4 +39,30 @@ export function logWarn(...args: unknown[]): void {
 
 export function logError(...args: unknown[]): void {
   try { appendFileSync(LOG_PATH, `${ts()} ERROR ${fmt(...args)}\n`); } catch { /* ignore */ }
+}
+
+/**
+ * Delete log files older than the given TTL from the log directory.
+ * Called on primary startup to prevent unbounded log accumulation.
+ */
+export function cleanOldLogs(ttlHours: number): void {
+  const cutoff = Date.now() - ttlHours * 60 * 60 * 1000;
+  try {
+    const files = readdirSync(logDir);
+    let cleaned = 0;
+    for (const file of files) {
+      if (!file.endsWith('.log')) continue;
+      const filePath = join(logDir, file);
+      try {
+        const stat = statSync(filePath);
+        if (stat.mtimeMs < cutoff) {
+          unlinkSync(filePath);
+          cleaned++;
+        }
+      } catch { /* ignore individual file errors */ }
+    }
+    if (cleaned > 0) {
+      logInfo(`Cleaned ${cleaned} log file(s) older than ${ttlHours}h`);
+    }
+  } catch { /* ignore directory read errors */ }
 }

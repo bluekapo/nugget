@@ -1,4 +1,5 @@
 import type { Directive } from './types.js';
+import { logDebug, logInfo } from '../logging/logger.js';
 
 export interface ExecutionResult {
   executed: boolean;
@@ -11,6 +12,7 @@ export function executeDirective(
   directive: Directive,
   writeFn: (data: string) => void,
 ): ExecutionResult {
+  logInfo(`[action-executor] executeDirective(type='${directive.type}')`);
   switch (directive.type) {
     case 'COMMAND':
       writeFn(directive.command + '\r');

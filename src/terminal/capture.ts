@@ -10,6 +10,7 @@
 import { TerminalEmulator } from './emulator.js';
 import { cleanViewportText } from './viewport.js';
 import type { EventBus } from '../events/bus.js';
+import { logDebug } from '../logging/logger.js';
 
 /**
  * OutputEvent — the contract between ScreenCapture and downstream consumers.
@@ -191,6 +192,7 @@ export class ScreenCapture {
    * Call before session detach/exit to flush the last frame.
    */
   flush(): void {
+    logDebug('[capture] flush()');
     this.cancelTimer();
     if (this.pendingCapture) {
       this.capture();
@@ -248,6 +250,7 @@ export class ScreenCapture {
    * new session output.
    */
   resetBaseline(): void {
+    logDebug('[capture] resetBaseline()');
     this.cancelTimer();
     this.cancelIdleTimer();
     this.cancelExecIdleTimer();
@@ -269,6 +272,7 @@ export class ScreenCapture {
    * the user sends a new prompt.
    */
   markInputSent(): void {
+    logDebug('[capture] markInputSent()');
     this.crunched = false;
     this.cancelIdleTimer();
     this.cancelExecIdleTimer();
@@ -282,6 +286,7 @@ export class ScreenCapture {
    * The ScreenCapture should not be used after calling this.
    */
   dispose(): void {
+    logDebug('[capture] dispose()');
     this.cancelTimer();
     this.cancelIdleTimer();
     this.cancelExecIdleTimer();

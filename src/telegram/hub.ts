@@ -3,7 +3,7 @@ import type { HubStore } from '../db/hub-store.js';
 import type { AutomationHubRenderer } from './automation-hub.js';
 import type { RateLimiter } from './rate-limiter.js';
 import { engineStateLabel } from '../automation/engine.js';
-import { logError } from '../logging/logger.js';
+import { logDebug, logInfo, logError } from '../logging/logger.js';
 import { ACTION_BUTTONS } from './keyboard.js';
 import { wrapPre } from '../output/html.js';
 
@@ -93,6 +93,7 @@ export class HubRenderer {
 
   /** Set the hub view to one of the three navigation states. */
   setHubView(view: HubViewState): void {
+    logDebug(`[hub] setHubView('${view}')`);
     this.hubViewState = view;
   }
 
@@ -222,6 +223,7 @@ export class HubRenderer {
 
   /** Delete the hub message entirely and clear persisted state. */
   async delete(): Promise<void> {
+    logDebug(`[hub] delete() hubMessageId=${this.hubMessageId}`);
     if (this.hubMessageId === null) return;
     try {
       await this.api.deleteMessage(this.chatId, this.hubMessageId);

@@ -2,6 +2,7 @@ import type { EventBus } from '../events/bus.js';
 import type { SessionStore } from '../db/sessions.js';
 import type { Session } from './types.js';
 import type { PtyOptions } from './pty.js';
+import { logDebug, logInfo, logWarn, logError } from '../logging/logger.js';
 
 // Lazy import to avoid loading node-pty native module when a custom SpawnFn is provided (e.g. tests)
 let _runtimeMode: 'sandbox' | 'container' = 'sandbox';
@@ -61,8 +62,11 @@ export class SessionManager {
   }
 
   async start(name: string, opts?: { cols?: number; rows?: number; containerName?: string }): Promise<Session> {
+    logInfo(`[manager] Starting session '${name}' (active=${this.activePtys.size}/${this.maxSessions})`);
+
     // Check MAX_SESSIONS limit
     if (this.activePtys.size >= this.maxSessions) {
+      logWarn(`[manager] MAX_SESSIONS limit reached (${this.maxSessions})`);
       throw new Error(`Maximum ${this.maxSessions} concurrent sessions reached`);
     }
 
@@ -70,10 +74,10 @@ export class SessionManager {
     const existing = this.store.findByName(name);
     if (existing) {
       if (existing.status === 'stopped' || existing.status === 'stopping') {
-        // Remove stale record so the name can be reused.
-        // 'stopping' can linger if onExit never fired (PTY kill race, process exit).
+        logDebug(`[manager] Removing stale record for '${name}' (status=${existing.status})`);
         this.store.delete(name);
       } else {
+        logWarn(`[manager] Session '${name}' already exists (status=${existing.status})`);
         throw new Error(`Session "${name}" already exists (status: ${existing.status})`);
       }
     }
@@ -82,8 +86,10 @@ export class SessionManager {
     this.store.create(name);
 
     // Spawn PTY (lazy-load default spawnFn if none was provided)
+    logDebug(`[manager] Spawning PTY for '${name}' (runtime=${_runtimeMode})`);
     const spawnFn = this.spawnFn ?? await getDefaultSpawnFn();
     const ptyProcess = spawnFn({ name, containerName: opts?.containerName, cols: opts?.cols, rows: opts?.rows });
+    logInfo(`[manager] PTY spawned for '${name}' (pid=${ptyProcess.pid})`);
 
     const disposables: Array<{ dispose(): void }> = [];
 
@@ -95,6 +101,7 @@ export class SessionManager {
 
     // Wire onExit -> store.updateStatus('stopped') + bus 'session:exit'
     const exitDisposable = ptyProcess.onExit(({ exitCode }) => {
+      logInfo(`[manager] PTY exited for '${name}' (exitCode=${exitCode})`);
       this.store.updateStatus(name, 'stopped');
       this.bus.emit('session:exit', name, exitCode);
 
@@ -119,14 +126,17 @@ export class SessionManager {
     // Return session from store
     const session = this.store.findByName(name);
     if (!session) {
+      logError(`[manager] Session '${name}' not found in store after creation`);
       throw new Error(`Session "${name}" not found after creation`);
     }
     return session;
   }
 
   async stop(name: string): Promise<void> {
+    logInfo(`[manager] Stopping session '${name}'`);
     const active = this.activePtys.get(name);
     if (!active) {
+      logWarn(`[manager] stop('${name}') — not found in active PTYs`);
       throw new Error(`Session "${name}" not found in active PTYs`);
     }
 
@@ -135,21 +145,26 @@ export class SessionManager {
 
     // Kill the PTY process -- onExit handler will do final cleanup
     active.pty.kill();
+    logDebug(`[manager] Kill signal sent to '${name}'`);
   }
 
   writeToSession(name: string, data: string): void {
     const active = this.activePtys.get(name);
     if (!active) {
+      logWarn(`[manager] writeToSession('${name}') — session not active`);
       throw new Error(`Session "${name}" is not active`);
     }
+    logDebug(`[manager] writeToSession('${name}', ${data.length} bytes)`);
     active.pty.write(data);
   }
 
   resizeSession(name: string, cols: number, rows: number): void {
     const active = this.activePtys.get(name);
     if (!active) {
+      logWarn(`[manager] resizeSession('${name}') — session not active`);
       throw new Error(`Session "${name}" is not active`);
     }
+    logDebug(`[manager] resizeSession('${name}', ${cols}x${rows})`);
     active.pty.resize?.(cols, rows);
   }
 
@@ -157,6 +172,7 @@ export class SessionManager {
   pauseSession(name: string): void {
     const active = this.activePtys.get(name);
     if (!active) return;
+    logDebug(`[manager] pauseSession('${name}')`);
     active.pty.pause?.();
   }
 
@@ -164,11 +180,13 @@ export class SessionManager {
   resumeSession(name: string): void {
     const active = this.activePtys.get(name);
     if (!active) return;
+    logDebug(`[manager] resumeSession('${name}')`);
     active.pty.resume?.();
   }
 
   /** Delete a session record from the store. Used by disconnect to prevent stale records. */
   deleteSession(name: string): void {
+    logDebug(`[manager] deleteSession('${name}')`);
     this.store.delete(name);
   }
 
