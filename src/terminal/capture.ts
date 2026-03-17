@@ -8,6 +8,7 @@
  */
 
 import { TerminalEmulator } from './emulator.js';
+import { cleanViewportText } from './viewport.js';
 import type { EventBus } from '../events/bus.js';
 
 /**
@@ -205,7 +206,8 @@ export class ScreenCapture {
   scrollUp(): void {
     this._scrollLocked = false;
     this.emulator.scrollPages(-1);
-    const text = this.emulator.getViewportText();
+    const raw = this.emulator.getViewportText();
+    const text = cleanViewportText(raw);
     this.onOutput({ text, mode: 'replace', trigger: 'redraw' });
     // Do NOT update lastSnapshot -- scroll view is transient
   }
@@ -213,7 +215,8 @@ export class ScreenCapture {
   /** Scroll down one page and emit the viewport as a replace event. Re-locks if at bottom. */
   scrollDown(): void {
     this.emulator.scrollPages(1);
-    const text = this.emulator.getViewportText();
+    const raw = this.emulator.getViewportText();
+    const text = cleanViewportText(raw);
     this.onOutput({ text, mode: 'replace', trigger: 'redraw' });
     // Do NOT update lastSnapshot -- scroll view is transient
 
@@ -231,7 +234,8 @@ export class ScreenCapture {
       if (this.emulator.isScrolledBack()) {
         this.emulator.scrollToBottom();
       }
-      const text = this.emulator.getScreenText();
+      const raw = this.emulator.getScreenText();
+      const text = cleanViewportText(raw);
       this.onOutput({ text, mode: 'replace', trigger: 'redraw' });
       this.lastSnapshot = text;
     }
