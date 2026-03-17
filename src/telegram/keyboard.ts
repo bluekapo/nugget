@@ -59,34 +59,6 @@ export function buildCLIKeyboard(locked = true, enterConfirmation = false): Inli
     .text(ACTION_BUTTONS.arrowRight.label, ACTION_BUTTONS.arrowRight.data);
 }
 
-/** Build an InlineKeyboard for /controls command (includes Delete button).
- *  Row 1: Scroll Up / Lock toggle / Scroll Down, Row 2: Clear-input + /clear + Enter, Row 3: Esc/Up/Bksp, Row 4: Left/Down/Right, Row 5: Delete.
- *  Lock button shows current state: locked (auto-scroll on) or unlocked (manual scroll). */
-export function buildControlsKeyboard(locked = true, enterConfirmation = false): InlineKeyboard {
-  const lockLabel = locked ? '\uD83D\uDD34\uD83D\uDD12' : '\uD83D\uDFE2\uD83D\uDD13';
-  const scrollUpLabel = locked ? '\uD83D\uDD12 \u2B06 Scroll Up' : '\u2B06 Scroll Up';
-  const scrollDownLabel = locked ? '\uD83D\uDD12 \u2B07 Scroll Down' : '\u2B07 Scroll Down';
-  const enterLabel = enterConfirmation ? '\uD83D\uDEE1 \u21A9 Enter' : ACTION_BUTTONS.enter.label;
-  return new InlineKeyboard()
-    .text(scrollUpLabel, ACTION_BUTTONS.scrollUp.data)
-    .text(lockLabel, 'action:scroll-lock')
-    .text(scrollDownLabel, ACTION_BUTTONS.scrollDown.data)
-    .row()
-    .text(ACTION_BUTTONS.clearInput.label, ACTION_BUTTONS.clearInput.data)
-    .text(ACTION_BUTTONS.clear.label, ACTION_BUTTONS.clear.data)
-    .text(enterLabel, ACTION_BUTTONS.enter.data)
-    .row()
-    .text(ACTION_BUTTONS.escape.label, ACTION_BUTTONS.escape.data)
-    .text(ACTION_BUTTONS.arrowUp.label, ACTION_BUTTONS.arrowUp.data)
-    .text(ACTION_BUTTONS.backspace.label, ACTION_BUTTONS.backspace.data)
-    .row()
-    .text(ACTION_BUTTONS.arrowLeft.label, ACTION_BUTTONS.arrowLeft.data)
-    .text(ACTION_BUTTONS.arrowDown.label, ACTION_BUTTONS.arrowDown.data)
-    .text(ACTION_BUTTONS.arrowRight.label, ACTION_BUTTONS.arrowRight.data)
-    .row()
-    .text('🗑 Delete', 'action:delete');
-}
-
 /**
  * Send keystrokes to a session in small timed batches.
  * Each batch writes `batchSize` copies of `key`, then waits `delayMs` before the next batch.

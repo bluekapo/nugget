@@ -177,7 +177,6 @@ export async function createBot(token: string, ownerId: number): Promise<Bot> {
     await bot.api.setMyCommands([
       { command: 'start', description: 'Welcome message and quick start' },
       { command: 'hub', description: 'Show sessions hub with controls' },
-      { command: 'controls', description: 'Show session control buttons' },
       { command: 'settings', description: 'Notification settings' },
       { command: 'help', description: 'Command reference' },
     ]);

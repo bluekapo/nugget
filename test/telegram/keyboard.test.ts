@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { ACTION_BUTTONS, buildCLIKeyboard, buildControlsKeyboard, registerCallbackHandlers } from '../../src/telegram/keyboard.js';
+import { ACTION_BUTTONS, buildCLIKeyboard, registerCallbackHandlers } from '../../src/telegram/keyboard.js';
 import { InlineKeyboard } from 'grammy';
 
 describe('InlineKeyboard', () => {
@@ -61,36 +61,6 @@ describe('InlineKeyboard', () => {
 
     it('backspace input is DEL char', () => {
       assert.equal(ACTION_BUTTONS.backspace.input, '\x7f');
-    });
-  });
-
-  describe('buildControlsKeyboard()', () => {
-    it('returns an InlineKeyboard instance', () => {
-      const kb = buildControlsKeyboard();
-      assert.ok(kb instanceof InlineKeyboard);
-    });
-
-    it('includes delete button as last row', () => {
-      const kb = buildControlsKeyboard();
-      const rows = kb.inline_keyboard;
-      assert.ok(rows.length > 0, 'keyboard should have rows');
-      const lastRow = rows[rows.length - 1];
-      assert.equal(lastRow.length, 1, 'last row should have exactly one button');
-      assert.equal(lastRow[0].callback_data, 'action:delete', 'last button should be action:delete');
-    });
-
-    it('row 3 has Esc, Up, Bksp and row 4 has Left, Down, Right (before Delete)', () => {
-      const kb = buildControlsKeyboard();
-      const row3 = kb.inline_keyboard[2];
-      assert.equal(row3.length, 3);
-      assert.equal(row3[0].callback_data, 'action:escape');
-      assert.equal(row3[1].callback_data, 'action:arrow-up');
-      assert.equal(row3[2].callback_data, 'action:backspace');
-      const row4 = kb.inline_keyboard[3];
-      assert.equal(row4.length, 3);
-      assert.equal(row4[0].callback_data, 'action:arrow-left');
-      assert.equal(row4[1].callback_data, 'action:arrow-down');
-      assert.equal(row4[2].callback_data, 'action:arrow-right');
     });
   });
 
@@ -156,17 +126,6 @@ describe('InlineKeyboard', () => {
     });
   });
 
-  describe('buildControlsKeyboard() row 2', () => {
-    it('row 2 has 3 buttons: Clear-input, /clear, Enter', () => {
-      const kb = buildControlsKeyboard();
-      const row2 = kb.inline_keyboard[1];
-      assert.equal(row2.length, 3, 'row 2 should have 3 buttons');
-      assert.equal(row2[0].callback_data, 'action:clear-input', 'first button should be clear-input');
-      assert.equal(row2[1].callback_data, 'action:clear', 'second button should be /clear');
-      assert.equal(row2[2].callback_data, 'action:enter', 'third button should be enter');
-    });
-  });
-
   describe('buildCLIKeyboard() enterConfirmation shield emoji', () => {
     it('shows shield emoji on Enter button when enterConfirmation=true', () => {
       const kb = buildCLIKeyboard(true, true);
@@ -177,22 +136,6 @@ describe('InlineKeyboard', () => {
 
     it('shows normal Enter button label when enterConfirmation=false', () => {
       const kb = buildCLIKeyboard(true, false);
-      const enterBtn = kb.inline_keyboard[1][2];
-      assert.ok(!enterBtn.text.includes('\uD83D\uDEE1'), 'Enter button should NOT include shield emoji');
-      assert.equal(enterBtn.text, ACTION_BUTTONS.enter.label, 'should use default label');
-    });
-  });
-
-  describe('buildControlsKeyboard() enterConfirmation shield emoji', () => {
-    it('shows shield emoji on Enter button when enterConfirmation=true', () => {
-      const kb = buildControlsKeyboard(true, true);
-      const enterBtn = kb.inline_keyboard[1][2];
-      assert.ok(enterBtn.text.includes('\uD83D\uDEE1'), 'Enter button should include shield emoji');
-      assert.equal(enterBtn.callback_data, 'action:enter', 'callback_data should remain action:enter');
-    });
-
-    it('shows normal Enter button label when enterConfirmation=false', () => {
-      const kb = buildControlsKeyboard(true, false);
       const enterBtn = kb.inline_keyboard[1][2];
       assert.ok(!enterBtn.text.includes('\uD83D\uDEE1'), 'Enter button should NOT include shield emoji');
       assert.equal(enterBtn.text, ACTION_BUTTONS.enter.label, 'should use default label');
@@ -325,25 +268,6 @@ describe('InlineKeyboard', () => {
       // Third press should be a "first press" again (state was reset after confirmation)
       await enterHandler(mockCtx);
       assert.equal(writeCalls.length, 1, 'third press should be first press again, no write');
-    });
-  });
-
-  describe('buildControlsKeyboard() scroll row', () => {
-    it('scroll row has 3 buttons: Up, Lock, Down', () => {
-      const kb = buildControlsKeyboard();
-      const scrollRow = kb.inline_keyboard[0];
-      assert.equal(scrollRow.length, 3, 'scroll row should have 3 buttons');
-      assert.equal(scrollRow[0].callback_data, 'action:scroll-up');
-      assert.equal(scrollRow[1].callback_data, 'action:scroll-lock');
-      assert.equal(scrollRow[2].callback_data, 'action:scroll-down');
-    });
-
-    it('lock button reflects locked state with colored circle', () => {
-      const kbLocked = buildControlsKeyboard(true);
-      assert.equal(kbLocked.inline_keyboard[0][1].text, '\uD83D\uDD34\uD83D\uDD12');
-
-      const kbUnlocked = buildControlsKeyboard(false);
-      assert.equal(kbUnlocked.inline_keyboard[0][1].text, '\uD83D\uDFE2\uD83D\uDD13');
     });
   });
 
