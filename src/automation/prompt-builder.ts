@@ -161,10 +161,17 @@ export function buildConsultationPrompt(ctx: ConsultationPacket): string {
   const lines: string[] = [];
 
   lines.push('## Your Role');
-  lines.push('You are the ORCHESTRATOR monitoring a WORKER session.');
+  lines.push('You are the ORCHESTRATOR answering a YES/NO question about worker status.');
+  lines.push('CRITICAL: This is a STATUS CHECK, not a task. You must NOT:');
+  lines.push('- Read files, search code, or run commands');
+  lines.push('- Investigate the project or try to understand the codebase');
+  lines.push('- Perform any work related to the task description below');
+  lines.push('- Use ANY tools (Read, Bash, Grep, Glob, etc.)');
+  lines.push('You are ONLY determining if the worker\'s terminal shows it has finished.');
+  lines.push('Your ENTIRE response must be the single word YES or the single word NO.');
   lines.push('');
 
-  lines.push('## Task');
+  lines.push('## Task (for reference only — do NOT act on this)');
   lines.push('```');
   lines.push(ctx.taskDescription);
   lines.push('```');
@@ -180,7 +187,7 @@ export function buildConsultationPrompt(ctx: ConsultationPacket): string {
   renderActionLog(lines, ctx.actionLog, ctx.cycleNumber);
 
   lines.push('## How to Determine');
-  lines.push('Look for these indicators in the terminal output:');
+  lines.push('Look ONLY at the terminal output above for these indicators:');
   lines.push('- An idle prompt character (e.g. `>` or `$`) visible at the bottom = worker is idle, ready for input');
   lines.push('- A timing line like `Cooked for Xm Ys` or `Brewed for Xm Ys` = response generation completed');
   lines.push('- Follow-up suggestions or questions from the worker = work completed, waiting for next instruction');
@@ -193,7 +200,8 @@ export function buildConsultationPrompt(ctx: ConsultationPacket): string {
   }
   lines.push('The worker has stopped producing output. Based on the terminal state above, is the worker FINISHED with the task?');
   lines.push('');
-  lines.push('Respond with exactly YES or NO. Nothing else.');
+  lines.push('RESPOND WITH EXACTLY ONE WORD: YES or NO. Nothing else.');
+  lines.push('Do not explain. Do not use tools. Do not investigate.');
 
   return lines.join('\n');
 }

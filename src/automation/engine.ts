@@ -85,7 +85,9 @@ const RETRY_PROMPT = 'Your previous response could not be parsed as a valid dire
   + '- DONE: <summary>';
 
 const CONSULTATION_RETRY_PROMPT = 'Your previous response could not be parsed. '
-  + 'Please respond with exactly YES or NO. Is the worker finished?';
+  + 'Do NOT use tools, read files, or investigate the project. '
+  + 'This is a status check, not a task. '
+  + 'Respond with exactly YES or NO. Nothing else.';
 
 export type EngineState =
   | 'stopped'
