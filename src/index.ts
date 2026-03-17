@@ -911,8 +911,29 @@ async function becomeNewPrimary(
       logInfo(`Restored ${restoredCount} automation(s) from previous primary`);
     }
 
+    // Handle SIGWINCH to resize PTY and all emulators when terminal is resized
+    const sigwinchHandler = () => {
+      const cols = process.stdout.columns;
+      const rows = process.stdout.rows;
+      if (cols && rows) {
+        try {
+          sessionManager.resizeSession(sessionName, cols, rows);
+          for (const emu of emulators.values()) {
+            emu.resize(cols, rows);
+          }
+        } catch {
+          // Session may have exited -- ignore
+        }
+      }
+    };
+    process.on('SIGWINCH', sigwinchHandler);
+
+    const cleanupSigwinch = () => {
+      process.removeListener('SIGWINCH', sigwinchHandler);
+    };
+
     // Set up graceful shutdown for the promoted primary
-    promotedShutdownFn = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, capture, emulators, undefined, promotedAutomationHub);
+    promotedShutdownFn = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, capture, emulators, cleanupSigwinch, promotedAutomationHub);
 
     logInfo('Promotion complete -- Telegram control restored.');
   } catch (err) {
