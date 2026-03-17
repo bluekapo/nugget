@@ -8,8 +8,8 @@
  * Gap 1 (UHM-04): ScreenCapture output events trigger hub re-render when hub
  * is in CLI view. When hub is in another view, render() is NOT called.
  *
- * Gap 2 (UHM-05): Session switch triggers resetBaseline(), setCliContent(''),
- * and setHubView('cli') — no message deletion or SQLite persistence involved.
+ * Gap 2 (UHM-05): Session switch triggers swapEmulator(targetEmulator),
+ * setCliContent(''), and setHubView('cli') — using per-session emulator Map.
  */
 
 import { describe, it, beforeEach } from 'node:test';
@@ -56,10 +56,13 @@ function createMockHubRenderer() {
 }
 
 function createMockScreenCapture() {
-  const calls: { method: string }[] = [];
+  const calls: { method: string; args?: unknown[] }[] = [];
   return {
     resetBaseline(): void {
       calls.push({ method: 'resetBaseline' });
+    },
+    swapEmulator(emulator: unknown): void {
+      calls.push({ method: 'swapEmulator', args: [emulator] });
     },
     calls,
   };
@@ -92,15 +95,22 @@ function makeOutputCallback(
 }
 
 // ---------------------------------------------------------------------------
-// The onSessionSwitch handler factory — extracted from index.ts lines 190-193.
+// The onSessionSwitch handler factory — mirrors index.ts production wiring.
+// Uses per-session emulator Map and calls swapEmulator() instead of resetBaseline().
 // ---------------------------------------------------------------------------
 
 function makeOnSessionSwitchHandler(
   screenCapture: ReturnType<typeof createMockScreenCapture>,
   hubRenderer: ReturnType<typeof createMockHubRenderer>,
+  emulators: Map<string, unknown>,
 ) {
   return (_from: string | null, to: string): void => {
-    screenCapture.resetBaseline();
+    let targetEmulator = emulators.get(to);
+    if (!targetEmulator) {
+      targetEmulator = { name: to }; // mock emulator placeholder
+      emulators.set(to, targetEmulator);
+    }
+    screenCapture.swapEmulator(targetEmulator);
     hubRenderer.setCliContent(to, '');
     hubRenderer.setHubView('cli');
   };
@@ -202,19 +212,46 @@ describe('UHM-04: ScreenCapture output event -> hub wiring', () => {
 describe('UHM-05: onSessionSwitch handler wiring', () => {
   let hub: ReturnType<typeof createMockHubRenderer>;
   let capture: ReturnType<typeof createMockScreenCapture>;
+  let emulators: Map<string, unknown>;
   let onSessionSwitch: (from: string | null, to: string) => void;
 
   beforeEach(() => {
     hub = createMockHubRenderer();
     capture = createMockScreenCapture();
-    onSessionSwitch = makeOnSessionSwitchHandler(capture, hub);
+    emulators = new Map<string, unknown>();
+    onSessionSwitch = makeOnSessionSwitchHandler(capture, hub, emulators);
   });
 
-  it('calls screenCapture.resetBaseline() on session switch', () => {
+  it('calls screenCapture.swapEmulator() on session switch', () => {
     onSessionSwitch('old-session', 'new-session');
 
-    const resets = capture.calls.filter(c => c.method === 'resetBaseline');
-    assert.equal(resets.length, 1, 'resetBaseline() should be called on session switch');
+    const swaps = capture.calls.filter(c => c.method === 'swapEmulator');
+    assert.equal(swaps.length, 1, 'swapEmulator() should be called on session switch');
+  });
+
+  it('passes the correct target emulator to swapEmulator()', () => {
+    // Pre-populate an emulator for the target session
+    const mockEmulator = { name: 'session-b' };
+    emulators.set('session-b', mockEmulator);
+
+    onSessionSwitch('session-a', 'session-b');
+
+    const swaps = capture.calls.filter(c => c.method === 'swapEmulator');
+    assert.equal(swaps.length, 1, 'swapEmulator() should be called');
+    assert.equal(swaps[0].args![0], mockEmulator, 'should pass the pre-existing emulator');
+  });
+
+  it('creates emulator for unknown session on first switch', () => {
+    // No emulator pre-populated for 'brand-new'
+    assert.equal(emulators.has('brand-new'), false, 'emulator should not exist yet');
+
+    onSessionSwitch('old', 'brand-new');
+
+    // getOrCreateEmulator should have created one
+    assert.equal(emulators.has('brand-new'), true, 'emulator should be created for new session');
+    const swaps = capture.calls.filter(c => c.method === 'swapEmulator');
+    assert.equal(swaps.length, 1, 'swapEmulator() should be called');
+    assert.equal(swaps[0].args![0], emulators.get('brand-new'), 'should pass the newly created emulator');
   });
 
   it('clears cli content for the new session via setCliContent(newSession, empty string)', () => {
@@ -236,7 +273,7 @@ describe('UHM-05: onSessionSwitch handler wiring', () => {
   it('works correctly when switching from null (first switch)', () => {
     onSessionSwitch(null, 'first-session');
 
-    assert.equal(capture.calls.filter(c => c.method === 'resetBaseline').length, 1, 'resetBaseline should be called');
+    assert.equal(capture.calls.filter(c => c.method === 'swapEmulator').length, 1, 'swapEmulator should be called');
     const setCliCalls = hub.calls.filter(c => c.method === 'setCliContent');
     assert.equal(setCliCalls.length, 1, 'setCliContent should be called');
     assert.deepEqual(setCliCalls[0].args, ['first-session', ''], 'new session content should be empty');
@@ -244,7 +281,7 @@ describe('UHM-05: onSessionSwitch handler wiring', () => {
     assert.deepEqual(setViewCalls[0].args, ['cli'], 'hub view should be cli');
   });
 
-  it('performs all three operations in order: resetBaseline, setCliContent, setHubView', () => {
+  it('performs all three operations in order: swapEmulator, setCliContent, setHubView', () => {
     onSessionSwitch('a', 'b');
 
     // The calls array records in order of invocation
@@ -258,8 +295,26 @@ describe('UHM-05: onSessionSwitch handler wiring', () => {
     const setViewIdx = methods.indexOf('setHubView');
     assert.ok(setCliIdx < setViewIdx, 'setCliContent should be called before setHubView');
 
-    // resetBaseline must happen (tracked separately in capture.calls)
-    assert.equal(capture.calls.length, 1, 'resetBaseline should be the only capture call');
-    assert.equal(capture.calls[0].method, 'resetBaseline');
+    // swapEmulator must happen (tracked separately in capture.calls)
+    assert.equal(capture.calls.length, 1, 'swapEmulator should be the only capture call');
+    assert.equal(capture.calls[0].method, 'swapEmulator');
+  });
+
+  it('uses correct emulator when switching A -> B -> A', () => {
+    // Pre-populate emulators for both sessions
+    const emuA = { name: 'session-a' };
+    const emuB = { name: 'session-b' };
+    emulators.set('session-a', emuA);
+    emulators.set('session-b', emuB);
+
+    // Switch from A to B
+    onSessionSwitch('session-a', 'session-b');
+    // Switch back from B to A
+    onSessionSwitch('session-b', 'session-a');
+
+    const swaps = capture.calls.filter(c => c.method === 'swapEmulator');
+    assert.equal(swaps.length, 2, 'swapEmulator should be called twice');
+    assert.equal(swaps[0].args![0], emuB, 'first swap should use session-b emulator');
+    assert.equal(swaps[1].args![0], emuA, 'second swap should use session-a emulator');
   });
 });
