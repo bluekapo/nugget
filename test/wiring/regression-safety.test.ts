@@ -266,4 +266,21 @@ describe('REGR-03: becomeNewPrimary parity', () => {
       'becomeNewPrimary IPC onRegister should pre-create emulator via getOrCreateEmulator(name)',
     );
   });
+
+  it('registers SIGWINCH handler', () => {
+    assert.ok(
+      body.includes("process.on('SIGWINCH'"),
+      'becomeNewPrimary should register a SIGWINCH handler',
+    );
+  });
+
+  it('SIGWINCH handler resizes all emulators via emulators.values()', () => {
+    // Extract the sigwinchHandler body to verify it iterates emulators
+    const sigwinchMatch = body.match(/const sigwinchHandler[\s\S]*?process\.on\('SIGWINCH'/);
+    assert.ok(sigwinchMatch, 'Should find sigwinchHandler definition');
+    assert.ok(
+      sigwinchMatch[0].includes('emulators.values()'),
+      'SIGWINCH handler should iterate emulators.values() to resize all session emulators',
+    );
+  });
 });
