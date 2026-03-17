@@ -76,7 +76,7 @@ export class ScreenCapture {
   private burstStartTime: number | null = null;
 
   private readonly timer: TimerProvider;
-  private readonly bufferChangeDisposable: { dispose(): void };
+  private bufferChangeDisposable: { dispose(): void };
 
   // Completion detection: fires when a completion marker ("\u273B <Verb> for Xm Xs") is found
   // in terminal output AND terminal goes idle for idleDelay ms with no active spinners.
@@ -100,7 +100,7 @@ export class ScreenCapture {
   private readonly sessionNameFn?: () => string | null;
 
   constructor(
-    private readonly emulator: TerminalEmulator,
+    private emulator: TerminalEmulator,
     private readonly onOutput: (event: OutputEvent) => void,
     opts?: {
       burstThreshold?: number;
@@ -264,6 +264,63 @@ export class ScreenCapture {
     this.requireMarker = true;
     this.lastFiredMarker = null;
     this._execBusy = false;
+  }
+
+  /**
+   * Hot-swap the underlying TerminalEmulator instance.
+   *
+   * Replaces the internal emulator reference, re-subscribes to buffer-change events,
+   * resets capture state for a fresh start, and cancels all pending timers.
+   *
+   * Does NOT call emulator.reset() on either old or new emulator — the caller
+   * manages emulator lifecycle. The whole point is preserving the new emulator's
+   * existing scrollback buffer.
+   */
+  swapEmulator(newEmulator: TerminalEmulator): void {
+    logDebug('[capture] swapEmulator()');
+
+    // Cancel all pending timers
+    this.cancelTimer();
+    this.cancelIdleTimer();
+    this.cancelExecIdleTimer();
+
+    // Dispose old buffer-change subscription
+    this.bufferChangeDisposable.dispose();
+
+    // Swap emulator reference
+    this.emulator = newEmulator;
+
+    // Re-subscribe to new emulator's buffer-change events (same logic as constructor)
+    this.bufferChangeDisposable = this.emulator.onBufferChange((isAltScreen) => {
+      this.cancelTimer();
+      this.pendingCapture = false;
+
+      if (!this._scrollLocked) return;
+
+      const currentText = this.emulator.getScreenText();
+      const trigger = isAltScreen ? 'alt-enter' : 'alt-exit';
+
+      this.onOutput({
+        text: currentText,
+        mode: 'replace',
+        trigger,
+      });
+
+      this.lastSnapshot = currentText;
+      this.captureCount++;
+    });
+
+    // Reset capture state for fresh start
+    this.lastSnapshot = '';
+    this.captureCount = 0;
+    this.pendingCapture = false;
+    this.redrawDetected = false;
+    this._scrollLocked = true;
+    this.crunched = false;
+    this.requireMarker = true;
+    this.lastFiredMarker = null;
+    this._execBusy = false;
+    this.burstStartTime = null;
   }
 
   /**
