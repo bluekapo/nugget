@@ -132,12 +132,23 @@ async function startPrimary(
   // 8b. Create SettingsStore early (needed by keyboard builders below)
   const settingsStore = new SettingsStore(db);
 
-  // 9b. Create TerminalEmulator + ScreenCapture pipeline
+  // 9b. Create per-session TerminalEmulator map + ScreenCapture pipeline
   // PTY data -> ScreenCapture.onData -> emulator -> OutputEvent -> hub CLI view
   const ptyCols = process.stdout.columns ?? TERMINAL_COLS;
   const ptyRows = process.stdout.rows ?? TERMINAL_ROWS;
-  const emulator = new TerminalEmulator(ptyCols, ptyRows);
-  const screenCapture = new ScreenCapture(emulator, (event) => {
+  const emulators = new Map<string, TerminalEmulator>();
+
+  function getOrCreateEmulator(name: string): TerminalEmulator {
+    let emu = emulators.get(name);
+    if (!emu) {
+      emu = new TerminalEmulator(ptyCols, ptyRows);
+      emulators.set(name, emu);
+    }
+    return emu;
+  }
+
+  const initialEmulator = getOrCreateEmulator(sessionName);
+  const screenCapture = new ScreenCapture(initialEmulator, (event) => {
     const session = router.activeSession;
     if (!session) return;
     if (event.mode === 'replace') {
@@ -206,9 +217,10 @@ async function startPrimary(
     hubRenderer.render();
   });
 
-  // 12a. Wire session switch callback: reset baseline, clear CLI content, switch to CLI view
+  // 12a. Wire session switch callback: swap emulator, clear CLI content, switch to CLI view
   router.onSessionSwitch = (_from, to) => {
-    screenCapture.resetBaseline();
+    const targetEmulator = getOrCreateEmulator(to);
+    screenCapture.swapEmulator(targetEmulator);
     hubRenderer.setCliContent(to, '');
     hubRenderer.setHubView('cli');
   };
@@ -222,10 +234,17 @@ async function startPrimary(
     }
   };
 
-  // 12c. Wire PTY data from EventBus to ScreenCapture (filtered by active session)
+  // 12c. Wire PTY data from EventBus to ScreenCapture and per-session emulators
   bus.on('session:output', (name: string, data: string) => {
     if (router.activeSession === name) {
+      // Active session: data flows through ScreenCapture which writes to its internal emulator
       screenCapture.onData(data);
+    } else {
+      // Non-active session: write directly to the session's emulator for scrollback accumulation
+      const emu = emulators.get(name);
+      if (emu) {
+        emu.write(data);
+      }
     }
   });
 
@@ -278,6 +297,12 @@ async function startPrimary(
     router.remove(name);
     hubRenderer.clearExecState(name);
     completionTracker.removeSession(name);
+    // Dispose and remove per-session emulator
+    const emu = emulators.get(name);
+    if (emu) {
+      emu.dispose();
+      emulators.delete(name);
+    }
     // Auto-switch to next available session if the killed one was active
     if (wasActive && router.activeSession === null && router.getAll().length > 0) {
       router.switchTo(router.getAll()[0]);
@@ -336,6 +361,8 @@ async function startPrimary(
     onRegister: (name, bridge, meta) => {
       // Remote session from another CLI process
       router.addRemote(name, bridge, meta);
+      // Pre-create emulator so remote session data accumulates scrollback
+      getOrCreateEmulator(name);
       logInfo(`IPC: Remote session '${name}' registered`);
       hubRenderer.render();
 
@@ -386,14 +413,16 @@ async function startPrimary(
     };
     process.stdin.on('data', stdinHandler);
 
-    // 22. Handle SIGWINCH to resize PTY and emulator when terminal is resized
+    // 22. Handle SIGWINCH to resize PTY and all emulators when terminal is resized
     const sigwinchHandler = () => {
       const cols = process.stdout.columns;
       const rows = process.stdout.rows;
       if (cols && rows) {
         try {
           sessionManager.resizeSession(sessionName, cols, rows);
-          emulator.resize(cols, rows);
+          for (const emu of emulators.values()) {
+            emu.resize(cols, rows);
+          }
         } catch {
           // Session may have exited -- ignore
         }
@@ -412,7 +441,7 @@ async function startPrimary(
   }
 
   // 23. Graceful shutdown on SIGINT/SIGTERM
-  const shutdown = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, screenCapture, emulator, cleanupStdin, automationHub);
+  const shutdown = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, screenCapture, emulators, cleanupStdin, automationHub);
   shutdownFn = shutdown;
 
   // 24. Auto-shutdown when the main session PTY exits AND no other sessions remain.
@@ -655,8 +684,19 @@ async function becomeNewPrimary(
     const bot = await createBot(config.botToken, config.ownerId);
     const settingsStore = new SettingsStore(db);
 
-    const emulator = new TerminalEmulator(ptyCols, ptyRows);
-    const capture = new ScreenCapture(emulator, (event) => {
+    const emulators = new Map<string, TerminalEmulator>();
+
+    function getOrCreateEmulator(name: string): TerminalEmulator {
+      let emu = emulators.get(name);
+      if (!emu) {
+        emu = new TerminalEmulator(ptyCols, ptyRows);
+        emulators.set(name, emu);
+      }
+      return emu;
+    }
+
+    const initialEmulator = getOrCreateEmulator(sessionName);
+    const capture = new ScreenCapture(initialEmulator, (event) => {
       const session = router.activeSession;
       if (!session) return;
       if (event.mode === 'replace') {
@@ -683,7 +723,14 @@ async function becomeNewPrimary(
 
     bus.on('session:output', (name: string, data: string) => {
       if (router.activeSession === name) {
+        // Active session: data flows through ScreenCapture which writes to its internal emulator
         capture.onData(data);
+      } else {
+        // Non-active session: write directly to the session's emulator for scrollback accumulation
+        const emu = emulators.get(name);
+        if (emu) {
+          emu.write(data);
+        }
       }
     });
 
@@ -737,7 +784,8 @@ async function becomeNewPrimary(
     });
 
     router.onSessionSwitch = (_from, to) => {
-      capture.resetBaseline();
+      const targetEmulator = getOrCreateEmulator(to);
+      capture.swapEmulator(targetEmulator);
       hubRenderer.setCliContent(to, '');
       hubRenderer.setHubView('cli');
     };
@@ -811,6 +859,12 @@ async function becomeNewPrimary(
       router.remove(name);
       hubRenderer.clearExecState(name);
       promotedCompletionTracker.removeSession(name);
+      // Dispose and remove per-session emulator
+      const emu = emulators.get(name);
+      if (emu) {
+        emu.dispose();
+        emulators.delete(name);
+      }
       // Auto-switch to next available session if the killed one was active
       if (wasActive && router.activeSession === null && router.getAll().length > 0) {
         router.switchTo(router.getAll()[0]);
@@ -835,6 +889,8 @@ async function becomeNewPrimary(
       },
       onRegister: (name, bridge, meta) => {
         router.addRemote(name, bridge, meta);
+        // Pre-create emulator so remote session data accumulates scrollback
+        getOrCreateEmulator(name);
         hubRenderer.render();
         bridge.onOutput((data: string) => {
           bus.emit('session:output', name, data);
@@ -856,7 +912,7 @@ async function becomeNewPrimary(
     }
 
     // Set up graceful shutdown for the promoted primary
-    promotedShutdownFn = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, capture, emulator, undefined, promotedAutomationHub);
+    promotedShutdownFn = setupPrimaryShutdown(bot, config.botToken, sessionManager, router, db, capture, emulators, undefined, promotedAutomationHub);
 
     logInfo('Promotion complete -- Telegram control restored.');
   } catch (err) {
@@ -1004,7 +1060,7 @@ function setupPrimaryShutdown(
   router: SessionRouter,
   db: Database.Database,
   screenCapture: ScreenCapture,
-  emulator: TerminalEmulator,
+  emulators: Map<string, TerminalEmulator>,
   cleanupStdin?: () => void,
   automationHub?: { dispose(): void },
 ): (signal: string) => Promise<void> {
@@ -1028,9 +1084,12 @@ function setupPrimaryShutdown(
     try {
       // Flush pending ScreenCapture debounce (synchronous -- fires onOutput callback)
       screenCapture.flush();
-      // Dispose ScreenCapture and emulator to prevent memory leaks
+      // Dispose ScreenCapture and all per-session emulators to prevent memory leaks
       screenCapture.dispose();
-      emulator.dispose();
+      for (const emu of emulators.values()) {
+        emu.dispose();
+      }
+      emulators.clear();
     } catch {
       // Ignore -- best effort
     }
