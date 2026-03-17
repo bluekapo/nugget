@@ -318,3 +318,158 @@ describe('UHM-05: onSessionSwitch handler wiring', () => {
     assert.equal(swaps[1].args![0], emuA, 'second swap should use session-a emulator');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Mock emulator that tracks write() calls — used for SCRL-02 routing tests
+// ---------------------------------------------------------------------------
+
+function createMockEmulator() {
+  const written: string[] = [];
+  return {
+    write(data: string): void {
+      written.push(data);
+    },
+    written,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The session:output handler factory — mirrors index.ts production wiring:
+//
+//   bus.on('session:output', (name, data) => {
+//     if (router.activeSession === name) {
+//       screenCapture.onData(data);
+//     } else {
+//       const emu = emulators.get(name);
+//       if (emu) { emu.write(data); }
+//     }
+//   });
+//
+// We extract the inner callback as a pure function for unit testing.
+// ---------------------------------------------------------------------------
+
+function makeSessionOutputHandler(
+  screenCapture: { onData(data: string): void; calls: { method: string; args?: unknown[] }[] },
+  emulators: Map<string, ReturnType<typeof createMockEmulator>>,
+  getActiveSession: () => string | null,
+) {
+  return (name: string, data: string): void => {
+    if (getActiveSession() === name) {
+      screenCapture.onData(data);
+    } else {
+      const emu = emulators.get(name);
+      if (emu) {
+        emu.write(data);
+      }
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Gap 3 (SCRL-02): session:output data routing — active vs non-active sessions
+// ---------------------------------------------------------------------------
+
+describe('SCRL-02: session:output routing to active vs non-active session emulators', () => {
+  let screenCapture: ReturnType<typeof createMockScreenCapture> & { onData(data: string): void };
+  let emulators: Map<string, ReturnType<typeof createMockEmulator>>;
+  let activeSession: string;
+  let onSessionOutput: (name: string, data: string) => void;
+
+  beforeEach(() => {
+    const base = createMockScreenCapture();
+    screenCapture = Object.assign(base, {
+      onData(data: string): void {
+        base.calls.push({ method: 'onData', args: [data] });
+      },
+    });
+    emulators = new Map();
+    activeSession = 'session-a';
+    onSessionOutput = makeSessionOutputHandler(
+      screenCapture,
+      emulators,
+      () => activeSession,
+    );
+  });
+
+  it('routes active session PTY data to screenCapture.onData() and not the emulator', () => {
+    const emuA = createMockEmulator();
+    emulators.set('session-a', emuA);
+
+    onSessionOutput('session-a', 'active output');
+
+    const onDataCalls = screenCapture.calls.filter(c => c.method === 'onData');
+    assert.equal(onDataCalls.length, 1, 'onData() should be called for the active session');
+    assert.deepEqual(onDataCalls[0].args, ['active output']);
+
+    assert.equal(emuA.written.length, 0, 'emulator.write() should NOT be called for the active session (screenCapture owns that write)');
+  });
+
+  it('routes non-active session PTY data directly to that session emulator.write()', () => {
+    const emuB = createMockEmulator();
+    emulators.set('session-b', emuB);
+    // session-a is active; session-b is not
+
+    onSessionOutput('session-b', 'background output');
+
+    assert.equal(emuB.written.length, 1, 'emulator.write() should be called for the non-active session');
+    assert.equal(emuB.written[0], 'background output');
+
+    const onDataCalls = screenCapture.calls.filter(c => c.method === 'onData');
+    assert.equal(onDataCalls.length, 0, 'onData() should NOT be called for a non-active session');
+  });
+
+  it('non-active session emulator accumulates multiple PTY data chunks independently', () => {
+    const emuB = createMockEmulator();
+    emulators.set('session-b', emuB);
+
+    onSessionOutput('session-b', 'chunk1');
+    onSessionOutput('session-b', 'chunk2');
+    onSessionOutput('session-b', 'chunk3');
+
+    assert.equal(emuB.written.length, 3, 'all three chunks should be written to session-b emulator');
+    assert.deepEqual(emuB.written, ['chunk1', 'chunk2', 'chunk3']);
+  });
+
+  it('non-active session data is silently dropped when no emulator exists for that session', () => {
+    // No emulator registered for 'session-unknown'
+    assert.doesNotThrow(() => {
+      onSessionOutput('session-unknown', 'orphan data');
+    }, 'handler should not throw when emulator is missing');
+
+    const onDataCalls = screenCapture.calls.filter(c => c.method === 'onData');
+    assert.equal(onDataCalls.length, 0, 'onData() should not be called for orphan output');
+  });
+
+  it('two non-active sessions each accumulate in their own emulators without cross-contamination', () => {
+    const emuB = createMockEmulator();
+    const emuC = createMockEmulator();
+    emulators.set('session-b', emuB);
+    emulators.set('session-c', emuC);
+
+    onSessionOutput('session-b', 'data-for-b');
+    onSessionOutput('session-c', 'data-for-c');
+
+    assert.deepEqual(emuB.written, ['data-for-b'], 'session-b should only receive its own data');
+    assert.deepEqual(emuC.written, ['data-for-c'], 'session-c should only receive its own data');
+  });
+
+  it('when active session changes, subsequent data routes to the new active session via onData', () => {
+    const emuA = createMockEmulator();
+    const emuB = createMockEmulator();
+    emulators.set('session-a', emuA);
+    emulators.set('session-b', emuB);
+
+    // session-a is active initially
+    onSessionOutput('session-b', 'b-background');
+
+    // Switch active session to session-b
+    activeSession = 'session-b';
+
+    onSessionOutput('session-b', 'b-now-active');
+
+    assert.deepEqual(emuB.written, ['b-background'], 'only pre-switch data should go to emulator');
+    const onDataCalls = screenCapture.calls.filter(c => c.method === 'onData');
+    assert.equal(onDataCalls.length, 1, 'post-switch active session data should flow through onData');
+    assert.deepEqual(onDataCalls[0].args, ['b-now-active']);
+  });
+});
