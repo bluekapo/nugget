@@ -967,4 +967,175 @@ describe('ScreenCapture', () => {
       );
     });
   });
+
+  // ---------- Scroll content cleaning (cleanViewportText integration) ----------
+
+  it('scrollUp emits cleaned viewport text with stacked separators collapsed', async () => {
+    createCapture({ baseDelay: 50 });
+
+    // Write enough lines to fill scrollback, including stacked separators
+    // that will be in the viewport after scrolling up
+    const lines: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      lines.push(`content line ${i}`);
+    }
+    // Add stacked separator lines (Ink TUI artifact)
+    lines.push('───────────────────');
+    lines.push('───────────────────');
+    lines.push('───────────────────');
+    lines.push('after separators');
+    // Fill remaining to push content into scrollback
+    for (let i = 0; i < 20; i++) {
+      lines.push(`filler line ${i}`);
+    }
+
+    await capture.onData(lines.join('\r\n'));
+    timer.advance(50); // let initial capture fire
+    events.length = 0; // clear initial events
+
+    // Scroll up to see the separator region
+    capture.scrollUp();
+
+    assert.equal(events.length, 1, 'scrollUp should emit one event');
+    const text = events[0].text;
+
+    // Count separator lines in emitted text -- should be at most 1 consecutive
+    const emittedLines = text.split('\n');
+    let maxConsecutiveSeps = 0;
+    let currentRun = 0;
+    for (const line of emittedLines) {
+      if (/^[─━═\-]{3,}/.test(line.trim())) {
+        currentRun++;
+        maxConsecutiveSeps = Math.max(maxConsecutiveSeps, currentRun);
+      } else {
+        currentRun = 0;
+      }
+    }
+    assert.ok(
+      maxConsecutiveSeps <= 1,
+      `Expected at most 1 consecutive separator line, found ${maxConsecutiveSeps} in: ${text}`,
+    );
+  });
+
+  it('scrollDown emits cleaned viewport text', async () => {
+    createCapture({ baseDelay: 50 });
+
+    // Write content with stacked separators
+    const lines: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      lines.push(`line ${i}`);
+    }
+    lines.push('───────────────────');
+    lines.push('───────────────────');
+    lines.push('───────────────────');
+    for (let i = 0; i < 10; i++) {
+      lines.push(`more line ${i}`);
+    }
+
+    await capture.onData(lines.join('\r\n'));
+    timer.advance(50);
+    events.length = 0;
+
+    // Scroll up first, then down
+    capture.scrollUp();
+    capture.scrollUp();
+    events.length = 0;
+
+    capture.scrollDown();
+    assert.equal(events.length, 1, 'scrollDown should emit one event');
+    const text = events[0].text;
+
+    // Verify cleaning was applied -- no stacked separators
+    const emittedLines = text.split('\n');
+    let maxConsecutiveSeps = 0;
+    let currentRun = 0;
+    for (const line of emittedLines) {
+      if (/^[─━═\-]{3,}/.test(line.trim())) {
+        currentRun++;
+        maxConsecutiveSeps = Math.max(maxConsecutiveSeps, currentRun);
+      } else {
+        currentRun = 0;
+      }
+    }
+    assert.ok(
+      maxConsecutiveSeps <= 1,
+      `Expected at most 1 consecutive separator in scrollDown, found ${maxConsecutiveSeps}`,
+    );
+  });
+
+  it('toggleLock re-lock emits cleaned screen text', async () => {
+    createCapture({ baseDelay: 50 });
+
+    // Write content including stacked separators at the bottom of the screen
+    const lines: string[] = [];
+    lines.push('───────────────────');
+    lines.push('───────────────────');
+    lines.push('───────────────────');
+    lines.push('content after seps');
+
+    await capture.onData(lines.join('\r\n'));
+    timer.advance(50);
+    events.length = 0;
+
+    // Unlock then re-lock
+    capture.toggleLock(); // unlock
+    capture.toggleLock(); // re-lock -> should emit cleaned text
+
+    const lastEvent = events[events.length - 1];
+    assert.equal(lastEvent.mode, 'replace', 'should be replace mode');
+    assert.equal(lastEvent.trigger, 'redraw', 'should be redraw trigger');
+
+    // Check that stacked separators are collapsed
+    const emittedLines = lastEvent.text.split('\n');
+    let maxConsecutiveSeps = 0;
+    let currentRun = 0;
+    for (const line of emittedLines) {
+      if (/^[─━═\-]{3,}/.test(line.trim())) {
+        currentRun++;
+        maxConsecutiveSeps = Math.max(maxConsecutiveSeps, currentRun);
+      } else {
+        currentRun = 0;
+      }
+    }
+    assert.ok(
+      maxConsecutiveSeps <= 1,
+      `Expected at most 1 consecutive separator in toggleLock relock, found ${maxConsecutiveSeps}`,
+    );
+  });
+
+  it('scrollDown at bottom re-locks and scrollLocked returns true', async () => {
+    createCapture({ baseDelay: 50 });
+
+    // Write enough content to have scrollback
+    for (let i = 0; i < 30; i++) {
+      await capture.onData(`line ${i}\r\n`);
+    }
+    timer.advance(50);
+
+    // Scroll up to unlock
+    capture.scrollUp();
+    assert.equal(capture.scrollLocked, false, 'should be unlocked after scrollUp');
+
+    // Scroll down repeatedly until at bottom
+    for (let i = 0; i < 5; i++) {
+      capture.scrollDown();
+    }
+
+    assert.equal(capture.scrollLocked, true, 'should be re-locked after scrolling to bottom');
+  });
+
+  it('scrollUp from locked state unlocks and scrollLocked returns false', async () => {
+    createCapture({ baseDelay: 50 });
+
+    // Write enough content to have scrollback
+    for (let i = 0; i < 30; i++) {
+      await capture.onData(`line ${i}\r\n`);
+    }
+    timer.advance(50);
+
+    assert.equal(capture.scrollLocked, true, 'should start locked');
+
+    capture.scrollUp();
+    assert.equal(capture.scrollLocked, false, 'should be unlocked after scrollUp');
+  });
 });
