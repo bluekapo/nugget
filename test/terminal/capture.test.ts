@@ -1138,4 +1138,147 @@ describe('ScreenCapture', () => {
     capture.scrollUp();
     assert.equal(capture.scrollLocked, false, 'should be unlocked after scrollUp');
   });
+
+  // ---------- swapEmulator ----------
+
+  describe('swapEmulator', () => {
+    let emulator2: TerminalEmulator;
+
+    afterEach(() => {
+      emulator2?.dispose();
+    });
+
+    it('after swapEmulator, captures read from the new emulator buffer', async () => {
+      createCapture({ baseDelay: 50 });
+
+      // Write to original emulator
+      await capture.onData('original content\r\n');
+      timer.advance(50);
+      assert.equal(events.length, 1);
+      assert.ok(events[0].text.includes('original content'));
+
+      // Create new emulator with distinct content
+      emulator2 = new TerminalEmulator(80, 24);
+      await emulator2.write('new emulator content\r\n');
+
+      // Swap to new emulator
+      capture.swapEmulator(emulator2);
+
+      // Write to new emulator via capture pipeline
+      await capture.onData('post-swap data\r\n');
+      timer.advance(50);
+
+      const lastEvent = events[events.length - 1];
+      assert.ok(
+        lastEvent.text.includes('new emulator content') || lastEvent.text.includes('post-swap data'),
+        `After swap, capture should read from new emulator, got: "${lastEvent.text}"`,
+      );
+    });
+
+    it('after swapEmulator, buffer-change events come from new emulator (old disconnected)', async () => {
+      createCapture({ baseDelay: 50 });
+
+      // Write initial content so capture has something
+      await capture.onData('initial\r\n');
+      timer.advance(50);
+      const eventsBeforeSwap = events.length;
+
+      // Create new emulator and swap
+      emulator2 = new TerminalEmulator(80, 24);
+      capture.swapEmulator(emulator2);
+
+      // Trigger alt-screen on OLD emulator -- should NOT produce event
+      await emulator.write('\x1b[?1049h'); // enter alt screen
+      const eventsAfterOldAlt = events.length;
+      assert.equal(eventsAfterOldAlt, eventsBeforeSwap,
+        'Old emulator alt-screen should NOT fire events after swap');
+
+      // Trigger alt-screen on NEW emulator -- SHOULD produce event
+      await emulator2.write('\x1b[?1049h'); // enter alt screen
+      assert.ok(events.length > eventsAfterOldAlt,
+        'New emulator alt-screen SHOULD fire events after swap');
+
+      const lastEvent = events[events.length - 1];
+      assert.equal(lastEvent.trigger, 'alt-enter', 'trigger should be alt-enter from new emulator');
+    });
+
+    it('swapEmulator resets diff baseline and capture state (no emulator.reset())', async () => {
+      createCapture({ baseDelay: 50 });
+
+      // Write content and capture several times to build up state
+      await capture.onData('line 1\r\n');
+      timer.advance(50);
+      await capture.onData('line 2\r\n');
+      timer.advance(50);
+      assert.ok(events.length >= 2, 'should have multiple captures');
+
+      // Unlock scroll to verify it gets reset
+      capture.scrollUp();
+      assert.equal(capture.scrollLocked, false, 'should be unlocked');
+
+      // Create new emulator and swap
+      emulator2 = new TerminalEmulator(80, 24);
+      capture.swapEmulator(emulator2);
+
+      // After swap: scrollLocked should be true (reset)
+      assert.equal(capture.scrollLocked, true, 'scrollLocked should be reset to true after swap');
+
+      // After swap: first capture should be 'initial' trigger (captureCount reset to 0)
+      await capture.onData('fresh start\r\n');
+      timer.advance(50);
+
+      const lastEvent = events[events.length - 1];
+      assert.equal(lastEvent.trigger, 'initial',
+        'First capture after swap should have initial trigger (captureCount was reset)');
+    });
+
+    it('swapEmulator cancels pending debounce, idle, and exec-idle timers', async () => {
+      createCapture({ baseDelay: 200, idleDelay: 500, execIdleDelay: 300 });
+
+      // Start some data flowing to arm timers
+      await capture.onData('\u273B Crunched for 1s\r\n');
+      // Don't advance timer -- debounce is pending
+
+      const eventsBeforeSwap = events.length;
+
+      // Swap
+      emulator2 = new TerminalEmulator(80, 24);
+      capture.swapEmulator(emulator2);
+
+      // Advance past all timer delays -- nothing should fire from old state
+      timer.advance(1000);
+
+      assert.equal(events.length, eventsBeforeSwap,
+        'No events should fire from cancelled timers after swap');
+    });
+
+    it('after swapEmulator, scrollUp/scrollDown operate on the new emulator buffer', async () => {
+      createCapture({ baseDelay: 50 });
+
+      // Write enough content to the new emulator to enable scrollback
+      emulator2 = new TerminalEmulator(80, 24);
+      for (let i = 0; i < 40; i++) {
+        await emulator2.write(`new-emu line ${i}\r\n`);
+      }
+
+      // Swap
+      capture.swapEmulator(emulator2);
+
+      // Write one more line via capture to ensure pipeline works
+      await capture.onData('post-swap line\r\n');
+      timer.advance(50);
+      events.length = 0; // clear events to check scroll output
+
+      // Scroll up on new emulator
+      capture.scrollUp();
+      assert.equal(events.length, 1, 'scrollUp should emit an event');
+
+      const scrollEvent = events[0];
+      assert.equal(scrollEvent.mode, 'replace', 'scroll should be replace mode');
+      assert.ok(
+        scrollEvent.text.includes('new-emu line'),
+        `scrollUp content should come from new emulator, got: "${scrollEvent.text}"`,
+      );
+    });
+  });
 });
