@@ -16,15 +16,26 @@ Nugget is a Node.js framework that spawns Claude Code inside Docker sandboxes, m
 
 ## Features
 
-- Real-time terminal output mirrored to Telegram
-- Send text input and use inline buttons (approve, reject, scroll, navigate)
+### Remote Terminal Mirroring
+
+Real-time terminal output streamed to Telegram. Interact with sessions using inline buttons (approve, reject, scroll, navigate). Scroll lock lets you browse output while streaming continues. Multiple instances use a primary/secondary architecture with automatic promotion if the primary exits.
+
+### Automation Orchestration
+
+One Claude session (orchestrator) directs another (worker) via structured directives. Create an automation from the hub: select a worker session, select an orchestrator session, and enter a task description. The orchestrator issues directives -- COMMAND, SELECT, ENTER, WAIT, ESCALATE, YES, NO, CLEAR, RESET -- to drive the worker through multi-step tasks autonomously.
+
+Safety controls keep automation bounded: a configurable cycle limit (10--1000, default 100) caps how many directive cycles run before stopping, and ESCALATE lets the orchestrator hand a decision back to you. Monitor progress, pause, resume, or stop automations from the hub. Context persists across cycles so the orchestrator maintains awareness of prior work.
+
+### Notifications
+
+Togglable prompt-completion alerts (via `/settings`) notify you when a session finishes processing and is waiting for input, so you know exactly when to check back in.
+
+### Other Features
+
 - Multi-session support with a central hub
 - Session switching and concurrent named sessions
-- Scroll lock for browsing output while streaming continues
-- Prompt completion notifications
-- Configurable settings via /settings
-- Primary/secondary instance architecture with automatic promotion
 - Command allowlist for security
+- Configurable settings (notifications, enter confirmation, cycle limit)
 
 ## Prerequisites
 
@@ -33,7 +44,9 @@ Nugget is a Node.js framework that spawns Claude Code inside Docker sandboxes, m
 - Your Telegram user ID (from [@userinfobot](https://t.me/userinfobot))
 - Docker (if running Claude Code in sandboxes)
 
-## Installation
+## Quick Start
+
+### Installation
 
 ```bash
 git clone https://github.com/AshGw/nugget.git
@@ -41,7 +54,7 @@ cd nugget
 npm install
 ```
 
-## Configuration
+### Configuration
 
 Create a `.env` file from the example:
 
@@ -58,19 +71,33 @@ Then fill in your values:
 | `DB_PATH` | No | `./data/nugget.db` | SQLite database path |
 | `COMMAND_ALLOWLIST` | No | - | Comma-separated allowed commands |
 | `MAX_SESSIONS` | No | `3` | Maximum concurrent sessions |
+| `NUGGET_RUNTIME` | No | `sandbox` | Runtime mode: "sandbox" or "container" |
 
-## Usage
+### Running
+
+Build and link the CLI:
 
 ```bash
-# Development (watch mode)
-npm run dev
-
-# Production
 npm run build
-npm start
+npm link
+```
 
-# Start a named session
-npx nugget start my-project
+Start a named session:
+
+```bash
+nugget start my-project
+```
+
+Start a second session (becomes secondary, bridges to primary via IPC):
+
+```bash
+nugget start my-other-project
+```
+
+For development with watch mode:
+
+```bash
+npm run dev
 ```
 
 ## Telegram Commands
@@ -78,9 +105,8 @@ npx nugget start my-project
 | Command | Description |
 |---------|-------------|
 | `/start` | Welcome message and quick start |
-| `/hub` | Show sessions hub with switch/kill buttons |
-| `/controls` | Show session control buttons |
-| `/settings` | Configure notifications |
+| `/hub` | Show sessions hub with controls |
+| `/settings` | Configure notifications, enter confirmation, cycle limit |
 | `/help` | Command reference |
 
 Any text message sent to the bot is forwarded to the active session as input.
