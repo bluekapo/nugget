@@ -211,6 +211,11 @@ export class AutomationHubRenderer {
         await this.onRender?.();
         return 'Session not found';
       }
+      if (this.isAutomatedSession(sessionName)) {
+        this.pendingCreation = null;
+        await this.onRender?.();
+        return `Session "${sessionName}" is already in use by an active automation`;
+      }
       this.pendingCreation = {
         step: 'select-orchestrator',
         workerSession: sessionName,
@@ -221,6 +226,11 @@ export class AutomationHubRenderer {
 
     if (data.startsWith('auto:o:')) {
       const sessionName = data.slice('auto:o:'.length);
+      if (this.isAutomatedSession(sessionName)) {
+        this.pendingCreation = null;
+        await this.onRender?.();
+        return `Session "${sessionName}" is already in use by an active automation`;
+      }
       this.pendingCreation = {
         ...this.pendingCreation!,
         step: 'enter-task',
@@ -300,6 +310,13 @@ export class AutomationHubRenderer {
     logInfo(`[automation-hub] completeCreation(worker='${this.pendingCreation?.workerSession}', orch='${this.pendingCreation?.orchestratorSession}')`);
     if (!this.pendingCreation || (this.pendingCreation.step !== 'enter-task' && this.pendingCreation.step !== 'confirm-task')) return;
     if (!this.pendingCreation.workerSession || !this.pendingCreation.orchestratorSession) return;
+
+    // Race guard: sessions may have been claimed between selection and confirmation
+    if (this.isAutomatedSession(this.pendingCreation.workerSession) || this.isAutomatedSession(this.pendingCreation.orchestratorSession)) {
+      this.pendingCreation = null;
+      await this.onRender?.();
+      return;
+    }
 
     const config: EngineConfig = {
       workerSession: this.pendingCreation.workerSession,
