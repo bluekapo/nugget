@@ -315,8 +315,20 @@ function buildText(
     return ['<b>Automation Details</b>', '', 'No automation running.'].join('\n');
   }
 
-  // Automation hub view: intermediate summary with state, cycles, truncated task
+  // Automation hub view: multi-automation list or single-automation summary
   if (hubView === 'automationHub') {
+    // Multi-automation list: show numbered list with per-automation status
+    if (allAutos && allAutos.size > 1) {
+      const lines = [
+        '<b>Automation Hub</b>',
+        '',
+      ];
+      for (const [id, auto] of allAutos) {
+        lines.push(`${id}. ${engineStateLabel(auto.engine.state)} | ${auto.workerSession} \u2192 ${auto.orchestratorSession} | Cycles: ${auto.cycleCount}`);
+      }
+      return lines.join('\n');
+    }
+    // Single automation: backward-compatible summary with truncated task
     if (activeAuto) {
       const truncatedTask = activeAuto.taskDescription.length > 80
         ? activeAuto.taskDescription.slice(0, 80) + '...'
@@ -331,7 +343,7 @@ function buildText(
       ];
       return lines.join('\n');
     }
-    return ['<b>Automation Hub</b>', '', 'No automation running.', 'Tap New Automation to start.'].join('\n');
+    return ['<b>Automation Hub</b>', '', 'No automation running.', 'Tap New Automation to start.', '', '<i>Cycle limit configurable via /settings</i>'].join('\n');
   }
 
   if (sessions.length === 0) {
@@ -518,12 +530,23 @@ function buildKeyboard(
     return { inline_keyboard: keyboard };
   }
 
-  // Automation hub view: intermediate summary with View Details + Back
+  // Automation hub view: multi-automation detail buttons or single View Details + Back
   if (hubView === 'automationHub') {
-    if (activeAuto) {
-      keyboard.push([{ text: '\uD83D\uDD0D View Details', callback_data: 'hub:auto-details' }]);
+    const allAutos = automationHub?.allAutomations;
+    if (allAutos && allAutos.size > 1) {
+      // Per-automation detail buttons
+      for (const [id, auto] of allAutos) {
+        const stateEmoji = auto.engine.state === 'paused' ? '\u23F8' : '\uD83D\uDD0D';
+        keyboard.push([{ text: `${stateEmoji} ${auto.workerSession} \u2192 ${auto.orchestratorSession}`, callback_data: `auto:details:${id}` }]);
+      }
+      keyboard.push([{ text: '\uD83E\uDD16 New Automation', callback_data: 'auto:new' }]);
+      keyboard.push([{ text: '\u2190 Back to Sessions', callback_data: 'hub:auto-back' }]);
+    } else {
+      if (activeAuto) {
+        keyboard.push([{ text: '\uD83D\uDD0D View Details', callback_data: 'hub:auto-details' }]);
+      }
+      keyboard.push([{ text: '\u2190 Back to Sessions', callback_data: 'hub:auto-back' }]);
     }
-    keyboard.push([{ text: '\u2190 Back to Sessions', callback_data: 'hub:auto-back' }]);
     return { inline_keyboard: keyboard };
   }
 

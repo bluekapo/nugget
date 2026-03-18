@@ -1409,16 +1409,22 @@ describe('HubRenderer', () => {
       const firstText = api.calls[0].args[1] as string;
       assert.ok(firstText.includes('worker-1'), 'initial list should show worker-1');
       assert.ok(firstText.includes('worker-2'), 'initial list should show worker-2');
+      assert.ok(firstText.includes('Cycles: 5'), 'initial list should show cycles for auto 1');
+      assert.ok(firstText.includes('Cycles: 3'), 'initial list should show cycles for auto 2');
 
       // Simulate stopping automation 1 -- remove it from the mock
+      // With only 1 automation remaining, the view falls back to single-auto summary
       hub.setAutomationHub(createMultiMockAutomationHub([auto2]) as any);
 
       api.calls.length = 0;
       await hub.render({ forceNew: true });
 
       const secondText = api.calls.filter(c => c.method === 'sendMessage')[0]?.args[1] as string;
-      assert.ok(!secondText.includes('worker-1'), 'after stopping, should NOT show worker-1');
-      assert.ok(secondText.includes('worker-2'), 'after stopping, should still show worker-2');
+      // Should NOT contain the stopped automation's info
+      assert.ok(!secondText.includes('Fix bugs'), 'after stopping, should NOT show stopped automation task');
+      // Single-auto summary shows the remaining automation info
+      assert.ok(secondText.includes('Deploy'), 'after stopping, should show remaining automation task');
+      assert.ok(secondText.includes('Cycles: 3'), 'after stopping, should show remaining automation cycles');
     });
   });
 
