@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDirective, parseContextBlock, parseDirectiveWithContext } from '../../src/automation/directive-parser.js';
+import { parseDirective, parseContextBlock, parseDirectiveWithContext, stripPromptArtifacts } from '../../src/automation/directive-parser.js';
 import { stripAnsi, stripSpinners } from '../../src/automation/engine.js';
 
 describe('parseDirective', () => {
@@ -1021,5 +1021,95 @@ describe('AUTO-02: stripSpinners extension for Unicode spinners', () => {
     const text = 'some output\n  · Catapulting...\nprompt';
     const result = stripSpinners(text);
     assert.ok(!result.includes('Catapulting'), `should strip middle-dot spinner, got: ${result}`);
+  });
+});
+
+describe('stripPromptArtifacts', () => {
+  it('strips trailing horizontal rule and prompt chevron from text', () => {
+    const result = stripPromptArtifacts('do stuff ───────────────── ❯');
+    assert.strictEqual(result, 'do stuff');
+  });
+
+  it('strips embedded horizontal rule mid-text', () => {
+    const result = stripPromptArtifacts('first part ──────── second part');
+    assert.strictEqual(result, 'first part second part');
+  });
+
+  it('preserves legitimate dashes (e.g., --verbose)', () => {
+    const result = stripPromptArtifacts('npm test --verbose --coverage');
+    assert.strictEqual(result, 'npm test --verbose --coverage');
+  });
+
+  it('strips ❯ prompt character embedded in text', () => {
+    const result = stripPromptArtifacts('some command text ❯');
+    assert.strictEqual(result, 'some command text');
+  });
+
+  it('leaves normal text without artifacts unchanged', () => {
+    const result = stripPromptArtifacts('npm run build && npm test');
+    assert.strictEqual(result, 'npm run build && npm test');
+  });
+
+  it('collapses resulting multiple spaces after stripping', () => {
+    const result = stripPromptArtifacts('hello ─────  ❯  world');
+    assert.strictEqual(result, 'hello world');
+  });
+});
+
+describe('parseDirective strips prompt input field artifacts', () => {
+  it('COMMAND with trailing horizontal rule and ❯ yields clean command', () => {
+    const screenText = [
+      '● COMMAND: do stuff',
+      '  ───────────────────',
+      '  ❯',
+    ].join('\n');
+    const result = parseDirective(screenText);
+    // The ─── and ❯ lines are already stopped by collectContinuation boundary checks.
+    // But if they slip into the continuation text, stripPromptArtifacts cleans them.
+    assert.ok(result);
+    assert.strictEqual(result!.type, 'COMMAND');
+    assert.strictEqual(result!.command, 'do stuff');
+  });
+
+  it('COMMAND continuation with embedded ─── artifacts yields clean command', () => {
+    // Scenario: artifacts are embedded within continuation text (not on their own lines)
+    const screenText = [
+      '● COMMAND: npm test',
+      '  --coverage ──────────── ❯',
+    ].join('\n');
+    const result = parseDirective(screenText);
+    assert.ok(result);
+    assert.strictEqual(result!.type, 'COMMAND');
+    assert.strictEqual(result!.command, 'npm test --coverage');
+  });
+
+  it('ESCALATE continuation text gets artifacts stripped', () => {
+    const screenText = [
+      '● ESCALATE: Task appears complete',
+      '  all tests pass ─────────── ❯',
+    ].join('\n');
+    const result = parseDirective(screenText);
+    assert.ok(result);
+    assert.strictEqual(result!.type, 'ESCALATE');
+    assert.strictEqual((result as any).reason, 'Task appears complete all tests pass');
+  });
+
+  it('DONE continuation text gets artifacts stripped', () => {
+    const screenText = [
+      '● DONE: All tests pass',
+      '  feature works ────────── ❯',
+    ].join('\n');
+    const result = parseDirective(screenText);
+    assert.ok(result);
+    assert.strictEqual(result!.type, 'DONE');
+    assert.strictEqual((result as any).summary, 'All tests pass feature works');
+  });
+
+  it('COMMAND without artifacts is unchanged', () => {
+    const result = parseDirective('● COMMAND: git log --oneline | head -5');
+    assert.deepStrictEqual(result, {
+      type: 'COMMAND',
+      command: 'git log --oneline | head -5',
+    });
   });
 });
