@@ -76,13 +76,23 @@ function hasCompletionMarkerAfterResponse(text: string): boolean {
   return false;
 }
 
-const RETRY_PROMPT = 'Your previous response could not be parsed as a valid directive. '
-  + 'Please respond with exactly ONE of the following formats:\n'
-  + '- COMMAND: <shell command>\n'
+export const RETRY_PROMPT = 'Your previous response could not be parsed as a valid directive.\n'
+  + 'Respond with exactly ONE directive from:\n'
+  + '- COMMAND: <text to type into worker prompt>\n'
   + '- SELECT: <number>\n'
   + '- ENTER\n'
+  + '- DONE: <summary>\n'
   + '- ESCALATE: <reason>\n'
-  + '- DONE: <summary>';
+  + '- CLEAR\n'
+  + '- RESET\n'
+  + '\n'
+  + 'Optional modifier (on a separate line before or after the directive):\n'
+  + '- CONTEXT: <text> -- Attaches persistent memory carried across all future cycles.\n'
+  + '  Multiple CONTEXT lines stack. CONTEXT survives RESET.\n'
+  + '\n'
+  + 'Example:\n'
+  + 'CONTEXT: The project uses React 18\n'
+  + 'COMMAND: Fix the hook dependency array in useEffect';
 
 const CONSULTATION_RETRY_PROMPT = 'Your previous response could not be parsed. '
   + 'Do NOT use tools, read files, or investigate the project. '
