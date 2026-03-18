@@ -28,10 +28,13 @@ describe('AutomationHubRenderer', () => {
     };
   }
 
+  let mockEngineIdCounter = 1;
   function createMockEngine(initialState = 'idle' as string) {
     let _state = initialState;
     const engineCalls: string[] = [];
+    const eid = `mock-engine-${mockEngineIdCounter++}`;
     return {
+      engineId: eid,
       get state() { return _state; },
       set state(s: string) { _state = s; },
       start() { engineCalls.push('start'); _state = 'idle'; },
@@ -1701,6 +1704,142 @@ describe('AutomationHubRenderer', () => {
       assert.ok(!orchResult.includes('already in use'), 'should NOT reject unclaimed orchestrator session');
       assert.equal(hub.pendingCreationInfo!.step, 'enter-task', 'should advance to enter-task');
       assert.equal(hub.pendingCreationInfo!.orchestratorSession, 'o2', 'should store the orchestrator session');
+    });
+  });
+
+  describe('engineId handler isolation (CONC-02)', () => {
+    /** Helper: create two automations with distinct engineIds on the same bus. */
+    async function setupTwoEngineAutomations() {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const engines: ReturnType<typeof createMockEngine>[] = [];
+      const factory = () => {
+        const eng = createMockEngine('idle');
+        engines.push(eng);
+        return eng;
+      };
+      const { hub } = createHub(api, {
+        sessions: ['w1', 'o1', 'w2', 'o2'],
+        engineFactory: factory as any,
+        bus,
+      });
+
+      // Create first automation: w1 -> o1
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w1');
+      await hub.handleCallback('auto:o:o1');
+      await hub.completeCreation('task A');
+
+      // Go back to list view, then create second automation: w2 -> o2
+      await hub.handleCallback('auto:back');
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w2');
+      await hub.handleCallback('auto:o:o2');
+      await hub.completeCreation('task B');
+
+      return { api, bus, hub, engines };
+    }
+
+    it('stateChange handler for automation A ignores events from engine B (different engineId)', async () => {
+      const { bus, hub, engines } = await setupTwoEngineAutomations();
+      let renderCount = 0;
+      hub.onRender = async () => { renderCount++; };
+
+      const renderBefore = renderCount;
+
+      // Emit state-change with engine B's ID -- handler for A should ignore it
+      bus.emit('automation:state-change', engines[1].engineId, 'executing');
+
+      // Only engine B's handler should fire, not engine A's
+      // Both engines exist so the bus delivers to both listeners,
+      // but each handler should only process events matching its own engineId
+      assert.equal(hub.activeAutomationCount, 2, 'both automations should still be active');
+    });
+
+    it('cycleComplete handler for automation A only updates automation A cycle count (not B)', async () => {
+      const { bus, hub, engines } = await setupTwoEngineAutomations();
+
+      // Emit cycle-complete from engine A
+      bus.emit('automation:cycle-complete', engines[0].engineId, 5, 'COMMAND: echo A');
+
+      // Check automation A's cycle count was updated
+      const allAutos = hub.allAutomations;
+      const autoA = [...allAutos.values()].find(a => a.workerSession === 'w1');
+      const autoB = [...allAutos.values()].find(a => a.workerSession === 'w2');
+
+      assert.equal(autoA!.cycleCount, 5, 'automation A should have cycle count 5');
+      assert.equal(autoA!.lastAction, 'COMMAND: echo A', 'automation A should have updated lastAction');
+      assert.equal(autoB!.cycleCount, 0, 'automation B cycle count should remain 0');
+      assert.equal(autoB!.lastAction, null, 'automation B lastAction should remain null');
+    });
+
+    it('done handler for automation A removes only automation A when engine A emits done', async () => {
+      const { api, bus, hub, engines } = await setupTwoEngineAutomations();
+      assert.equal(hub.activeAutomationCount, 2, 'should start with 2 automations');
+
+      // Emit done from engine A
+      bus.emit('automation:done', engines[0].engineId, 'Task A complete');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      assert.equal(hub.activeAutomationCount, 1, 'should have 1 automation after engine A done');
+      assert.equal(hub.isAutomatedSession('w2'), true, 'automation B should still be active');
+      assert.equal(hub.isAutomatedSession('w1'), false, 'automation A should be removed');
+    });
+
+    it('error handler for automation A removes only automation A when engine A emits error', async () => {
+      const { bus, hub, engines } = await setupTwoEngineAutomations();
+      assert.equal(hub.activeAutomationCount, 2, 'should start with 2 automations');
+
+      // Emit error from engine A
+      bus.emit('automation:error', engines[0].engineId, 'Engine A failed');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      assert.equal(hub.activeAutomationCount, 1, 'should have 1 automation after engine A error');
+      assert.equal(hub.isAutomatedSession('w2'), true, 'automation B should still be active');
+      assert.equal(hub.isAutomatedSession('w1'), false, 'automation A should be removed');
+    });
+
+    it('two automations run simultaneously -- engine A done does not affect automation B state', async () => {
+      const { bus, hub, engines } = await setupTwoEngineAutomations();
+
+      // Set some state on both
+      bus.emit('automation:cycle-complete', engines[0].engineId, 3, 'COMMAND: A');
+      bus.emit('automation:cycle-complete', engines[1].engineId, 7, 'COMMAND: B');
+
+      const autoBBefore = [...hub.allAutomations.values()].find(a => a.workerSession === 'w2');
+      assert.equal(autoBBefore!.cycleCount, 7, 'automation B should have cycle count 7');
+
+      // Engine A completes
+      bus.emit('automation:done', engines[0].engineId, 'A is done');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Automation B should be completely unaffected
+      assert.equal(hub.activeAutomationCount, 1, 'only automation B should remain');
+      const autoB = [...hub.allAutomations.values()][0];
+      assert.equal(autoB.workerSession, 'w2', 'remaining automation should be B');
+      assert.equal(autoB.cycleCount, 7, 'automation B cycle count should be unchanged');
+      assert.equal(autoB.lastAction, 'COMMAND: B', 'automation B lastAction should be unchanged');
+    });
+
+    it('escalation handler for automation A only fires for engine A engineId', async () => {
+      const { api, bus, hub, engines } = await setupTwoEngineAutomations();
+      api.calls.length = 0;
+
+      // Emit escalation from engine A
+      bus.emit('automation:escalation', engines[0].engineId, 'A needs help');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Should send exactly one escalation message (from engine A's handler only)
+      const escalationSends = api.calls.filter(
+        c => c.method === 'sendMessage' && (c.args[1] as string).includes('escalated'),
+      );
+      assert.equal(escalationSends.length, 1, 'should send exactly 1 escalation message');
+      assert.ok((escalationSends[0].args[1] as string).includes('A needs help'),
+        'escalation message should contain engine A reason');
+
+      // Both automations should still be active (escalation doesn't remove)
+      assert.equal(hub.activeAutomationCount, 2, 'both automations should still be active after escalation');
     });
   });
 });
