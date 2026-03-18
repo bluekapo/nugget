@@ -378,10 +378,12 @@ function buildText(
     if (allAutos) {
       for (const auto of allAutos.values()) {
         if (s.name === auto.workerSession) {
-          line += ' [worker]';
+          const pauseTag = auto.engine.state === 'paused' ? ' \u23F8' : '';
+          line += ` [worker${pauseTag}]`;
           break;
         } else if (s.name === auto.orchestratorSession) {
-          line += ' [orch]';
+          const pauseTag = auto.engine.state === 'paused' ? ' \u23F8' : '';
+          line += ` [orch${pauseTag}]`;
           break;
         }
       }
