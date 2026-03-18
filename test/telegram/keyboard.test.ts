@@ -1126,6 +1126,7 @@ describe('InlineKeyboard', () => {
         undefined, // toggleAdvanced
         undefined, // onShutdown
         undefined, // deleteHub
+        undefined, // setHubView
         mockAutomationHub, // automationHub
       );
 
@@ -1144,6 +1145,130 @@ describe('InlineKeyboard', () => {
 
       assert.equal(handleCallbackCalledWith, 'auto:pause', 'should delegate to automationHub.handleCallback with callback data');
       assert.equal(answerText, 'Paused', 'should answer callback query with returned text');
+    });
+
+    it('auto:details:N callback transitions hub view to automationDetails (CONC-04)', async () => {
+      const regexHandlers: Array<{ pattern: RegExp; handler: (ctx: any) => Promise<void> }> = [];
+      const mockBot = {
+        callbackQuery(data: string | RegExp, handler: (ctx: any) => Promise<void>) {
+          if (data instanceof RegExp) {
+            regexHandlers.push({ pattern: data, handler });
+          }
+        },
+        on(_filter: string, _handler: unknown) {},
+      };
+
+      const mockSm = {
+        writeToSession(_name: string, _data: string) {},
+        async stop(_name: string) {},
+      };
+
+      const mockRouter = {
+        switchTo(_name: string) {},
+        remove(_name: string) {},
+        isRemote(_name: string) { return false; },
+        removeRemote(_name: string) {},
+        getAll() { return []; },
+        getRemoteBridge(_name: string) { return undefined; },
+      };
+
+      let setHubViewCalledWith = '';
+      const mockSetHubView = async (view: string) => {
+        setHubViewCalledWith = view;
+      };
+
+      const mockAutomationHub = {
+        async handleCallback(_data: string) { return ''; },
+        async render() {},
+      };
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'test-session',
+        mockRouter as any,
+        undefined, // refreshHub
+        undefined, // scrollHandler
+        undefined, // toggleAdvanced
+        undefined, // onShutdown
+        undefined, // deleteHub
+        mockSetHubView as any, // setHubView
+        mockAutomationHub, // automationHub
+      );
+
+      const autoHandler = regexHandlers.find(h => h.pattern.test('auto:details:1'));
+      assert.ok(autoHandler, 'auto:* regex handler should be registered');
+
+      const mockCtx = {
+        callbackQuery: { data: 'auto:details:1' },
+        async answerCallbackQuery(_opts?: { text?: string }) {},
+      };
+
+      await autoHandler.handler(mockCtx);
+
+      assert.equal(setHubViewCalledWith, 'automationDetails', 'auto:details:N should transition hub view to automationDetails');
+    });
+
+    it('auto:back callback transitions hub view to automationHub (CONC-04)', async () => {
+      const regexHandlers: Array<{ pattern: RegExp; handler: (ctx: any) => Promise<void> }> = [];
+      const mockBot = {
+        callbackQuery(data: string | RegExp, handler: (ctx: any) => Promise<void>) {
+          if (data instanceof RegExp) {
+            regexHandlers.push({ pattern: data, handler });
+          }
+        },
+        on(_filter: string, _handler: unknown) {},
+      };
+
+      const mockSm = {
+        writeToSession(_name: string, _data: string) {},
+        async stop(_name: string) {},
+      };
+
+      const mockRouter = {
+        switchTo(_name: string) {},
+        remove(_name: string) {},
+        isRemote(_name: string) { return false; },
+        removeRemote(_name: string) {},
+        getAll() { return []; },
+        getRemoteBridge(_name: string) { return undefined; },
+      };
+
+      let setHubViewCalledWith = '';
+      const mockSetHubView = async (view: string) => {
+        setHubViewCalledWith = view;
+      };
+
+      const mockAutomationHub = {
+        async handleCallback(_data: string) { return ''; },
+        async render() {},
+      };
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'test-session',
+        mockRouter as any,
+        undefined, // refreshHub
+        undefined, // scrollHandler
+        undefined, // toggleAdvanced
+        undefined, // onShutdown
+        undefined, // deleteHub
+        mockSetHubView as any, // setHubView
+        mockAutomationHub, // automationHub
+      );
+
+      const autoHandler = regexHandlers.find(h => h.pattern.test('auto:back'));
+      assert.ok(autoHandler, 'auto:* regex handler should be registered');
+
+      const mockCtx = {
+        callbackQuery: { data: 'auto:back' },
+        async answerCallbackQuery(_opts?: { text?: string }) {},
+      };
+
+      await autoHandler.handler(mockCtx);
+
+      assert.equal(setHubViewCalledWith, 'automationHub', 'auto:back should transition hub view to automationHub (not sessions)');
     });
 
     it('does not register auto:* handler when automationHub is not provided', () => {
