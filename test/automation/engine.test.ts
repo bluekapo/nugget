@@ -228,7 +228,7 @@ describe('AutomationEngine', () => {
   it('full COMMAND cycle: worker idle -> capture -> /clear -> prompt -> parse -> execute', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const cycleEvents: Array<{ cycle: number; action: string }> = [];
-    bus.on('automation:cycle-complete', (cycle, action) => {
+    bus.on('automation:cycle-complete', (_engineId, cycle, action) => {
       cycleEvents.push({ cycle, action });
     });
 
@@ -272,7 +272,7 @@ describe('AutomationEngine', () => {
   it('ESCALATE directive pauses engine and emits escalation event', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const escalations: string[] = [];
-    bus.on('automation:escalation', (reason) => {
+    bus.on('automation:escalation', (_engineId, reason) => {
       escalations.push(reason);
     });
 
@@ -375,7 +375,7 @@ describe('AutomationEngine', () => {
   it('emits automation:state-change events on transitions', () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const stateChanges: string[] = [];
-    bus.on('automation:state-change', (state) => {
+    bus.on('automation:state-change', (_engineId, state) => {
       stateChanges.push(state);
     });
 
@@ -434,7 +434,7 @@ describe('AutomationEngine', () => {
     config.maxCycles = 2;
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const errors: string[] = [];
-    bus.on('automation:error', (err) => errors.push(err));
+    bus.on('automation:error', (_engineId, err) => errors.push(err));
 
     engine.start();
 
@@ -473,8 +473,8 @@ describe('AutomationEngine', () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const errors: string[] = [];
     const cycles: number[] = [];
-    bus.on('automation:error', (err) => errors.push(err));
-    bus.on('automation:cycle-complete', (cycle) => cycles.push(cycle));
+    bus.on('automation:error', (_engineId, err) => errors.push(err));
+    bus.on('automation:cycle-complete', (_engineId, cycle) => cycles.push(cycle));
 
     engine.start();
 
@@ -503,7 +503,7 @@ describe('AutomationEngine', () => {
   it('SAF-02: engine retries once with clarifying re-prompt when directive parse fails', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const errors: string[] = [];
-    bus.on('automation:error', (err) => errors.push(err));
+    bus.on('automation:error', (_engineId, err) => errors.push(err));
 
     engine.start();
 
@@ -533,7 +533,7 @@ describe('AutomationEngine', () => {
   it('SAF-02: engine retries again after second parse failure (unlimited retries)', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const errors: string[] = [];
-    bus.on('automation:error', (err) => errors.push(err));
+    bus.on('automation:error', (_engineId, err) => errors.push(err));
 
     engine.start();
 
@@ -569,7 +569,7 @@ describe('AutomationEngine', () => {
   it('SAF-03: engine stops when worker session:exit fires during automation', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const errors: string[] = [];
-    bus.on('automation:error', (err) => errors.push(err));
+    bus.on('automation:error', (_engineId, err) => errors.push(err));
 
     engine.start();
     assert.equal(engine.state, 'idle');
@@ -586,7 +586,7 @@ describe('AutomationEngine', () => {
   it('SAF-03: engine stops when orchestrator session:exit fires during automation', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const errors: string[] = [];
-    bus.on('automation:error', (err) => errors.push(err));
+    bus.on('automation:error', (_engineId, err) => errors.push(err));
 
     engine.start();
     assert.equal(engine.state, 'idle');
@@ -603,7 +603,7 @@ describe('AutomationEngine', () => {
   it('SAF-03: engine ignores session:exit for unrelated sessions', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const errors: string[] = [];
-    bus.on('automation:error', (err) => errors.push(err));
+    bus.on('automation:error', (_engineId, err) => errors.push(err));
 
     engine.start();
     assert.equal(engine.state, 'idle');
@@ -620,7 +620,7 @@ describe('AutomationEngine', () => {
   it('SAF-03: session:exit listener is cleaned up on stop()', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const errors: string[] = [];
-    bus.on('automation:error', (err) => errors.push(err));
+    bus.on('automation:error', (_engineId, err) => errors.push(err));
 
     engine.start();
     engine.stop();
@@ -706,7 +706,7 @@ describe('AutomationEngine', () => {
 
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const cycleEvents: Array<{ cycle: number; action: string }> = [];
-    bus.on('automation:cycle-complete', (cycle, action) => {
+    bus.on('automation:cycle-complete', (_engineId, cycle, action) => {
       cycleEvents.push({ cycle, action });
     });
 
@@ -799,7 +799,7 @@ describe('AutomationEngine', () => {
   it('orchestrator response with bare ✻ idle prompt does not stall at waiting-response', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const cycleEvents: Array<{ cycle: number; action: string }> = [];
-    bus.on('automation:cycle-complete', (cycle, action) => {
+    bus.on('automation:cycle-complete', (_engineId, cycle, action) => {
       cycleEvents.push({ cycle, action });
     });
 
@@ -836,7 +836,7 @@ describe('AutomationEngine', () => {
   it('waiting-response poll: engine detects response via directive polling when completion marker is absent', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const cycleEvents: Array<{ cycle: number; action: string }> = [];
-    bus.on('automation:cycle-complete', (cycle, action) => {
+    bus.on('automation:cycle-complete', (_engineId, cycle, action) => {
       cycleEvents.push({ cycle, action });
     });
 
@@ -874,7 +874,7 @@ describe('AutomationEngine', () => {
   it('response poll runs indefinitely when no directive appears, then completes when it does', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const cycleEvents: Array<{ cycle: number; action: string }> = [];
-    bus.on('automation:cycle-complete', (cycle, action) => {
+    bus.on('automation:cycle-complete', (_engineId, cycle, action) => {
       cycleEvents.push({ cycle, action });
     });
 
@@ -1055,7 +1055,7 @@ describe('AutomationEngine', () => {
   it('echoed worker screen with indented ● and ✻ does not trigger false completion', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const errors: string[] = [];
-    bus.on('automation:error', (err) => errors.push(err));
+    bus.on('automation:error', (_engineId, err) => errors.push(err));
 
     engine.start();
 
@@ -1098,7 +1098,7 @@ describe('AutomationEngine', () => {
   it('real column-0 response detected after echoed indented content', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const cycleEvents: Array<{ cycle: number; action: string }> = [];
-    bus.on('automation:cycle-complete', (cycle, action) => {
+    bus.on('automation:cycle-complete', (_engineId, cycle, action) => {
       cycleEvents.push({ cycle, action });
     });
 
@@ -1144,7 +1144,7 @@ describe('AutomationEngine', () => {
   it('DONE directive stops engine and emits automation:done', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const doneSummaries: string[] = [];
-    bus.on('automation:done', (summary) => {
+    bus.on('automation:done', (_engineId, summary) => {
       doneSummaries.push(summary);
     });
 
@@ -1175,7 +1175,7 @@ describe('AutomationEngine', () => {
   it('ESCALATE still pauses engine after DONE is added (unchanged behavior)', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     const escalations: string[] = [];
-    bus.on('automation:escalation', (reason) => {
+    bus.on('automation:escalation', (_engineId, reason) => {
       escalations.push(reason);
     });
 
@@ -1418,7 +1418,7 @@ describe('AutomationEngine', () => {
     const stagnationConfig = { ...config, stagnationDelay: 200, consultationWaitDelay: 300 };
     engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
     const cycleEvents: Array<{ cycle: number; action: string }> = [];
-    bus.on('automation:cycle-complete', (cycle: number, action: string) => {
+    bus.on('automation:cycle-complete', (_engineId: string, cycle: number, action: string) => {
       cycleEvents.push({ cycle, action });
     });
     engine.start();
@@ -1555,7 +1555,7 @@ describe('AutomationEngine', () => {
     const stagnationConfig = { ...config, stagnationDelay: 200, consultationWaitDelay: 300 };
     engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
     const errors: string[] = [];
-    bus.on('automation:error', (err: string) => {
+    bus.on('automation:error', (_engineId: string, err: string) => {
       errors.push(err);
     });
     engine.start();
@@ -1864,7 +1864,7 @@ describe('AutomationEngine', () => {
     it('polls worker for (no content) and completes CLEAR', async () => {
       engine = new AutomationEngine(config, mockSessionManager, bus);
       const cycleEvents: Array<{ cycle: number; action: string }> = [];
-      bus.on('automation:cycle-complete', (cycle, action) => {
+      bus.on('automation:cycle-complete', (_engineId, cycle, action) => {
         cycleEvents.push({ cycle, action });
       });
 
@@ -1942,7 +1942,7 @@ describe('AutomationEngine', () => {
       const stagnationConfig = { ...config, stagnationDelay: 200 };
       engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
       const consultationEvents: string[] = [];
-      bus.on('automation:state-change', (state: string) => {
+      bus.on('automation:state-change', (_engineId: string, state: string) => {
         if (state === 'clearing-orchestrator' || state === 'consulting-orchestrator') {
           consultationEvents.push(state);
         }
@@ -2391,7 +2391,7 @@ describe('AutomationEngine', () => {
         },
       };
       errorEvents = [];
-      bus.on('automation:error', (err: string) => errorEvents.push(err));
+      bus.on('automation:error', (_eid: string, err: string) => errorEvents.push(err));
     });
 
     it('onWorkerIdle /clear write failure: engine stops gracefully with EXEC_FAILURE', async () => {
@@ -2485,7 +2485,7 @@ describe('AutomationEngine', () => {
       // subsequent idle detection may break.
       engine = new AutomationEngine(config, mockSessionManager, bus);
       const cycleEvents: Array<{ cycle: number; action: string }> = [];
-      bus.on('automation:cycle-complete', (cycle, action) => {
+      bus.on('automation:cycle-complete', (_engineId, cycle, action) => {
         cycleEvents.push({ cycle, action });
       });
 
@@ -2535,9 +2535,9 @@ describe('AutomationEngine', () => {
     it('times out after 30s when worker does not produce "(no content)"', async () => {
       engine = new AutomationEngine(config, mockSessionManager, bus);
       const warningEvents: string[] = [];
-      bus.on('automation:warning', (msg: string) => warningEvents.push(msg));
+      bus.on('automation:warning', (_eid: string, msg: string) => warningEvents.push(msg));
       const cycleEvents: Array<{ cycle: number; action: string }> = [];
-      bus.on('automation:cycle-complete', (cycle: number, action: string) => {
+      bus.on('automation:cycle-complete', (_engineId: string, cycle: number, action: string) => {
         cycleEvents.push({ cycle, action });
       });
 
@@ -2568,7 +2568,7 @@ describe('AutomationEngine', () => {
     it('normal "(no content)" success cancels deadline timer — no warning fires later', async () => {
       engine = new AutomationEngine(config, mockSessionManager, bus);
       const warningEvents: string[] = [];
-      bus.on('automation:warning', (msg: string) => warningEvents.push(msg));
+      bus.on('automation:warning', (_eid: string, msg: string) => warningEvents.push(msg));
 
       engine.start();
       timer.advance(1);
@@ -2596,7 +2596,7 @@ describe('AutomationEngine', () => {
     it('no double cycle-complete when both poll-success and deadline could fire', async () => {
       engine = new AutomationEngine(config, mockSessionManager, bus);
       const cycleEvents: Array<{ cycle: number; action: string }> = [];
-      bus.on('automation:cycle-complete', (cycle: number, action: string) => {
+      bus.on('automation:cycle-complete', (_engineId: string, cycle: number, action: string) => {
         cycleEvents.push({ cycle, action });
       });
 
@@ -2662,11 +2662,11 @@ describe('AutomationEngine', () => {
       let cycleCompleteCount = 0;
       let cycleCountAtStateIdle = -1;
 
-      bus.on('automation:cycle-complete', (_cycleNumber: number, _action: string) => {
+      bus.on('automation:cycle-complete', (_eid: string, _cycleNumber: number, _action: string) => {
         cycleCompleteCount = _cycleNumber;
       });
 
-      bus.on('automation:state-change', (state: string) => {
+      bus.on('automation:state-change', (_engineId: string, state: string) => {
         if (state === 'idle' && cycleCompleteCount > 0) {
           // Record what cycleCount was when state-change fired with 'idle'
           cycleCountAtStateIdle = cycleCompleteCount;
@@ -2736,7 +2736,7 @@ describe('AutomationEngine', () => {
     it('stripSpinners consistency: spinner lines between directive lines are stripped in poll', async () => {
       engine = new AutomationEngine(config, mockSessionManager, bus);
       const cycleEvents: Array<{ cycle: number; action: string }> = [];
-      bus.on('automation:cycle-complete', (cycle, action) => {
+      bus.on('automation:cycle-complete', (_engineId, cycle, action) => {
         cycleEvents.push({ cycle, action });
       });
 

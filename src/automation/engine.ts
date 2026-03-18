@@ -170,6 +170,8 @@ interface SessionWriter {
 }
 
 export class AutomationEngine {
+  private static nextId = 1;
+  readonly engineId: string;
   private _state: EngineState = 'stopped';
   private workerMonitor: SessionMonitor | null = null;
   private orchestratorMonitor: SessionMonitor | null = null;
@@ -210,6 +212,7 @@ export class AutomationEngine {
     private readonly sessionManager: SessionWriter,
     private readonly bus: EventBus,
   ) {
+    this.engineId = `auto-${AutomationEngine.nextId++}`;
     this.timer = config.timer ?? {
       setTimeout: (cb, delay) => globalThis.setTimeout(cb, delay),
       clearTimeout: (id) => globalThis.clearTimeout(id as ReturnType<typeof setTimeout>),
@@ -307,7 +310,7 @@ export class AutomationEngine {
       if (this._state === 'stopped') return;
       if (name === this.config.workerSession || name === this.config.orchestratorSession) {
         const role = name === this.config.workerSession ? 'Worker' : 'Orchestrator';
-        this.bus.emit('automation:error', `${role} session "${name}" disconnected`);
+        this.bus.emit('automation:error', this.engineId, `${role} session "${name}" disconnected`);
         this.stop();
       }
     };
@@ -407,7 +410,7 @@ export class AutomationEngine {
       this.startStagnationTimer();
     }
 
-    this.bus.emit('automation:state-change', newState);
+    this.bus.emit('automation:state-change', this.engineId, newState);
   }
 
   private onWorkerIdle(): void {
@@ -416,7 +419,7 @@ export class AutomationEngine {
 
     // SAF-01: Cycle limit guard
     if (this.cycleNumber >= this.maxCycles) {
-      this.bus.emit('automation:error', `Cycle limit reached (${this.maxCycles})`);
+      this.bus.emit('automation:error', this.engineId, `Cycle limit reached (${this.maxCycles})`);
       this.stop();
       return;
     }
@@ -479,7 +482,7 @@ export class AutomationEngine {
       const msg = err instanceof Error ? err.message : String(err);
       debugLog(`[onWorkerIdle] write failed: ${msg}`);
       this.actionLog.add('EXEC_FAILURE', msg);
-      this.bus.emit('automation:error', `Execution failed: ${msg}`);
+      this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
       this.stop();
       return;
     }
@@ -525,7 +528,7 @@ export class AutomationEngine {
       const msg = err instanceof Error ? err.message : String(err);
       debugLog(`[onClearComplete] write failed: ${msg}`);
       this.actionLog.add('EXEC_FAILURE', msg);
-      this.bus.emit('automation:error', `Execution failed: ${msg}`);
+      this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
       this.stop();
       return;
     }
@@ -539,7 +542,7 @@ export class AutomationEngine {
         const msg = err instanceof Error ? err.message : String(err);
         debugLog(`[onClearComplete] Enter write failed: ${msg}`);
         this.actionLog.add('EXEC_FAILURE', msg);
-        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
         this.stop();
         return;
       }
@@ -580,7 +583,7 @@ export class AutomationEngine {
       const msg = err instanceof Error ? err.message : String(err);
       debugLog(`[sendFollowUpPrompt] write failed: ${msg}`);
       this.actionLog.add('EXEC_FAILURE', msg);
-      this.bus.emit('automation:error', `Execution failed: ${msg}`);
+      this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
       this.stop();
       return;
     }
@@ -594,7 +597,7 @@ export class AutomationEngine {
         const msg = err instanceof Error ? err.message : String(err);
         debugLog(`[sendFollowUpPrompt] Enter write failed: ${msg}`);
         this.actionLog.add('EXEC_FAILURE', msg);
-        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
         this.stop();
         return;
       }
@@ -636,7 +639,7 @@ export class AutomationEngine {
     // SAF-02: Parse retry logic
     if (!directive && !this.retryAttempted) {
       this.retryAttempted = true;
-      this.bus.emit('automation:warning', 'Failed to parse directive from orchestrator response, retrying');
+      this.bus.emit('automation:warning', this.engineId, 'Failed to parse directive from orchestrator response, retrying');
 
       // Send clarifying re-prompt text (without Enter), then submit after delay
       try {
@@ -645,7 +648,7 @@ export class AutomationEngine {
         const msg = err instanceof Error ? err.message : String(err);
         debugLog(`[onResponseReady] retry write failed: ${msg}`);
         this.actionLog.add('EXEC_FAILURE', msg);
-        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
         this.stop();
         return;
       }
@@ -660,7 +663,7 @@ export class AutomationEngine {
           const msg = err instanceof Error ? err.message : String(err);
           debugLog(`[onResponseReady] retry Enter write failed: ${msg}`);
           this.actionLog.add('EXEC_FAILURE', msg);
-          this.bus.emit('automation:error', `Execution failed: ${msg}`);
+          this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
           this.stop();
           return;
         }
@@ -684,7 +687,7 @@ export class AutomationEngine {
       debugLog(`[onResponseReady] parse failed after retry — retrying again`);
       this.retryAttempted = false;  // Reset so the retry-prompt block above fires again
       this.actionLog.add('PARSE_FAILURE', stripped.slice(0, 200));
-      this.bus.emit('automation:warning', 'Failed to parse orchestrator response, retrying again');
+      this.bus.emit('automation:warning', this.engineId, 'Failed to parse orchestrator response, retrying again');
 
       try {
         this.sessionManager.writeToSession(this.config.orchestratorSession, RETRY_PROMPT);
@@ -692,7 +695,7 @@ export class AutomationEngine {
         const msg = err instanceof Error ? err.message : String(err);
         debugLog(`[onResponseReady] unlimited retry write failed: ${msg}`);
         this.actionLog.add('EXEC_FAILURE', msg);
-        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
         this.stop();
         return;
       }
@@ -706,7 +709,7 @@ export class AutomationEngine {
           const msg = err instanceof Error ? err.message : String(err);
           debugLog(`[onResponseReady] unlimited retry Enter failed: ${msg}`);
           this.actionLog.add('EXEC_FAILURE', msg);
-          this.bus.emit('automation:error', `Execution failed: ${msg}`);
+          this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
           this.stop();
           return;
         }
@@ -735,7 +738,7 @@ export class AutomationEngine {
         const msg = err instanceof Error ? err.message : String(err);
         debugLog(`[onResponseReady] CLEAR write failed: ${msg}`);
         this.actionLog.add('EXEC_FAILURE', msg);
-        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
         this.stop();
         return;
       }
@@ -754,7 +757,7 @@ export class AutomationEngine {
         const msg = err instanceof Error ? err.message : String(err);
         debugLog(`[onResponseReady] RESET write failed: ${msg}`);
         this.actionLog.add('EXEC_FAILURE', msg);
-        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
         this.stop();
         return;
       }
@@ -783,14 +786,14 @@ export class AutomationEngine {
       const msg = err instanceof Error ? err.message : String(err);
       debugLog(`[onResponseReady] executeDirective failed: ${msg}`);
       this.actionLog.add('EXEC_FAILURE', msg);
-      this.bus.emit('automation:error', `Execution failed: ${msg}`);
+      this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
       this.stop();
       return;
     }
 
     if (directive.type === 'DONE') {
       this.actionLog.add(result.description, result.doneSummary ?? 'done');
-      this.bus.emit('automation:done', result.doneSummary ?? directive.summary);
+      this.bus.emit('automation:done', this.engineId, result.doneSummary ?? directive.summary);
       // Remove session exit handler BEFORE stop() to prevent race condition
       if (this.sessionExitHandler) {
         this.bus.off('session:exit', this.sessionExitHandler);
@@ -802,14 +805,14 @@ export class AutomationEngine {
 
     if (directive.type === 'ESCALATE') {
       this.actionLog.add(result.description, result.escalateReason ?? 'escalated');
-      this.bus.emit('automation:escalation', result.escalateReason ?? directive.reason);
+      this.bus.emit('automation:escalation', this.engineId, result.escalateReason ?? directive.reason);
       this.setState('paused');
       return;
     }
 
     // COMMAND or ENTER -- log and complete cycle
     this.actionLog.add(result.description, '(awaiting result)');
-    this.bus.emit('automation:cycle-complete', this.cycleNumber, result.description);
+    this.bus.emit('automation:cycle-complete', this.engineId, this.cycleNumber, result.description);
 
     // Reset worker monitor for next cycle and re-enter idle
     if (this.workerMonitor) {
@@ -839,7 +842,7 @@ export class AutomationEngine {
           const msg = err instanceof Error ? err.message : String(err);
           debugLog(`[sendSelect] arrow-down write failed: ${msg}`);
           this.actionLog.add('EXEC_FAILURE', msg);
-          this.bus.emit('automation:error', `Execution failed: ${msg}`);
+          this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
           this.stop();
           return;
         }
@@ -853,7 +856,7 @@ export class AutomationEngine {
           const msg = err instanceof Error ? err.message : String(err);
           debugLog(`[sendSelect] Enter write failed: ${msg}`);
           this.actionLog.add('EXEC_FAILURE', msg);
-          this.bus.emit('automation:error', `Execution failed: ${msg}`);
+          this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
           this.stop();
           return;
         }
@@ -861,7 +864,7 @@ export class AutomationEngine {
         // Log and complete cycle
         const description = `SELECT: ${option}`;
         this.actionLog.add(description, '(awaiting result)');
-        this.bus.emit('automation:cycle-complete', this.cycleNumber, description);
+        this.bus.emit('automation:cycle-complete', this.engineId, this.cycleNumber, description);
 
         // Reset worker monitor for next cycle
         if (this.workerMonitor) {
@@ -881,7 +884,7 @@ export class AutomationEngine {
         const msg = err instanceof Error ? err.message : String(err);
         debugLog(`[sendSelect] first arrow-down write failed: ${msg}`);
         this.actionLog.add('EXEC_FAILURE', msg);
-        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
         this.stop();
         return;
       }
@@ -895,13 +898,13 @@ export class AutomationEngine {
         const msg = err instanceof Error ? err.message : String(err);
         debugLog(`[sendSelect] SELECT:1 Enter write failed: ${msg}`);
         this.actionLog.add('EXEC_FAILURE', msg);
-        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
         this.stop();
         return;
       }
       const description = `SELECT: ${option}`;
       this.actionLog.add(description, '(awaiting result)');
-      this.bus.emit('automation:cycle-complete', this.cycleNumber, description);
+      this.bus.emit('automation:cycle-complete', this.engineId, this.cycleNumber, description);
       if (this.workerMonitor) {
         this.workerMonitor.capture.resetBaseline();
         this.workerMonitor.capture.markInputSent();
@@ -944,7 +947,7 @@ export class AutomationEngine {
         const msg = err instanceof Error ? err.message : String(err);
         debugLog(`[clear-poll] EXCEPTION: ${msg}`);
         this.actionLog.add('EXEC_FAILURE', `Clear polling error: ${msg}`);
-        this.bus.emit('automation:error', `Clear polling failed: ${msg}`);
+        this.bus.emit('automation:error', this.engineId, `Clear polling failed: ${msg}`);
         this.stop();
       }
     }, 1000);
@@ -1006,7 +1009,7 @@ export class AutomationEngine {
         const msg = err instanceof Error ? err.message : String(err);
         debugLog(`[response-poll] EXCEPTION: ${msg}`);
         this.actionLog.add('EXEC_FAILURE', `Response polling error: ${msg}`);
-        this.bus.emit('automation:error', `Response polling failed: ${msg}`);
+        this.bus.emit('automation:error', this.engineId, `Response polling failed: ${msg}`);
         this.stop();
       }
     }, 1000);
@@ -1033,8 +1036,8 @@ export class AutomationEngine {
       this.workerClearBuffer = '';
 
       this.actionLog.updateLastOutcome('Worker context cleared (timeout)');
-      this.bus.emit('automation:warning', `Worker CLEAR poll timed out after ${CLEAR_TIMEOUT_MS / 1000}s — continuing`);
-      this.bus.emit('automation:cycle-complete', this.cycleNumber, 'CLEAR');
+      this.bus.emit('automation:warning', this.engineId, `Worker CLEAR poll timed out after ${CLEAR_TIMEOUT_MS / 1000}s — continuing`);
+      this.bus.emit('automation:cycle-complete', this.engineId, this.cycleNumber, 'CLEAR');
 
       // Same post-CLEAR continuation as the normal success path
       if (this.workerMonitor) {
@@ -1069,7 +1072,7 @@ export class AutomationEngine {
           this.cancelWorkerClearPolling();  // cancel both poll timer and deadline timer
           this.workerClearBuffer = '';
           this.actionLog.updateLastOutcome('Worker context cleared');
-          this.bus.emit('automation:cycle-complete', this.cycleNumber, 'CLEAR');
+          this.bus.emit('automation:cycle-complete', this.engineId, this.cycleNumber, 'CLEAR');
 
           // Reset worker monitor for next cycle
           if (this.workerMonitor) {
@@ -1096,7 +1099,7 @@ export class AutomationEngine {
         const msg = err instanceof Error ? err.message : String(err);
         debugLog(`[worker-clear-poll] EXCEPTION: ${msg}`);
         this.actionLog.add('EXEC_FAILURE', `Worker clear polling error: ${msg}`);
-        this.bus.emit('automation:error', `Worker clear polling failed: ${msg}`);
+        this.bus.emit('automation:error', this.engineId, `Worker clear polling failed: ${msg}`);
         this.stop();
       }
     }, 1000);
@@ -1185,7 +1188,7 @@ export class AutomationEngine {
       const msg = err instanceof Error ? err.message : String(err);
       debugLog(`[onWorkerStagnation] write failed: ${msg}`);
       this.actionLog.add('EXEC_FAILURE', msg);
-      this.bus.emit('automation:error', `Execution failed: ${msg}`);
+      this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
       this.stop();
       return;
     }
@@ -1222,7 +1225,7 @@ export class AutomationEngine {
       const msg = err instanceof Error ? err.message : String(err);
       debugLog(`[onConsultationClearComplete] write failed: ${msg}`);
       this.actionLog.add('EXEC_FAILURE', msg);
-      this.bus.emit('automation:error', `Execution failed: ${msg}`);
+      this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
       this.stop();
       return;
     }
@@ -1236,7 +1239,7 @@ export class AutomationEngine {
         const msg = err instanceof Error ? err.message : String(err);
         debugLog(`[onConsultationClearComplete] Enter write failed: ${msg}`);
         this.actionLog.add('EXEC_FAILURE', msg);
-        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
         this.stop();
         return;
       }
@@ -1353,7 +1356,7 @@ export class AutomationEngine {
         const msg = err instanceof Error ? err.message : String(err);
         debugLog(`[onConsultationResponse] retry write failed: ${msg}`);
         this.actionLog.add('EXEC_FAILURE', msg);
-        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
         this.stop();
         return;
       }
@@ -1368,7 +1371,7 @@ export class AutomationEngine {
           const msg = err instanceof Error ? err.message : String(err);
           debugLog(`[onConsultationResponse] retry Enter write failed: ${msg}`);
           this.actionLog.add('EXEC_FAILURE', msg);
-          this.bus.emit('automation:error', `Execution failed: ${msg}`);
+          this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
           this.stop();
           return;
         }
@@ -1389,7 +1392,7 @@ export class AutomationEngine {
     // Retry already attempted — retry again (unlimited)
     debugLog(`[onConsultationResponse] parse failed after retry — retrying again`);
     this.retryAttempted = false;  // Reset so the retry block above fires again
-    this.bus.emit('automation:warning', 'Failed to parse consultation response, retrying again');
+    this.bus.emit('automation:warning', this.engineId, 'Failed to parse consultation response, retrying again');
 
     try {
       this.sessionManager.writeToSession(this.config.orchestratorSession, CONSULTATION_RETRY_PROMPT);
@@ -1397,7 +1400,7 @@ export class AutomationEngine {
       const msg = err instanceof Error ? err.message : String(err);
       debugLog(`[onConsultationResponse] unlimited retry write failed: ${msg}`);
       this.actionLog.add('EXEC_FAILURE', msg);
-      this.bus.emit('automation:error', `Execution failed: ${msg}`);
+      this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
       this.stop();
       return;
     }
@@ -1411,7 +1414,7 @@ export class AutomationEngine {
         const msg = err instanceof Error ? err.message : String(err);
         debugLog(`[onConsultationResponse] unlimited retry Enter failed: ${msg}`);
         this.actionLog.add('EXEC_FAILURE', msg);
-        this.bus.emit('automation:error', `Execution failed: ${msg}`);
+        this.bus.emit('automation:error', this.engineId, `Execution failed: ${msg}`);
         this.stop();
         return;
       }
