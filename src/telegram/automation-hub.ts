@@ -26,6 +26,7 @@ export interface PendingCreation {
 }
 
 export interface ActiveAutomation {
+  engineId: string;
   engine: AutomationEngine;
   workerSession: string;
   orchestratorSession: string;
@@ -34,12 +35,12 @@ export interface ActiveAutomation {
   lastAction: string | null;
   startTime: number;
   handlers: {
-    stateChange: (state: string) => void;
-    cycleComplete: (cycleNumber: number, action: string) => void;
-    escalation: (reason: string) => void;
-    done: (summary: string) => void;
-    error: (error: string) => void;
-    warning: (message: string) => void;
+    stateChange: (engineId: string, state: string) => void;
+    cycleComplete: (engineId: string, cycleNumber: number, action: string) => void;
+    escalation: (engineId: string, reason: string) => void;
+    done: (engineId: string, summary: string) => void;
+    error: (engineId: string, error: string) => void;
+    warning: (engineId: string, message: string) => void;
   };
 }
 
@@ -327,13 +328,15 @@ export class AutomationHubRenderer {
     const engine = this.engineFactory(config, this.bus);
     const id = this.nextAutomationId++;
 
-    // Build per-automation handlers that capture the automation ID
+    // Build per-automation handlers that capture the automation ID and filter by engineId
     const handlers = {
-      stateChange: (_state: string) => {
+      stateChange: (eid: string, _state: string) => {
+        if (eid !== engine.engineId) return;
         this.onRender?.();
         this.persistState();
       },
-      cycleComplete: (cycleNumber: number, action: string) => {
+      cycleComplete: (eid: string, cycleNumber: number, action: string) => {
+        if (eid !== engine.engineId) return;
         const auto = this.activeAutomations.get(id);
         if (auto) {
           auto.cycleCount = cycleNumber;
@@ -343,7 +346,8 @@ export class AutomationHubRenderer {
         // and will trigger the render with both updated cycle count and state
         this.persistState();
       },
-      escalation: (reason: string) => {
+      escalation: (eid: string, reason: string) => {
+        if (eid !== engine.engineId) return;
         this.api.sendMessage(this.chatId, `Automation escalated: ${reason}`, {
           parse_mode: 'HTML',
           reply_markup: {
@@ -352,7 +356,8 @@ export class AutomationHubRenderer {
         }).catch(() => {});
         this.onRender?.();
       },
-      done: (_summary: string) => {
+      done: (eid: string, _summary: string) => {
+        if (eid !== engine.engineId) return;
         // Capture automation state BEFORE cleanup
         const auto = this.activeAutomations.get(id);
         if (auto) {
@@ -374,7 +379,8 @@ export class AutomationHubRenderer {
         this.onRender?.();
         this.persistState();
       },
-      error: (error: string) => {
+      error: (eid: string, error: string) => {
+        if (eid !== engine.engineId) return;
         this.api.sendMessage(this.chatId, `Automation error: ${error}`, {
           parse_mode: 'HTML',
           reply_markup: {
@@ -386,13 +392,15 @@ export class AutomationHubRenderer {
         this.onRender?.();
         this.persistState();
       },
-      warning: (_message: string) => {
+      warning: (eid: string, _message: string) => {
+        if (eid !== engine.engineId) return;
         // Non-destructive: engine handles retries internally.
         // Do NOT delete automation from Map or clear detailViewId.
       },
     };
 
     const automation: ActiveAutomation = {
+      engineId: engine.engineId,
       engine,
       workerSession: config.workerSession,
       orchestratorSession: config.orchestratorSession,
@@ -507,13 +515,15 @@ export class AutomationHubRenderer {
         this.nextAutomationId = id + 1;
       }
 
-      // Build per-automation handlers (same pattern as completeCreation)
+      // Build per-automation handlers (same pattern as completeCreation) with engineId filtering
       const handlers = {
-        stateChange: (_state: string) => {
+        stateChange: (eid: string, _state: string) => {
+          if (eid !== engine.engineId) return;
           this.onRender?.();
           this.persistState();
         },
-        cycleComplete: (cycleNumber: number, action: string) => {
+        cycleComplete: (eid: string, cycleNumber: number, action: string) => {
+          if (eid !== engine.engineId) return;
           const auto = this.activeAutomations.get(id);
           if (auto) {
             auto.cycleCount = cycleNumber;
@@ -523,7 +533,8 @@ export class AutomationHubRenderer {
           // and will trigger the render with both updated cycle count and state
           this.persistState();
         },
-        escalation: (reason: string) => {
+        escalation: (eid: string, reason: string) => {
+          if (eid !== engine.engineId) return;
           this.api.sendMessage(this.chatId, `Automation escalated: ${reason}`, {
             parse_mode: 'HTML',
             reply_markup: {
@@ -532,7 +543,8 @@ export class AutomationHubRenderer {
           }).catch(() => {});
           this.onRender?.();
         },
-        done: (_summary: string) => {
+        done: (eid: string, _summary: string) => {
+          if (eid !== engine.engineId) return;
           // Capture automation state BEFORE cleanup
           const auto = this.activeAutomations.get(id);
           if (auto) {
@@ -554,7 +566,8 @@ export class AutomationHubRenderer {
           this.onRender?.();
           this.persistState();
         },
-        error: (error: string) => {
+        error: (eid: string, error: string) => {
+          if (eid !== engine.engineId) return;
           this.api.sendMessage(this.chatId, `Automation error: ${error}`, {
             parse_mode: 'HTML',
             reply_markup: {
@@ -566,12 +579,14 @@ export class AutomationHubRenderer {
           this.onRender?.();
           this.persistState();
         },
-        warning: (_message: string) => {
+        warning: (eid: string, _message: string) => {
+          if (eid !== engine.engineId) return;
           // Non-destructive: engine handles retries internally.
         },
       };
 
       const automation: ActiveAutomation = {
+        engineId: engine.engineId,
         engine,
         workerSession: p.workerSession,
         orchestratorSession: p.orchestratorSession,

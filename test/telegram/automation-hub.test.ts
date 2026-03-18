@@ -439,7 +439,7 @@ describe('AutomationHubRenderer', () => {
       api.calls.length = 0;
 
       // Trigger error event
-      bus.emit('automation:error', 'something broke');
+      bus.emit('automation:error', mockEng.engineId, 'something broke');
 
       // Wait for async sendMessage
       await new Promise(resolve => setTimeout(resolve, 50));
@@ -474,7 +474,7 @@ describe('AutomationHubRenderer', () => {
       api.calls.length = 0;
 
       // Trigger escalation event
-      bus.emit('automation:escalation', 'needs human help');
+      bus.emit('automation:escalation', mockEng.engineId, 'needs human help');
 
       // Wait for async sendMessage
       await new Promise(resolve => setTimeout(resolve, 50));
@@ -761,7 +761,7 @@ describe('AutomationHubRenderer', () => {
       api.calls.length = 0;
 
       // Emit done event
-      bus.emit('automation:done', 'All tests passed');
+      bus.emit('automation:done', mockEng.engineId, 'All tests passed');
 
       // Wait for async sendMessage
       await new Promise(resolve => setTimeout(resolve, 50));
@@ -781,7 +781,7 @@ describe('AutomationHubRenderer', () => {
       // Verify the errorHandler is no longer on the bus
       // Emitting another error after done should not produce a message
       const callsBefore = api.calls.length;
-      bus.emit('automation:error', 'ghost error');
+      bus.emit('automation:error', mockEng.engineId, 'ghost error');
       await new Promise(resolve => setTimeout(resolve, 50));
       const errorAfter = api.calls.slice(callsBefore).find(
         c => c.method === 'sendMessage' && (c.args[1] as string).includes('ghost error'),
@@ -1030,7 +1030,7 @@ describe('AutomationHubRenderer', () => {
       const savesAtCreation = store.saved.length;
 
       // Simulate engine emitting automation:state-change (which calls persistState() via handler)
-      bus.emit('automation:state-change', 'capturing-worker');
+      bus.emit('automation:state-change', mockEng.engineId, 'capturing-worker');
 
       // save() should have been called again after the state-change event
       assert.ok(store.saved.length >= savesAtCreation, 'persistState should be called on state-change event');
@@ -1178,11 +1178,12 @@ describe('AutomationHubRenderer', () => {
         },
       ];
 
+      let restoredEngine: ReturnType<typeof createMockEngine> | null = null;
       const hub = new AutomationHubRenderer(
         api as any,
         123,
         () => [],
-        (() => createMockEngine('idle')) as any,
+        (() => { restoredEngine = createMockEngine('idle'); return restoredEngine; }) as any,
         bus,
         store as any,
       );
@@ -1193,7 +1194,7 @@ describe('AutomationHubRenderer', () => {
       const renderCountAfterRestore = renderCount;
 
       // Emitting automation:state-change should trigger onRender (handler was registered)
-      bus.emit('automation:state-change', 'capturing-worker');
+      bus.emit('automation:state-change', restoredEngine!.engineId, 'capturing-worker');
 
       assert.ok(renderCount > renderCountAfterRestore, 'automation:state-change should trigger onRender after restoreFromStore');
     });
@@ -1281,12 +1282,12 @@ describe('AutomationHubRenderer', () => {
       await hub.completeCreation('build the thing');
 
       // Simulate some cycles
-      bus.emit('automation:cycle-complete', 3, 'COMMAND: npm test');
+      bus.emit('automation:cycle-complete', mockEng.engineId, 3, 'COMMAND: npm test');
 
       api.calls.length = 0;
 
       // Emit done event
-      bus.emit('automation:done', 'All done');
+      bus.emit('automation:done', mockEng.engineId, 'All done');
       await new Promise(resolve => setTimeout(resolve, 50));
 
       const doneSend = api.calls.find(
@@ -1320,11 +1321,12 @@ describe('AutomationHubRenderer', () => {
         },
       ];
 
+      let restoredEng: ReturnType<typeof createMockEngine> | null = null;
       const hub = new AutomationHubRenderer(
         api as any,
         123,
         () => [],
-        (() => createMockEngine('idle')) as any,
+        (() => { restoredEng = createMockEngine('idle'); return restoredEng; }) as any,
         bus,
         store as any,
       );
@@ -1334,7 +1336,7 @@ describe('AutomationHubRenderer', () => {
       api.calls.length = 0;
 
       // Emit done event for the restored automation
-      bus.emit('automation:done', 'Restored done');
+      bus.emit('automation:done', restoredEng!.engineId, 'Restored done');
       await new Promise(resolve => setTimeout(resolve, 50));
 
       const doneSend = api.calls.find(
@@ -1352,7 +1354,7 @@ describe('AutomationHubRenderer', () => {
   });
 
   describe('warning vs error event handling', () => {
-    // Helper: create an automation and return { api, bus, hub }
+    // Helper: create an automation and return { api, bus, hub, mockEng }
     async function setupAutomation() {
       const api = createMockApi();
       const bus = new EventBus();
@@ -1375,14 +1377,14 @@ describe('AutomationHubRenderer', () => {
       // Clear setup calls
       api.calls.length = 0;
 
-      return { api, bus, hub };
+      return { api, bus, hub, mockEng };
     }
 
     it('automation:warning does not delete automation from Map', async () => {
-      const { bus, hub } = await setupAutomation();
+      const { bus, hub, mockEng } = await setupAutomation();
       assert.equal(hub.activeAutomationCount, 1, 'should have 1 automation before warning');
 
-      bus.emit('automation:warning', 'Failed to parse directive, retrying');
+      bus.emit('automation:warning', mockEng.engineId, 'Failed to parse directive, retrying');
       await new Promise(resolve => setTimeout(resolve, 50));
 
       assert.equal(hub.activeAutomationCount, 1, 'should still have 1 automation after warning');
@@ -1390,9 +1392,9 @@ describe('AutomationHubRenderer', () => {
     });
 
     it('automation:warning does not send error notification', async () => {
-      const { api, bus } = await setupAutomation();
+      const { api, bus, mockEng } = await setupAutomation();
 
-      bus.emit('automation:warning', 'parse retry message');
+      bus.emit('automation:warning', mockEng.engineId, 'parse retry message');
       await new Promise(resolve => setTimeout(resolve, 50));
 
       const errorSend = api.calls.find(
@@ -1402,24 +1404,24 @@ describe('AutomationHubRenderer', () => {
     });
 
     it('automation:error still deletes automation from Map', async () => {
-      const { bus, hub } = await setupAutomation();
+      const { bus, hub, mockEng } = await setupAutomation();
       assert.equal(hub.activeAutomationCount, 1, 'should have 1 automation before error');
 
-      bus.emit('automation:error', 'fatal failure');
+      bus.emit('automation:error', mockEng.engineId, 'fatal failure');
       await new Promise(resolve => setTimeout(resolve, 50));
 
       assert.equal(hub.activeAutomationCount, 0, 'should have 0 automations after error');
     });
 
     it('automation:done after prior warning includes full details', async () => {
-      const { api, bus } = await setupAutomation();
+      const { api, bus, mockEng } = await setupAutomation();
 
-      bus.emit('automation:warning', 'parse retry warning');
+      bus.emit('automation:warning', mockEng.engineId, 'parse retry warning');
       await new Promise(resolve => setTimeout(resolve, 50));
 
       // Clear calls, then emit done
       api.calls.length = 0;
-      bus.emit('automation:done', 'Completed');
+      bus.emit('automation:done', mockEng.engineId, 'Completed');
       await new Promise(resolve => setTimeout(resolve, 50));
 
       const completeSend = api.calls.find(
@@ -1433,13 +1435,13 @@ describe('AutomationHubRenderer', () => {
     });
 
     it('automation:done unsubscribes warning handler', async () => {
-      const { api, bus } = await setupAutomation();
+      const { api, bus, mockEng } = await setupAutomation();
 
-      bus.emit('automation:done', 'Completed');
+      bus.emit('automation:done', mockEng.engineId, 'Completed');
       await new Promise(resolve => setTimeout(resolve, 50));
 
       const callsBefore = api.calls.length;
-      bus.emit('automation:warning', 'ghost warning');
+      bus.emit('automation:warning', mockEng.engineId, 'ghost warning');
       await new Promise(resolve => setTimeout(resolve, 50));
 
       // No new calls should appear
