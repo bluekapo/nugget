@@ -934,6 +934,110 @@ describe('HubRenderer', () => {
       assert.ok(!sentText.includes('[orch]'), 'should not have [orch] tag when idle');
     });
 
+    it('paused automation shows pause emoji in worker role tag', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      const pausedAuto = {
+        engine: { state: 'paused' },
+        workerSession: 'worker-1',
+        orchestratorSession: 'orch-1',
+        taskDescription: 'Fix bugs',
+        cycleCount: 3,
+        lastAction: null,
+      };
+      const allAutos = new Map([[1, pausedAuto]]);
+      hub.setAutomationHub({
+        get activeAutomationInfo() { return pausedAuto; },
+        get activeAutomationCount() { return 1; },
+        get allAutomations() { return allAutos; },
+        get pendingCreationInfo() { return null; },
+      } as any);
+
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      const workerLine = sentText.split('\n').find(l => l.includes('worker-1'));
+      assert.ok(workerLine, 'should have worker-1 line');
+      assert.ok(workerLine!.includes('[worker \u23F8]'), 'paused worker should have [worker \u23F8] tag');
+    });
+
+    it('paused automation shows pause emoji in orchestrator role tag', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      const pausedAuto = {
+        engine: { state: 'paused' },
+        workerSession: 'worker-1',
+        orchestratorSession: 'orch-1',
+        taskDescription: 'Fix bugs',
+        cycleCount: 3,
+        lastAction: null,
+      };
+      const allAutos = new Map([[1, pausedAuto]]);
+      hub.setAutomationHub({
+        get activeAutomationInfo() { return pausedAuto; },
+        get activeAutomationCount() { return 1; },
+        get allAutomations() { return allAutos; },
+        get pendingCreationInfo() { return null; },
+      } as any);
+
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      const orchLine = sentText.split('\n').find(l => l.includes('orch-1'));
+      assert.ok(orchLine, 'should have orch-1 line');
+      assert.ok(orchLine!.includes('[orch \u23F8]'), 'paused orchestrator should have [orch \u23F8] tag');
+    });
+
+    it('running automation shows role tags without pause emoji', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      hub.setAutomationHub(createMockAutomationHub(true) as any);
+
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      const workerLine = sentText.split('\n').find(l => l.includes('worker-1'));
+      assert.ok(workerLine, 'should have worker-1 line');
+      assert.ok(workerLine!.includes('[worker]'), 'running worker should have [worker] tag');
+      assert.ok(!workerLine!.includes('\u23F8'), 'running worker should NOT have pause emoji');
+      const orchLine = sentText.split('\n').find(l => l.includes('orch-1'));
+      assert.ok(orchLine, 'should have orch-1 line');
+      assert.ok(orchLine!.includes('[orch]'), 'running orchestrator should have [orch] tag');
+      assert.ok(!orchLine!.includes('\u23F8'), 'running orchestrator should NOT have pause emoji');
+    });
+
+    it('session not in any automation shows no role or pause indicator', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+        { name: 'standalone', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      hub.setAutomationHub(createMockAutomationHub(true) as any);
+
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      const standaloneLine = sentText.split('\n').find(l => l.includes('standalone'));
+      assert.ok(standaloneLine, 'should have standalone line');
+      assert.ok(!standaloneLine!.includes('[worker]'), 'standalone should not have [worker] tag');
+      assert.ok(!standaloneLine!.includes('[orch]'), 'standalone should not have [orch] tag');
+      assert.ok(!standaloneLine!.includes('\u23F8'), 'standalone should not have pause emoji');
+    });
+
     it('automationView mode shows automation details', async () => {
       const api = createMockApi();
       const sm = createMockSessionManager([
