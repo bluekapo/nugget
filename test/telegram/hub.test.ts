@@ -1285,6 +1285,143 @@ describe('HubRenderer', () => {
     });
   });
 
+  describe('multi-automation hub view (CONC-03, CONC-04)', () => {
+    function createMultiMockAutomationHub(automations: Array<{ id: number; engine: { state: string }; workerSession: string; orchestratorSession: string; taskDescription: string; cycleCount: number; lastAction: string | null }>) {
+      const allAutos = new Map(automations.map(a => [a.id, a]));
+      return {
+        get activeAutomationInfo() {
+          // When multiple automations, activeAutomationInfo is null (no detail view)
+          if (allAutos.size === 1) return allAutos.values().next().value ?? null;
+          return null;
+        },
+        get activeAutomationCount() { return allAutos.size; },
+        get allAutomations() { return allAutos; },
+        get pendingCreationInfo() { return null; },
+      };
+    }
+
+    it('automationHub view with 2 automations shows list with per-automation status and cycles', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+        { name: 'worker-2', status: 'running' },
+        { name: 'orch-2', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      hub.setAutomationHub(createMultiMockAutomationHub([
+        { id: 1, engine: { state: 'executing' }, workerSession: 'worker-1', orchestratorSession: 'orch-1', taskDescription: 'Fix bugs', cycleCount: 5, lastAction: null },
+        { id: 2, engine: { state: 'paused' }, workerSession: 'worker-2', orchestratorSession: 'orch-2', taskDescription: 'Deploy', cycleCount: 3, lastAction: null },
+      ]) as any);
+
+      hub.setHubView('automationHub');
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(sentText.includes('<b>Automation Hub</b>'), 'should show Automation Hub header');
+      // Should show numbered list with per-automation status
+      assert.ok(sentText.includes('Executing directive'), 'should show executing state label for auto 1');
+      assert.ok(sentText.includes('Paused'), 'should show paused state label for auto 2');
+      assert.ok(sentText.includes('worker-1'), 'should show worker-1 session name');
+      assert.ok(sentText.includes('orch-1'), 'should show orch-1 session name');
+      assert.ok(sentText.includes('worker-2'), 'should show worker-2 session name');
+      assert.ok(sentText.includes('orch-2'), 'should show orch-2 session name');
+      assert.ok(sentText.includes('Cycles: 5'), 'should show cycle count for auto 1');
+      assert.ok(sentText.includes('Cycles: 3'), 'should show cycle count for auto 2');
+      // Should NOT show the single-summary "Tap View Details" text
+      assert.ok(!sentText.includes('Tap View Details'), 'should NOT show single-automation summary text');
+    });
+
+    it('automationHub keyboard with 2 automations shows per-automation detail buttons', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+        { name: 'worker-2', status: 'running' },
+        { name: 'orch-2', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      hub.setAutomationHub(createMultiMockAutomationHub([
+        { id: 1, engine: { state: 'executing' }, workerSession: 'worker-1', orchestratorSession: 'orch-1', taskDescription: 'Fix bugs', cycleCount: 5, lastAction: null },
+        { id: 2, engine: { state: 'paused' }, workerSession: 'worker-2', orchestratorSession: 'orch-2', taskDescription: 'Deploy', cycleCount: 3, lastAction: null },
+      ]) as any);
+
+      hub.setHubView('automationHub');
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'should have inline keyboard');
+
+      const allBtns: Array<{ text: string; callback_data: string }> = [];
+      for (const row of keyboard as any[][]) {
+        for (const btn of row) {
+          if (btn.callback_data) allBtns.push(btn);
+        }
+      }
+
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:details:1'), 'should have auto:details:1 button');
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:details:2'), 'should have auto:details:2 button');
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:new'), 'should have auto:new button');
+      assert.ok(allBtns.some(b => b.callback_data === 'hub:auto-back'), 'should have hub:auto-back button');
+      // Should NOT have the old single-automation view details button
+      assert.ok(!allBtns.some(b => b.callback_data === 'hub:auto-details'), 'should NOT have hub:auto-details button for multi-automation');
+    });
+
+    it('automationHub view with 1 automation still shows single summary', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      hub.setAutomationHub(createMultiMockAutomationHub([
+        { id: 1, engine: { state: 'executing' }, workerSession: 'worker-1', orchestratorSession: 'orch-1', taskDescription: 'Fix bugs', cycleCount: 5, lastAction: null },
+      ]) as any);
+
+      hub.setHubView('automationHub');
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(sentText.includes('<b>Automation Hub</b>'), 'should show Automation Hub header');
+      assert.ok(sentText.includes('State:'), 'should show single-automation summary with State:');
+      assert.ok(sentText.includes('Tap View Details'), 'should show Tap View Details for single automation');
+    });
+
+    it('stopping one automation shows updated list without the stopped one', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+        { name: 'worker-2', status: 'running' },
+        { name: 'orch-2', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+
+      // Start with 2 automations
+      const auto1 = { id: 1, engine: { state: 'executing' }, workerSession: 'worker-1', orchestratorSession: 'orch-1', taskDescription: 'Fix bugs', cycleCount: 5, lastAction: null };
+      const auto2 = { id: 2, engine: { state: 'idle' }, workerSession: 'worker-2', orchestratorSession: 'orch-2', taskDescription: 'Deploy', cycleCount: 3, lastAction: null };
+      hub.setAutomationHub(createMultiMockAutomationHub([auto1, auto2]) as any);
+
+      hub.setHubView('automationHub');
+      await hub.render();
+
+      const firstText = api.calls[0].args[1] as string;
+      assert.ok(firstText.includes('worker-1'), 'initial list should show worker-1');
+      assert.ok(firstText.includes('worker-2'), 'initial list should show worker-2');
+
+      // Simulate stopping automation 1 -- remove it from the mock
+      hub.setAutomationHub(createMultiMockAutomationHub([auto2]) as any);
+
+      api.calls.length = 0;
+      await hub.render({ forceNew: true });
+
+      const secondText = api.calls.filter(c => c.method === 'sendMessage')[0]?.args[1] as string;
+      assert.ok(!secondText.includes('worker-1'), 'after stopping, should NOT show worker-1');
+      assert.ok(secondText.includes('worker-2'), 'after stopping, should still show worker-2');
+    });
+  });
+
   describe('CLI view state', () => {
     it('buildText renders CLI content with session name header and pre block', async () => {
       const api = createMockApi();
