@@ -526,7 +526,12 @@ function buildKeyboard(
       }
       keyboard.push([{ text: '\uD83D\uDD04 Refresh', callback_data: 'auto:refresh' }]);
     }
-    keyboard.push([{ text: '\u2190 Back to Sessions', callback_data: 'hub:auto-back' }]);
+    const allAutos = automationHub?.allAutomations;
+    if (allAutos && allAutos.size > 1) {
+      keyboard.push([{ text: '\u2190 Back to Automations', callback_data: 'auto:back' }]);
+    } else {
+      keyboard.push([{ text: '\u2190 Back to Sessions', callback_data: 'hub:auto-back' }]);
+    }
     return { inline_keyboard: keyboard };
   }
 

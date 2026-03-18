@@ -1426,6 +1426,49 @@ describe('HubRenderer', () => {
       assert.ok(secondText.includes('Deploy'), 'after stopping, should show remaining automation task');
       assert.ok(secondText.includes('Cycles: 3'), 'after stopping, should show remaining automation cycles');
     });
+
+    it('automationDetails back button uses auto:back when multiple automations exist', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+        { name: 'worker-2', status: 'running' },
+        { name: 'orch-2', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+
+      // Multi-auto mock that also returns activeAutomationInfo for detail view
+      const auto1 = { id: 1, engine: { state: 'executing' }, workerSession: 'worker-1', orchestratorSession: 'orch-1', taskDescription: 'Fix bugs', cycleCount: 5, lastAction: null };
+      const auto2 = { id: 2, engine: { state: 'idle' }, workerSession: 'worker-2', orchestratorSession: 'orch-2', taskDescription: 'Deploy', cycleCount: 3, lastAction: null };
+      const allAutos = new Map([[1, auto1], [2, auto2]]);
+      hub.setAutomationHub({
+        get activeAutomationInfo() { return auto1; },
+        get activeAutomationCount() { return allAutos.size; },
+        get allAutomations() { return allAutos; },
+        get pendingCreationInfo() { return null; },
+      } as any);
+
+      hub.setHubView('automationDetails');
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'should have inline keyboard');
+
+      const allBtns: Array<{ text: string; callback_data: string }> = [];
+      for (const row of keyboard as any[][]) {
+        for (const btn of row) {
+          if (btn.callback_data) allBtns.push(btn);
+        }
+      }
+
+      // With multiple automations, back should go to automationHub list (auto:back), not sessions (hub:auto-back)
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:back'), 'should use auto:back to return to automation list');
+      assert.ok(!allBtns.some(b => b.callback_data === 'hub:auto-back'), 'should NOT use hub:auto-back when multiple autos exist');
+      // Button text should indicate going back to automation list, not sessions
+      const backBtn = allBtns.find(b => b.callback_data === 'auto:back');
+      assert.ok(backBtn?.text.includes('Back'), 'back button should have Back text');
+    });
   });
 
   describe('CLI view state', () => {
