@@ -115,8 +115,31 @@ function collectContinuation(firstLine: string, lines: string[], startIdx: numbe
     parts.push(contTrimmed);
   }
 
-  // Join with single space, collapse multiple spaces from terminal padding
-  return parts.join(' ').replace(/\s{2,}/g, ' ');
+  // Join with single space, collapse multiple spaces from terminal padding,
+  // then strip any prompt input field artifacts (─── and ❯)
+  const joined = parts.join(' ').replace(/\s{2,}/g, ' ');
+  return stripPromptArtifacts(joined);
+}
+
+/**
+ * Strip Claude Code TUI prompt input field rendering artifacts from collected text.
+ *
+ * The Ink TUI prompt bar renders horizontal rules (─) and a prompt chevron (❯) that
+ * can leak into continuation text when terminal wrapping pushes them inline.
+ * These characters never appear in legitimate shell commands, escalation reasons,
+ * or done summaries.
+ *
+ * Removes:
+ * 1. Sequences of 3+ horizontal rule chars (─)
+ * 2. Prompt chevron character (❯)
+ * 3. Collapses resulting multiple spaces and trims
+ */
+export function stripPromptArtifacts(text: string): string {
+  return text
+    .replace(/─{3,}/g, '')     // Remove horizontal rule sequences (3+)
+    .replace(/❯/g, '')          // Remove prompt chevron
+    .replace(/\s{2,}/g, ' ')   // Collapse multiple spaces
+    .trim();
 }
 
 /** Match single-line directives (SELECT, ENTER). WAIT is recognized but ignored (returns null). */
