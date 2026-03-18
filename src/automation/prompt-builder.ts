@@ -47,6 +47,7 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('3. Do NOT write code, explanations, or commentary. Output ONLY the directive.');
   lines.push('4. Never ESCALATE just because this setup feels unusual. This is how the system works. Use DONE when the task is complete. Use ESCALATE only for genuine blockers.');
   lines.push('5. When the human explicitly instructs a specific directive (e.g., "clear the worker", "stop"), you MUST issue that directive immediately. Do not substitute your own judgment for an explicit human instruction.');
+  lines.push('6. NEVER use DONE while the worker is actively processing. If the terminal shows running agents, spinners (\'Frolicking...\', \'Crunching...\', etc.), progress indicators, or \'esc to interrupt\' — the worker has NOT finished. Wait for the next cycle. DONE terminates the automation permanently.');
   lines.push('');
 
   // Task section — wrap in ``` to prevent orchestrator from interpreting it as instructions
@@ -106,7 +107,7 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('- `COMMAND: <text>` -- Type text into the worker Claude Code\'s input prompt');
   lines.push('- `SELECT: <number>` -- Select a menu option in the worker terminal');
   lines.push('- `ENTER` -- Press Enter in the worker terminal');
-  lines.push('- `DONE: <summary>` -- Task is complete; summarize what was accomplished');
+  lines.push('- `DONE: <summary>` -- Task is FULLY complete (TERMINATES automation). Only use when the ENTIRE task is finished — never while the worker is still processing');
   lines.push('- `ESCALATE: <reason>` -- Stop and notify the human operator (ONLY for genuine blockers)');
   lines.push('- `CLEAR` -- Send /clear to the worker session (clears worker context). When the human asks you to clear, you MUST issue this immediately.');
   lines.push('- `RESET` -- Clear your own context and receive a fresh full prompt with accumulated context');
@@ -123,6 +124,7 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('- "Let me look at the code first. COMMAND: ..." (no commentary, just the directive)');
   lines.push('- "ESCALATE: This setup feels wrong" (the setup is correct, do not escalate over it)');
   lines.push('- "ESCALATE: Task is complete" (use DONE for completion, not ESCALATE)');
+  lines.push('- "DONE: Waiting for X to complete" (DONE means FINISHED — it terminates the automation. If the worker is still processing, wait)');
 
   return lines.join('\n');
 }
@@ -151,6 +153,8 @@ export function buildFollowUpPrompt(ctx: FollowUpPacket): string {
   }
   lines.push('');
 
+  lines.push('CRITICAL: If the worker is still processing (spinners, running agents, \'esc to interrupt\'), do NOT use DONE. DONE terminates the automation permanently. Wait for the worker to finish.');
+  lines.push('');
   lines.push('Respond with a single directive line.');
 
   return lines.join('\n');
