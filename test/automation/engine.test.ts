@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus } from '../../src/events/bus.js';
-import { AutomationEngine } from '../../src/automation/engine.js';
+import { AutomationEngine, RETRY_PROMPT } from '../../src/automation/engine.js';
 import type { EngineState, EngineConfig } from '../../src/automation/engine.js';
 import type { TimerProvider } from '../../src/terminal/capture.js';
 
@@ -2904,5 +2904,37 @@ describe('SettingsStore cycle_limit -> EngineConfig.maxCycles wiring', () => {
 
     const result = engineFactory(baseConfig, bus);
     assert.equal(result.maxCycles, 100, 'maxCycles should default to 100 when cycle_limit not set');
+  });
+});
+
+describe('RETRY_PROMPT', () => {
+  it('contains COMMAND directive documentation', () => {
+    assert.ok(RETRY_PROMPT.includes('COMMAND:'), 'RETRY_PROMPT should document COMMAND directive');
+  });
+
+  it('contains CLEAR directive documentation', () => {
+    assert.ok(RETRY_PROMPT.includes('CLEAR'), 'RETRY_PROMPT should document CLEAR directive');
+  });
+
+  it('contains RESET directive documentation', () => {
+    assert.ok(RETRY_PROMPT.includes('RESET'), 'RETRY_PROMPT should document RESET directive');
+  });
+
+  it('contains CONTEXT modifier documentation', () => {
+    assert.ok(RETRY_PROMPT.includes('CONTEXT:'), 'RETRY_PROMPT should document CONTEXT modifier');
+  });
+
+  it('documents that CONTEXT can be stacked with any directive', () => {
+    assert.ok(
+      RETRY_PROMPT.toLowerCase().includes('stack') || RETRY_PROMPT.toLowerCase().includes('cumulative'),
+      'RETRY_PROMPT should mention CONTEXT stacking behavior',
+    );
+  });
+
+  it('contains all 7 directive types', () => {
+    const directives = ['COMMAND:', 'SELECT:', 'ENTER', 'ESCALATE:', 'DONE:', 'CLEAR', 'RESET'];
+    for (const d of directives) {
+      assert.ok(RETRY_PROMPT.includes(d), `RETRY_PROMPT should contain ${d}`);
+    }
   });
 });
