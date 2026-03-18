@@ -2938,3 +2938,186 @@ describe('RETRY_PROMPT', () => {
     }
   });
 });
+
+// ========== CONC-02: engineId scoping tests ==========
+
+describe('AutomationEngine engineId (CONC-02)', () => {
+  let bus: EventBus;
+  let timer: ManualTimer;
+  let writes: Array<{ name: string; data: string }>;
+  let mockSessionManager: { writeToSession: (name: string, data: string) => void };
+
+  beforeEach(() => {
+    bus = new EventBus();
+    timer = new ManualTimer();
+    writes = [];
+    mockSessionManager = {
+      writeToSession: (name: string, data: string) => {
+        writes.push({ name, data });
+      },
+    };
+  });
+
+  it('engine emits automation:state-change with engineId as first argument', () => {
+    const config: EngineConfig = {
+      workerSession: 'worker',
+      orchestratorSession: 'orchestrator',
+      taskDescription: 'test',
+      timer,
+      baseDelay: 50,
+      idleDelay: 100,
+    };
+    const engine = new AutomationEngine(config, mockSessionManager, bus);
+    const events: Array<{ engineId: string; state: string }> = [];
+    bus.on('automation:state-change', (engineId, state) => {
+      events.push({ engineId, state });
+    });
+
+    engine.start();
+    engine.stop();
+
+    assert.ok(events.length >= 2, 'should have emitted at least 2 state-change events');
+    assert.equal(events[0].engineId, engine.engineId, 'first arg should be engineId');
+    assert.equal(events[0].state, 'idle', 'second arg should be the state');
+  });
+
+  it('engine emits automation:cycle-complete with engineId as first argument', async () => {
+    const config: EngineConfig = {
+      workerSession: 'worker',
+      orchestratorSession: 'orchestrator',
+      taskDescription: 'test',
+      timer,
+      baseDelay: 50,
+      idleDelay: 100,
+    };
+    const engine = new AutomationEngine(config, mockSessionManager, bus);
+    const events: Array<{ engineId: string; cycle: number; action: string }> = [];
+    bus.on('automation:cycle-complete', (engineId, cycle, action) => {
+      events.push({ engineId, cycle, action });
+    });
+
+    engine.start();
+
+    // Drive through a full COMMAND cycle
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000);
+
+    assert.equal(events.length, 1, 'should have emitted 1 cycle-complete event');
+    assert.equal(events[0].engineId, engine.engineId, 'first arg should be engineId');
+    assert.equal(events[0].cycle, 1, 'second arg should be cycle number');
+    assert.ok(events[0].action.includes('COMMAND'), 'third arg should be action');
+
+    engine.stop();
+  });
+
+  it('engine emits automation:done with engineId as first argument', async () => {
+    const config: EngineConfig = {
+      workerSession: 'worker',
+      orchestratorSession: 'orchestrator',
+      taskDescription: 'test',
+      timer,
+      baseDelay: 50,
+      idleDelay: 100,
+    };
+    const engine = new AutomationEngine(config, mockSessionManager, bus);
+    const events: Array<{ engineId: string; summary: string }> = [];
+    bus.on('automation:done', (engineId, summary) => {
+      events.push({ engineId, summary });
+    });
+
+    engine.start();
+
+    // Drive to DONE directive
+    timer.advance(1); // deferred start
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('DONE: All tests passed'));
+    timer.advance(1000);
+
+    assert.equal(events.length, 1, 'should have emitted 1 done event');
+    assert.equal(events[0].engineId, engine.engineId, 'first arg should be engineId');
+    assert.ok(events[0].summary.includes('All tests passed'), 'second arg should be summary');
+  });
+
+  it('engine emits automation:error with engineId as first argument', async () => {
+    const config: EngineConfig = {
+      workerSession: 'worker',
+      orchestratorSession: 'orchestrator',
+      taskDescription: 'test',
+      timer,
+      baseDelay: 50,
+      idleDelay: 100,
+      maxCycles: 1,
+    };
+    const engine = new AutomationEngine(config, mockSessionManager, bus);
+    const events: Array<{ engineId: string; error: string }> = [];
+    bus.on('automation:error', (engineId, error) => {
+      events.push({ engineId, error });
+    });
+
+    engine.start();
+
+    // Complete 1 cycle to reach max
+    timer.advance(1);
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo 1'));
+    timer.advance(1000);
+
+    // Trigger cycle 2 attempt -> hits limit
+    await emitOutput(bus, 'worker', completionOutput('done'));
+    timer.advance(50); timer.advance(100);
+
+    assert.ok(events.length >= 1, 'should have emitted at least 1 error event');
+    assert.equal(events[0].engineId, engine.engineId, 'first arg should be engineId');
+    assert.ok(events[0].error.includes('Cycle limit'), 'second arg should be error message');
+  });
+
+  it('two engines on the same bus emit events with different engineIds', () => {
+    const config1: EngineConfig = {
+      workerSession: 'worker-1',
+      orchestratorSession: 'orch-1',
+      taskDescription: 'task 1',
+      timer,
+      baseDelay: 50,
+      idleDelay: 100,
+    };
+    const config2: EngineConfig = {
+      workerSession: 'worker-2',
+      orchestratorSession: 'orch-2',
+      taskDescription: 'task 2',
+      timer,
+      baseDelay: 50,
+      idleDelay: 100,
+    };
+
+    const engine1 = new AutomationEngine(config1, mockSessionManager, bus);
+    const engine2 = new AutomationEngine(config2, mockSessionManager, bus);
+
+    assert.notEqual(engine1.engineId, engine2.engineId, 'engines should have different engineIds');
+    assert.ok(engine1.engineId.startsWith('auto-'), 'engineId should start with auto-');
+    assert.ok(engine2.engineId.startsWith('auto-'), 'engineId should start with auto-');
+
+    const stateEvents: Array<{ engineId: string; state: string }> = [];
+    bus.on('automation:state-change', (engineId, state) => {
+      stateEvents.push({ engineId, state });
+    });
+
+    engine1.start();
+    engine2.start();
+
+    const engine1Events = stateEvents.filter(e => e.engineId === engine1.engineId);
+    const engine2Events = stateEvents.filter(e => e.engineId === engine2.engineId);
+
+    assert.ok(engine1Events.length > 0, 'should have events from engine 1');
+    assert.ok(engine2Events.length > 0, 'should have events from engine 2');
+    assert.ok(engine1Events.every(e => e.engineId === engine1.engineId), 'all engine1 events should have engine1 id');
+    assert.ok(engine2Events.every(e => e.engineId === engine2.engineId), 'all engine2 events should have engine2 id');
+
+    engine1.stop();
+    engine2.stop();
+  });
+});
