@@ -242,6 +242,32 @@ describe('buildPrompt', () => {
     assert.ok(contextLine, `Expected CONTEXT: modifier documentation in prompt:\n${prompt}`);
   });
 
+  it('contains rule prohibiting DONE while worker is actively processing', () => {
+    const prompt = buildPrompt(basePacket);
+    assert.ok(
+      prompt.includes('NEVER use DONE while the worker is actively processing'),
+      `Expected DONE prohibition rule in prompt:\n${prompt}`
+    );
+  });
+
+  it('DONE directive description mentions TERMINATES', () => {
+    const prompt = buildPrompt(basePacket);
+    const doneLine = prompt.split('\n').find(l => l.includes('DONE: <summary>') && l.includes('--'));
+    assert.ok(doneLine, 'Expected DONE directive line in available directives');
+    assert.ok(
+      doneLine!.includes('TERMINATES'),
+      `Expected "TERMINATES" in DONE directive description: ${doneLine}`
+    );
+  });
+
+  it('wrong examples include premature DONE pattern', () => {
+    const prompt = buildPrompt(basePacket);
+    assert.ok(
+      prompt.includes('DONE: Waiting for'),
+      `Expected premature DONE wrong example in prompt:\n${prompt}`
+    );
+  });
+
   it('GSD pipeline hint includes phase number N in command examples', () => {
     const packet: ContextPacket = {
       ...basePacket,
@@ -612,6 +638,14 @@ describe('buildFollowUpPrompt', () => {
     assert.ok(
       !prompt.includes('Persistent Context'),
       `Follow-up prompt should NOT contain "Persistent Context":\n${prompt}`
+    );
+  });
+
+  it('contains critical reminder about DONE during active processing', () => {
+    const prompt = buildFollowUpPrompt(baseFollowUp);
+    assert.ok(
+      prompt.includes('DONE terminates the automation permanently'),
+      `Expected DONE termination reminder in follow-up prompt:\n${prompt}`
     );
   });
 
