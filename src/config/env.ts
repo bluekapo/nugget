@@ -29,7 +29,7 @@ export function loadConfig(): AppConfig {
   const commandAllowlist = process.env.COMMAND_ALLOWLIST;
 
   const maxSessionsStr = process.env.MAX_SESSIONS;
-  let maxSessions = 3;
+  let maxSessions = 4;
   if (maxSessionsStr !== undefined) {
     maxSessions = parseInt(maxSessionsStr, 10);
     if (isNaN(maxSessions) || maxSessions < 1) {

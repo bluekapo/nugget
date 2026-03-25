@@ -55,7 +55,7 @@ export class SessionManager {
     private bus: EventBus,
     private store: SessionStore,
     spawnFn?: SpawnFn,
-    maxSessions: number = 3,
+    maxSessions: number = 4,
   ) {
     this.spawnFn = spawnFn ?? null;
     this.maxSessions = maxSessions;

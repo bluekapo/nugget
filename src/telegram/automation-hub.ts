@@ -413,9 +413,6 @@ export class AutomationHubRenderer {
 
     this.activeAutomations.set(id, automation);
 
-    // Auto-navigate to detail view for the newly created automation
-    this.detailViewId = id;
-
     // Subscribe per-automation handlers to bus events
     this.bus.on('automation:state-change', handlers.stateChange);
     this.bus.on('automation:cycle-complete', handlers.cycleComplete);
@@ -614,10 +611,6 @@ export class AutomationHubRenderer {
       restored++;
     }
 
-    if (restored > 0 && this.activeAutomations.size === 1) {
-      this.detailViewId = this.activeAutomations.keys().next().value ?? null;
-    }
-
     return restored;
   }
 
@@ -771,11 +764,9 @@ export class AutomationHubRenderer {
       keyboard.push([
         { text: '\uD83D\uDD04 Refresh', callback_data: 'auto:refresh' },
       ]);
-      if (this.activeAutomations.size > 1) {
-        keyboard.push([
-          { text: '\u2190 Back to List', callback_data: 'auto:back' },
-        ]);
-      }
+      keyboard.push([
+        { text: '\u2190 Back to List', callback_data: 'auto:back' },
+      ]);
       return { inline_keyboard: keyboard };
     }
 
