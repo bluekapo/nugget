@@ -302,7 +302,7 @@ function buildText(
       const lines = [
         '<b>Automation Details</b>',
         '',
-        `Worker: <b>${activeAuto.workerSession}</b> \u2192 Orchestrator: <b>${activeAuto.orchestratorSession}</b>`,
+        `Orchestrator: <b>${activeAuto.orchestratorSession}</b> \u2192 Worker: <b>${activeAuto.workerSession}</b>`,
         `Task: ${activeAuto.taskDescription}`,
         '',
         `Status: ${engineStateLabel(activeAuto.engine.state)} | Cycles: ${activeAuto.cycleCount}`,
@@ -323,7 +323,7 @@ function buildText(
         '',
       ];
       for (const [id, auto] of allAutos) {
-        lines.push(`${id}. ${engineStateLabel(auto.engine.state)} | ${auto.workerSession} \u2192 ${auto.orchestratorSession} | Cycles: ${auto.cycleCount}`);
+        lines.push(`${id}. ${engineStateLabel(auto.engine.state)} | ${auto.orchestratorSession} \u2192 ${auto.workerSession} | Cycles: ${auto.cycleCount}`);
       }
       return lines.join('\n');
     }
@@ -520,7 +520,7 @@ function buildKeyboard(
     if (allAutos && allAutos.size > 0) {
       for (const [id, auto] of allAutos) {
         const stateEmoji = auto.engine.state === 'paused' ? '\u23F8' : '\uD83D\uDD0D';
-        keyboard.push([{ text: `${stateEmoji} ${auto.workerSession} \u2192 ${auto.orchestratorSession}`, callback_data: `auto:details:${id}` }]);
+        keyboard.push([{ text: `${stateEmoji} ${auto.orchestratorSession} \u2192 ${auto.workerSession}`, callback_data: `auto:details:${id}` }]);
       }
       keyboard.push([{ text: '\uD83E\uDD16 New Automation', callback_data: 'auto:new' }]);
     }

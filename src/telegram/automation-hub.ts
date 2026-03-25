@@ -657,7 +657,7 @@ export class AutomationHubRenderer {
         const lines = [
           '<b>Automation Hub</b>',
           '',
-          `Worker: <b>${a.workerSession}</b> -> Orchestrator: <b>${a.orchestratorSession}</b>`,
+          `Orchestrator: <b>${a.orchestratorSession}</b> -> Worker: <b>${a.workerSession}</b>`,
           `Task: ${a.taskDescription}`,
           '',
           `Status: ${engineStateLabel(a.engine.state)} | Cycles: ${a.cycleCount}`,
@@ -680,7 +680,7 @@ export class AutomationHubRenderer {
         'Active Automations:',
       ];
       for (const [id, a] of this.activeAutomations) {
-        lines.push(`${id}. ${a.workerSession} -> ${a.orchestratorSession} (${this.formatElapsed(a.startTime)})`);
+        lines.push(`${id}. ${a.orchestratorSession} -> ${a.workerSession} (${this.formatElapsed(a.startTime)})`);
       }
       lines.push('', '<i>Tip: Change max cycle limit in /settings</i>');
       return lines.join('\n');
@@ -774,7 +774,7 @@ export class AutomationHubRenderer {
     if (this.activeAutomations.size > 0 && this.detailViewId === null && !this.pendingCreation) {
       for (const [id, a] of this.activeAutomations) {
         keyboard.push([
-          { text: `\uD83D\uDD0D ${a.workerSession} -> ${a.orchestratorSession}`, callback_data: `auto:details:${id}` },
+          { text: `\uD83D\uDD0D ${a.orchestratorSession} -> ${a.workerSession}`, callback_data: `auto:details:${id}` },
         ]);
       }
       keyboard.push([{ text: '\uD83E\uDD16 New Automation', callback_data: 'auto:new' }]);
