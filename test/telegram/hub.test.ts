@@ -231,9 +231,10 @@ describe('HubRenderer', () => {
       assert.ok(allData.includes('hub:disconnect:active-one'), 'active session should have disconnect button');
       assert.ok(allData.includes('hub:disconnect:inactive-one'), 'inactive session should have disconnect button');
 
-      // Active session close button should include session name (no switch button present)
+      // Active session close button is always just the skull emoji (name is on the Resume button instead)
       const activeDisconnect = allBtns.find(b => b.callback_data === 'hub:disconnect:active-one');
-      assert.ok(activeDisconnect!.text.includes('active-one'), 'active session close button should include name');
+      assert.equal(activeDisconnect!.text, '\uD83D\uDC80', 'active session close button should be just skull emoji');
+      assert.ok(!activeDisconnect!.text.includes('active-one'), 'active session close button should not include name (name is on Resume button)');
 
       // Inactive session close button should be just the emoji (switch button already shows name)
       const inactiveDisconnect = allBtns.find(b => b.callback_data === 'hub:disconnect:inactive-one');
@@ -266,9 +267,9 @@ describe('HubRenderer', () => {
       const closeB = allBtns.find(b => b.callback_data === 'hub:disconnect:session-b');
       assert.equal(closeB!.text, '\uD83D\uDC80', 'inactive session close button should be just emoji');
 
-      // session-a is active, no switch button -- close should include session name
+      // session-a is active -- close is also just emoji (name is on the Resume button instead)
       const closeA = allBtns.find(b => b.callback_data === 'hub:disconnect:session-a');
-      assert.equal(closeA!.text, `\uD83D\uDC80 session-a`, 'active session close button should include name');
+      assert.equal(closeA!.text, '\uD83D\uDC80', 'active session close button should be just skull emoji');
     });
 
     it('close button shows only emoji when all sessions have switch buttons (no active session)', async () => {
@@ -1087,7 +1088,8 @@ describe('HubRenderer', () => {
       assert.ok(allBtns.some(b => b.callback_data === 'auto:pause'), 'should have pause button');
       assert.ok(allBtns.some(b => b.callback_data === 'auto:stop'), 'should have stop button');
       assert.ok(allBtns.some(b => b.callback_data === 'auto:refresh'), 'should have refresh button');
-      assert.ok(allBtns.some(b => b.callback_data === 'hub:auto-back'), 'should have back button');
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:back'), 'should have back button (auto:back goes to automation list)');
+      assert.ok(!allBtns.some(b => b.callback_data === 'hub:auto-back'), 'should NOT use hub:auto-back in automationDetails view');
       assert.ok(!allBtns.some(b => b.callback_data === 'hub:switch:orch-1'), 'should NOT have switch button');
       assert.ok(!allBtns.some(b => b.callback_data.startsWith('hub:disconnect')), 'should NOT have disconnect button');
     });
@@ -1118,7 +1120,8 @@ describe('HubRenderer', () => {
         }
       }
 
-      assert.ok(allBtns.some(b => b.callback_data === 'hub:auto-back'), 'should have back button');
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:back'), 'should have back button (auto:back goes to automation list)');
+      assert.ok(!allBtns.some(b => b.callback_data === 'hub:auto-back'), 'should NOT use hub:auto-back in automationDetails view');
       assert.equal(allBtns.length, 1, 'should only have back button');
     });
 
@@ -1163,9 +1166,13 @@ describe('HubRenderer', () => {
 
       const sentText = api.calls[0].args[1] as string;
       assert.ok(sentText.includes('<b>Automation Hub</b>'), 'should show Automation Hub header');
-      assert.ok(sentText.includes('State: Executing directive'), 'should show engine state label');
+      // Phase 41: unified numbered-list format -- no "State:" prefix, state label is inline in list item
+      assert.ok(sentText.includes('Executing directive'), 'should show engine state label');
+      assert.ok(!sentText.includes('State: Executing directive'), 'should NOT show old "State:" prefix format');
       assert.ok(sentText.includes('Cycles: 5'), 'should show cycle count');
-      assert.ok(sentText.includes('...'), 'should truncate long task description');
+      assert.ok(sentText.includes('worker-1'), 'should show worker session');
+      assert.ok(sentText.includes('orch-1'), 'should show orchestrator session');
+      // Phase 41: task description is NOT shown in the automationHub list view (only in detail view)
       assert.ok(!sentText.includes('Automation Details'), 'should NOT show Automation Details header');
       assert.ok(!sentText.includes('Sessions Hub'), 'should NOT show Sessions Hub header');
     });
@@ -1192,8 +1199,10 @@ describe('HubRenderer', () => {
         }
       }
 
-      assert.ok(allBtns.some(b => b.callback_data === 'hub:auto-details'), 'should have View Details button');
-      assert.ok(allBtns.some(b => b.text.includes('View Details')), 'button text should say View Details');
+      // Phase 41: single automation uses same per-automation detail button as multi (auto:details:N)
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:details:1'), 'should have auto:details:1 button for the single automation');
+      assert.ok(!allBtns.some(b => b.callback_data === 'hub:auto-details'), 'should NOT use old hub:auto-details button');
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:new'), 'should have auto:new button');
       assert.ok(allBtns.some(b => b.callback_data === 'hub:auto-back'), 'should have Back to Sessions button');
       assert.ok(allBtns.some(b => b.text.includes('Back to Sessions')), 'button text should say Back to Sessions');
       assert.ok(!allBtns.some(b => b.callback_data === 'auto:pause'), 'should NOT have pause button');
@@ -1230,58 +1239,42 @@ describe('HubRenderer', () => {
       assert.ok(!allBtns.some(b => b.callback_data === 'hub:auto-details'), 'should NOT have View Details button');
     });
 
-    it('automationHub summary truncates long task descriptions at 80 chars', async () => {
+    it('automationHub list view shows state, sessions, and cycles (not task description)', async () => {
+      // Phase 41: automationHub list view uses numbered-list format with state | worker → orch | Cycles
+      // Task description is not shown in the list view (only in automationDetails view)
       const api = createMockApi();
       const sm = createMockSessionManager([{ name: 'w', status: 'running' }]);
       const hub = new HubRenderer(api as any, 123, sm as any, () => 'w');
 
-      // Exactly 80 chars -- no truncation
-      const task80 = 'a'.repeat(80);
-      const auto80 = {
+      const longTask = 'a'.repeat(100);
+      const auto = {
         engine: { state: 'executing' },
         workerSession: 'w',
         orchestratorSession: 'o',
-        taskDescription: task80,
-        cycleCount: 1,
+        taskDescription: longTask,
+        cycleCount: 7,
         lastAction: null,
       };
       hub.setAutomationHub({
-        get activeAutomationInfo() { return auto80; },
+        get activeAutomationInfo() { return auto; },
         get activeAutomationCount() { return 1; },
-        get allAutomations() { return new Map([[1, auto80]]); },
+        get allAutomations() { return new Map([[1, auto]]); },
         get pendingCreationInfo() { return null; },
       } as any);
 
       hub.setHubView('automationHub');
       await hub.render();
 
-      const text80 = api.calls[0].args[1] as string;
-      assert.ok(!text80.includes('...'), 'should NOT truncate 80-char task');
-      assert.ok(text80.includes(task80), 'should show full 80-char task');
-
-      // 81+ chars -- should truncate
-      const task81 = 'b'.repeat(81);
-      const auto81 = {
-        engine: { state: 'executing' },
-        workerSession: 'w',
-        orchestratorSession: 'o',
-        taskDescription: task81,
-        cycleCount: 1,
-        lastAction: null,
-      };
-      hub.setAutomationHub({
-        get activeAutomationInfo() { return auto81; },
-        get activeAutomationCount() { return 1; },
-        get allAutomations() { return new Map([[1, auto81]]); },
-        get pendingCreationInfo() { return null; },
-      } as any);
-
-      api.calls.length = 0;
-      await hub.render({ forceNew: true });
-
-      const text81 = api.calls.filter(c => c.method === 'sendMessage')[0]?.args[1] as string;
-      assert.ok(text81.includes('...'), 'should truncate 81-char task with ...');
-      assert.ok(!text81.includes(task81), 'should NOT show full 81-char task');
+      const text = api.calls[0].args[1] as string;
+      assert.ok(text.includes('<b>Automation Hub</b>'), 'should show Automation Hub header');
+      // Numbered-list format: "{id}. {stateLabel} | {worker} → {orch} | Cycles: {n}"
+      assert.ok(text.includes('Executing directive'), 'should show state label');
+      assert.ok(text.includes('Cycles: 7'), 'should show cycle count');
+      assert.ok(text.includes('w'), 'should show worker session name');
+      assert.ok(text.includes('o'), 'should show orchestrator session name');
+      // Task description is NOT included in the list view
+      assert.ok(!text.includes(longTask), 'should NOT show task description in automationHub list view');
+      assert.ok(!text.includes('Tap View Details'), 'should NOT show old single-automation summary text');
     });
   });
 
@@ -1368,7 +1361,9 @@ describe('HubRenderer', () => {
       assert.ok(!allBtns.some(b => b.callback_data === 'hub:auto-details'), 'should NOT have hub:auto-details button for multi-automation');
     });
 
-    it('automationHub view with 1 automation still shows single summary', async () => {
+    it('automationHub view with 1 automation shows unified numbered-list format', async () => {
+      // Phase 41: single automation uses same numbered-list format as multi-automation
+      // No more "State:" prefix or "Tap View Details" text
       const api = createMockApi();
       const sm = createMockSessionManager([
         { name: 'worker-1', status: 'running' },
@@ -1384,8 +1379,14 @@ describe('HubRenderer', () => {
 
       const sentText = api.calls[0].args[1] as string;
       assert.ok(sentText.includes('<b>Automation Hub</b>'), 'should show Automation Hub header');
-      assert.ok(sentText.includes('State:'), 'should show single-automation summary with State:');
-      assert.ok(sentText.includes('Tap View Details'), 'should show Tap View Details for single automation');
+      // Numbered-list format: "1. Executing directive | worker-1 → orch-1 | Cycles: 5"
+      assert.ok(sentText.includes('Executing directive'), 'should show engine state label');
+      assert.ok(sentText.includes('worker-1'), 'should show worker session name');
+      assert.ok(sentText.includes('orch-1'), 'should show orchestrator session name');
+      assert.ok(sentText.includes('Cycles: 5'), 'should show cycle count');
+      // Phase 41 removed "State:" prefix and "Tap View Details" text
+      assert.ok(!sentText.includes('State:'), 'should NOT show old "State:" prefix');
+      assert.ok(!sentText.includes('Tap View Details'), 'should NOT show old "Tap View Details" text');
     });
 
     it('stopping one automation shows updated list without the stopped one', async () => {
@@ -1413,17 +1414,19 @@ describe('HubRenderer', () => {
       assert.ok(firstText.includes('Cycles: 3'), 'initial list should show cycles for auto 2');
 
       // Simulate stopping automation 1 -- remove it from the mock
-      // With only 1 automation remaining, the view falls back to single-auto summary
+      // Phase 41: with only 1 automation remaining, view still uses numbered-list format (unified)
       hub.setAutomationHub(createMultiMockAutomationHub([auto2]) as any);
 
       api.calls.length = 0;
       await hub.render({ forceNew: true });
 
       const secondText = api.calls.filter(c => c.method === 'sendMessage')[0]?.args[1] as string;
-      // Should NOT contain the stopped automation's info
-      assert.ok(!secondText.includes('Fix bugs'), 'after stopping, should NOT show stopped automation task');
-      // Single-auto summary shows the remaining automation info
-      assert.ok(secondText.includes('Deploy'), 'after stopping, should show remaining automation task');
+      // Should NOT contain the stopped automation's session names
+      assert.ok(!secondText.includes('worker-1'), 'after stopping, should NOT show stopped automation worker');
+      assert.ok(!secondText.includes('orch-1'), 'after stopping, should NOT show stopped automation orchestrator');
+      // Phase 41: numbered-list format shows state, sessions, cycles (task description NOT in list view)
+      assert.ok(secondText.includes('worker-2'), 'after stopping, should show remaining automation worker');
+      assert.ok(secondText.includes('orch-2'), 'after stopping, should show remaining automation orchestrator');
       assert.ok(secondText.includes('Cycles: 3'), 'after stopping, should show remaining automation cycles');
     });
 
