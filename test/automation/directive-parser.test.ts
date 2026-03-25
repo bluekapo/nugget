@@ -1033,6 +1033,42 @@ describe('AUTO-02: stripSpinners extension for Unicode spinners', () => {
   });
 });
 
+describe('ENG-02: stripSpinners strips bypass-permissions banner', () => {
+  it('strips "bypass permissions on" banner line', () => {
+    const text = 'some output\n  \u23F5\u23F5 bypass permissions on\nprompt';
+    const result = stripSpinners(text);
+    assert.ok(!result.includes('bypass permissions'), `should strip bypass banner, got: ${result}`);
+    assert.ok(result.includes('some output'), 'should preserve preceding line');
+    assert.ok(result.includes('prompt'), 'should preserve following line');
+  });
+
+  it('strips "bypass permissions off" banner line', () => {
+    const text = 'output\n  \u23F5\u23F5 bypass permissions off\n\u276F ';
+    const result = stripSpinners(text);
+    assert.ok(!result.includes('bypass permissions'), `should strip bypass banner off variant, got: ${result}`);
+    assert.ok(result.includes('output'), 'should preserve preceding line');
+  });
+
+  it('preserves non-banner lines adjacent to the banner', () => {
+    const text = 'line before\n  \u23F5\u23F5 bypass permissions on\nline after';
+    const result = stripSpinners(text);
+    assert.ok(!result.includes('bypass permissions'), 'should strip banner');
+    const lines = result.split('\n');
+    assert.ok(lines.some(l => l.includes('line before')), 'should keep line before');
+    assert.ok(lines.some(l => l.includes('line after')), 'should keep line after');
+  });
+
+  it('full pipeline (stripAnsi + stripSpinners) removes bypass banner from raw PTY data', () => {
+    // Raw PTY data from Claude Code v2.1.74 containing bypass banner at row 40
+    const raw = '\x1b[10;1H\u25CF COMMAND: /gsd:execute-phase 19\x1b[38;1H\u2722 Seasoning\u2026\x1b[39;1H\u276F \x1b[40;1H  \u23F5\u23F5 bypass permissions on';
+    const cleaned = stripSpinners(stripAnsi(raw));
+    assert.ok(!cleaned.includes('bypass permissions'),
+      `full pipeline should strip bypass banner, got: ${JSON.stringify(cleaned)}`);
+    assert.ok(cleaned.includes('COMMAND'),
+      'full pipeline should preserve command line');
+  });
+});
+
 describe('stripPromptArtifacts', () => {
   it('strips trailing horizontal rule and prompt chevron from text', () => {
     const result = stripPromptArtifacts('do stuff ───────────────── ❯');
