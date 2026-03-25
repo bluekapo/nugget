@@ -154,4 +154,25 @@ describe('CompletionTracker', () => {
     assert.ok(completions.includes('alpha'));
     assert.ok(completions.includes('beta'));
   });
+
+  describe('getLastFiredMarker', () => {
+    it('returns null for unknown session', () => {
+      assert.equal(tracker.getLastFiredMarker('unknown'), null);
+    });
+
+    it('returns null before any completion fires', () => {
+      // Feed data but don't advance past idle
+      tracker.onData('alpha', 'some output without marker');
+      assert.equal(tracker.getLastFiredMarker('alpha'), null);
+    });
+
+    it('returns the marker text after a completion fires', () => {
+      tracker.onData('alpha', '\u273B Brewed for 1m 22s');
+      timer.advance(5000);
+      assert.equal(completions.length, 1);
+
+      const marker = tracker.getLastFiredMarker('alpha');
+      assert.equal(marker, '\u273B Brewed for 1m 22s');
+    });
+  });
 });
