@@ -379,6 +379,16 @@ export class AutomationEngine {
     }
 
     this.setState('idle');
+
+    // Kick off a new cycle immediately — same pattern as start().
+    // The worker is likely already idle at its prompt, so onPromptComplete
+    // won't fire without new output. This timer ensures the engine
+    // resumes cycling without waiting for worker activity.
+    this.timer.setTimeout(() => {
+      if (this._state === 'idle') {
+        this.onWorkerIdle();
+      }
+    }, 0);
   }
 
   private createMonitor(): SessionMonitor {
