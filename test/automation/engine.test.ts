@@ -3061,6 +3061,87 @@ describe('AutomationEngine', () => {
       'WAIT should NOT trigger RETRY_PROMPT');
   });
 
+  // ========== Resume waits for worker completion (ENG-04) ==========
+
+  it('resume does not kick cycle when worker is still processing', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Fire the start() kickoff timer so it is consumed
+    timer.advance(1);
+    assert.equal(engine.state, 'clearing-orchestrator', 'start kickoff should fire');
+
+    // Complete the first full cycle to get back to idle
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000);
+    assert.equal(engine.state, 'idle', 'should be idle after cycle 1');
+
+    // Pause the engine while worker is processing (no completion output yet)
+    engine.pause();
+    assert.equal(engine.state, 'paused', 'should be paused');
+
+    // Clear the writes log so we can check for NEW writes from resume
+    writes.length = 0;
+
+    // Resume -- worker has NOT completed yet (no completion marker on screen)
+    // Worker emulator has no ❯ prompt and no ✻ completion marker
+    engine.resume();
+    assert.equal(engine.state, 'idle', 'resume() should transition to idle');
+
+    // Advance timer by 1ms to fire any setTimeout(0) from resume
+    timer.advance(1);
+
+    // Engine should stay in idle -- NOT transition to clearing-orchestrator
+    // because the worker hasn't produced output yet
+    assert.equal(engine.state, 'idle',
+      'resume should NOT kick cycle when worker is still processing');
+
+    // No /clear should have been written to orchestrator
+    const clearWrites = writes.filter(w => w.name === 'orchestrator' && w.data.includes('/clear'));
+    assert.equal(clearWrites.length, 0,
+      'no /clear should be sent when worker is still processing');
+  });
+
+  it('resume waits for worker completion then starts cycle', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Fire the start() kickoff timer
+    timer.advance(1);
+    assert.equal(engine.state, 'clearing-orchestrator');
+
+    // Complete the first full cycle to get back to idle
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000);
+    assert.equal(engine.state, 'idle', 'should be idle after cycle 1');
+
+    // Pause the engine
+    engine.pause();
+    assert.equal(engine.state, 'paused');
+
+    // Resume -- worker is still processing
+    engine.resume();
+    assert.equal(engine.state, 'idle', 'resume should set idle');
+    timer.advance(1); // fire any setTimeout(0)
+
+    // Engine should still be idle (worker not done yet)
+    assert.equal(engine.state, 'idle',
+      'should stay idle waiting for worker completion');
+
+    // Now worker completes
+    await emitOutput(bus, 'worker', completionOutput('command done'));
+    timer.advance(50);  // debounce
+    timer.advance(100); // idle detection -> onPromptComplete fires
+
+    // Engine should have started a new cycle (follow-up prompt path)
+    assert.notEqual(engine.state, 'idle',
+      'engine should start cycle after worker completes post-resume');
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------
