@@ -347,6 +347,92 @@ describe('AutomationEngine', () => {
     assert.equal(promptWrites.length, 0, 'no prompt should be sent while paused');
   });
 
+  // ---------- Test 7b: resume kicks off cycle immediately ----------
+
+  it('resume kicks off cycle immediately when worker is already idle (no new output needed)', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+    assert.equal(engine.state, 'idle', 'start() sets idle synchronously');
+
+    // Fire the start() kickoff timer so it is consumed and out of the way
+    timer.advance(1);
+    assert.equal(engine.state, 'clearing-orchestrator', 'start kickoff should fire');
+
+    // Complete the orchestrator /clear so engine can progress through the cycle
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(50);
+    timer.advance(100);
+
+    // Let the full cycle play out: orchestrator prompt -> response -> worker execution -> worker idle
+    // We need the engine to return to 'idle' naturally. Feed orchestrator a directive.
+    await emitOutput(bus, 'orchestrator', directiveOutput('CONTINUE'));
+    timer.advance(50);
+    timer.advance(100);
+
+    // Worker executes, then completes
+    await emitOutput(bus, 'worker', completionOutput('done with task'));
+    timer.advance(50);
+    timer.advance(100);
+
+    // Now engine is in clearing-orchestrator for cycle 2. Pause it.
+    engine.pause();
+    assert.equal(engine.state, 'paused', 'pause() should transition to paused');
+
+    // Clear the writes log so we can check for NEW /clear writes from resume
+    writes.length = 0;
+
+    // Resume -- should schedule its own kickoff timer
+    engine.resume();
+    assert.equal(engine.state, 'idle', 'resume() should transition back to idle');
+
+    // Advance timer by 1ms to fire the 0ms setTimeout from resume
+    // NO worker output emitted -- proves resume itself kicks the cycle
+    timer.advance(1);
+
+    // Engine should have transitioned out of idle into clearing-orchestrator
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'resume should kick cycle immediately without new worker output');
+
+    // Verify /clear was written to orchestrator (proves cycle started from resume, not old timer)
+    const clearWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('/clear'));
+    assert.ok(clearWrite, 'engine should send /clear to orchestrator after resume kickoff');
+  });
+
+  // ---------- Test 7c: resume after mid-cycle pause re-kicks cycle ----------
+
+  it('resume after mid-cycle pause re-kicks cycle', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Let the initial kickoff fire and reach clearing-orchestrator
+    timer.advance(1);
+    assert.equal(engine.state, 'clearing-orchestrator', 'initial kickoff should reach clearing-orchestrator');
+
+    // Simulate orchestrator /clear completion so engine progresses
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(50);
+    timer.advance(100);
+
+    // Engine should be past clearing-orchestrator now (prompting-orchestrator or waiting-response)
+    const stateBeforePause = engine.state;
+    assert.notEqual(stateBeforePause, 'idle', 'engine should be mid-cycle');
+
+    // Pause mid-cycle
+    engine.pause();
+    assert.equal(engine.state, 'paused', 'pause() should transition to paused');
+
+    // Resume -- should schedule a kickoff timer
+    engine.resume();
+    assert.equal(engine.state, 'idle', 'resume() should transition to idle');
+
+    // Advance timer to fire the resume kickoff (0ms setTimeout)
+    timer.advance(1);
+
+    // Engine should kick a new cycle from idle -> clearing-orchestrator
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'resume should re-kick cycle after mid-cycle pause');
+  });
+
   // ---------- Test 8: stop cleanup ----------
 
   it('stop() disposes monitors, clears timers, removes bus listeners', async () => {
