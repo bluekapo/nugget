@@ -220,7 +220,11 @@ async function startPrimary(
   // 12a. Wire session switch callback: swap emulator, clear CLI content, switch to CLI view
   router.onSessionSwitch = (_from, to) => {
     const targetEmulator = getOrCreateEmulator(to);
+    const priorMarker = completionTracker.getLastFiredMarker(to);
     screenCapture.swapEmulator(targetEmulator);
+    if (priorMarker) {
+      screenCapture.setLastFiredMarker(priorMarker);
+    }
     hubRenderer.setCliContent(to, '');
     hubRenderer.setHubView('cli');
   };
@@ -785,7 +789,11 @@ async function becomeNewPrimary(
 
     router.onSessionSwitch = (_from, to) => {
       const targetEmulator = getOrCreateEmulator(to);
+      const priorMarker = promotedCompletionTracker.getLastFiredMarker(to);
       capture.swapEmulator(targetEmulator);
+      if (priorMarker) {
+        capture.setLastFiredMarker(priorMarker);
+      }
       hubRenderer.setCliContent(to, '');
       hubRenderer.setHubView('cli');
     };

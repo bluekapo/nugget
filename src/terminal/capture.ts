@@ -324,6 +324,15 @@ export class ScreenCapture {
   }
 
   /**
+   * Seed the completion dedup marker. Call after swapEmulator() to carry over
+   * the last fired marker from CompletionTracker, preventing duplicate
+   * notifications when switching to a session whose prompt already completed.
+   */
+  setLastFiredMarker(marker: string | null): void {
+    this.lastFiredMarker = marker;
+  }
+
+  /**
    * Call when user sends input TO the PTY (e.g. from Telegram or stdin).
    * Resets completion detection so we don't fire a notification right after
    * the user sends a new prompt.

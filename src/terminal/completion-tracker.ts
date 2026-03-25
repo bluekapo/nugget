@@ -98,6 +98,14 @@ export class CompletionTracker {
   }
 
   /**
+   * Return the last fired marker text for a session, or null if unknown/never fired.
+   * Used to carry dedup state across session switches.
+   */
+  getLastFiredMarker(sessionName: string): string | null {
+    return this.sessions.get(sessionName)?.lastFiredMarker ?? null;
+  }
+
+  /**
    * Clean up timers and state for a session (called on session exit).
    */
   removeSession(sessionName: string): void {
