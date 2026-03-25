@@ -53,6 +53,8 @@ export function stripSpinners(text: string): string {
       // Strip Unicode spinner lines from Ink TUI: "✶ Scurrying...", "✽ Analyzing..."
       // Note: Do NOT add ✻ — it's used for completion markers (✻ Crunched for 1m 22s)
       if (/^\s*[✶✽✢]\s+\w+.*\.{3}\s*$/.test(line)) return false;
+      // ENG-02: Strip Claude Code TUI footer banner (bypass permissions indicator)
+      if (/^\s*\u23F5\u23F5\s+bypass\s+permissions/.test(line)) return false;
       // Strip lines that are just whitespace
       if (/^\s*$/.test(line)) return false;
       return true;
@@ -85,6 +87,7 @@ export const RETRY_PROMPT = 'Your previous response could not be parsed as a val
   + '- ESCALATE: <reason>\n'
   + '- CLEAR\n'
   + '- RESET\n'
+  + '- WAIT\n'
   + '\n'
   + 'Optional modifier (on a separate line before or after the directive):\n'
   + '- CONTEXT: <text> -- Attaches persistent memory carried across all future cycles.\n'
@@ -737,6 +740,20 @@ export class AutomationEngine {
 
     // Explicit null guard for TypeScript narrowing (all null paths returned above)
     if (!directive) return;
+
+    // Handle WAIT directive: no-op — log, emit cycle-complete, return to idle
+    if (directive.type === 'WAIT') {
+      this.actionLog.add('WAIT', '(no-op — orchestrator waiting)');
+      this.bus.emit('automation:cycle-complete', this.engineId, this.cycleNumber, 'WAIT');
+      // Re-arm worker completion detection and return to idle — no action on worker
+      if (this.workerMonitor) {
+        this.workerMonitor.capture.resetBaseline();
+        this.workerMonitor.capture.markInputSent();
+        this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
+      }
+      this.setState('idle');
+      return;
+    }
 
     // Handle CLEAR directive: send /clear to worker, poll for (no content)
     if (directive.type === 'CLEAR') {
