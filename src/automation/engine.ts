@@ -972,6 +972,7 @@ export class AutomationEngine {
         this.workerMonitor.capture.markInputSent();
         this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
       }
+      this.workerBusy = true;
       this.setState('idle');
     }
   }

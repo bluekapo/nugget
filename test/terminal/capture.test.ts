@@ -196,7 +196,7 @@ describe('ScreenCapture', () => {
     // Write some normal data (schedules debounce via ManualTimer)
     await capture.onData('some output');
     assert.equal(events.length, 0, 'No event yet');
-    assert.equal(timer.pendingCount, 1, 'One pending debounce timer');
+    assert.equal(timer.pendingCount, 2, 'Two pending timers (debounce + exec-idle)');
 
     // Before debounce fires, enter alt screen
     await capture.onData('\x1b[?1049h');
