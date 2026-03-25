@@ -308,6 +308,97 @@ describe('registerCommands', () => {
     });
   });
 
+  describe('GSD quick commands', () => {
+    const GSD_COMMAND_NAMES = [
+      'execute_phase', 'plan_phase', 'validate_phase',
+      'audit_milestone', 'complete_milestone', 'quick',
+    ];
+
+    it('registers all 6 GSD commands when writeToSession is provided', () => {
+      const bot = createMockBot();
+      const manager = createMockSessionManager();
+      const writeToSession = (_name: string, _data: string) => {};
+      registerCommands(bot as any, manager as any, () => null, undefined, undefined, undefined, writeToSession);
+
+      const commands = bot.registered.map((r) => r.command);
+      for (const cmd of GSD_COMMAND_NAMES) {
+        assert.ok(commands.includes(cmd), `/${cmd} should be registered`);
+      }
+    });
+
+    it('does NOT register GSD commands when writeToSession is not provided', () => {
+      const bot = createMockBot();
+      const manager = createMockSessionManager();
+      registerCommands(bot as any, manager as any, () => null);
+
+      const commands = bot.registered.map((r) => r.command);
+      for (const cmd of GSD_COMMAND_NAMES) {
+        assert.ok(!commands.includes(cmd), `/${cmd} should NOT be registered without writeToSession`);
+      }
+    });
+
+    it('/execute_phase with args calls writeToSession with "/gsd:execute-phase <args>\\n"', async () => {
+      const bot = createMockBot();
+      const manager = createMockSessionManager();
+      const writes: Array<{ name: string; data: string }> = [];
+      const writeToSession = (name: string, data: string) => { writes.push({ name, data }); };
+      registerCommands(bot as any, manager as any, () => 'my-session', undefined, undefined, undefined, writeToSession);
+
+      const cmd = bot.registered.find((r) => r.command === 'execute_phase')!;
+      const ctx = {
+        message: { text: '/execute_phase 43' },
+        async reply(_text: string, _opts?: unknown) {},
+        async deleteMessage() {},
+      };
+      await cmd.handler(ctx);
+
+      assert.equal(writes.length, 1);
+      assert.equal(writes[0].name, 'my-session');
+      assert.equal(writes[0].data, '/gsd:execute-phase 43\n');
+    });
+
+    it('/quick with no args calls writeToSession with "/gsd:quick\\n"', async () => {
+      const bot = createMockBot();
+      const manager = createMockSessionManager();
+      const writes: Array<{ name: string; data: string }> = [];
+      const writeToSession = (name: string, data: string) => { writes.push({ name, data }); };
+      registerCommands(bot as any, manager as any, () => 'my-session', undefined, undefined, undefined, writeToSession);
+
+      const cmd = bot.registered.find((r) => r.command === 'quick')!;
+      const ctx = {
+        message: { text: '/quick' },
+        async reply(_text: string, _opts?: unknown) {},
+        async deleteMessage() {},
+      };
+      await cmd.handler(ctx);
+
+      assert.equal(writes.length, 1);
+      assert.equal(writes[0].name, 'my-session');
+      assert.equal(writes[0].data, '/gsd:quick\n');
+    });
+
+    it('GSD command with no active session replies with error', async () => {
+      const bot = createMockBot();
+      const manager = createMockSessionManager();
+      const writes: Array<{ name: string; data: string }> = [];
+      const writeToSession = (name: string, data: string) => { writes.push({ name, data }); };
+      registerCommands(bot as any, manager as any, () => null, undefined, undefined, undefined, writeToSession);
+
+      const cmd = bot.registered.find((r) => r.command === 'execute_phase')!;
+      const replies: string[] = [];
+      const ctx = {
+        message: { text: '/execute_phase 43' },
+        async reply(text: string, _opts?: unknown) { replies.push(text); },
+        async deleteMessage() {},
+      };
+      await cmd.handler(ctx);
+
+      assert.equal(writes.length, 0, 'should NOT call writeToSession');
+      assert.equal(replies.length, 1);
+      assert.ok(replies[0].includes('No active session'), 'should mention no active session');
+    });
+  });
+
   describe('/settings Confirm Enter toggle', () => {
     /** Minimal mock for SettingsStore */
     function createMockSettingsStore(overrides: Record<string, boolean | number> = {}) {
