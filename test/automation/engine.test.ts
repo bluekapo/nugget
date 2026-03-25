@@ -3206,4 +3206,55 @@ describe('AutomationEngine engineId (CONC-02)', () => {
     engine1.stop();
     engine2.stop();
   });
+
+  // ========== WAIT directive no-op ==========
+
+  it('WAIT directive is a no-op — skips action, proceeds to next cycle', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    const cycleEvents: Array<{ cycle: number; action: string }> = [];
+    bus.on('automation:cycle-complete', (_engineId: string, cycle: number, action: string) => {
+      cycleEvents.push({ cycle, action });
+    });
+
+    engine.start();
+
+    // Worker goes idle (first cycle via deferred timer)
+    timer.advance(1);
+    assert.equal(engine.state, 'clearing-orchestrator');
+
+    // Orchestrator clears
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); // poll fires, finds "(no content)"
+    timer.advance(500);  // settling delay -> onClearComplete
+    timer.advance(50);   // delayed Enter -> waiting-response
+
+    assert.equal(engine.state, 'waiting-response', 'should be waiting for response');
+
+    // Record writes before WAIT response
+    const writesBeforeWait = writes.length;
+
+    // Orchestrator responds with WAIT
+    await emitOutput(bus, 'orchestrator', directiveOutput('WAIT'));
+    timer.advance(1000); // response poll fires, finds WAIT directive
+
+    // Engine should transition to idle (no-op), NOT stopped/paused
+    assert.equal(engine.state, 'idle',
+      'WAIT should transition engine to idle (no-op)');
+
+    // No writes should be sent to the worker session
+    const workerWrites = writes.slice(writesBeforeWait).filter(w => w.name === 'worker');
+    assert.equal(workerWrites.length, 0,
+      'WAIT should NOT send anything to worker session');
+
+    // automation:cycle-complete should be emitted
+    assert.equal(cycleEvents.length, 1, 'should emit one cycle-complete event');
+    assert.ok(cycleEvents[0].action.includes('WAIT'), 'cycle-complete action should mention WAIT');
+
+    // WAIT should NOT trigger retry prompt (verify no retry writes)
+    const retryWrites = writes.slice(writesBeforeWait).filter(
+      w => w.name === 'orchestrator' && w.data.includes('could not be parsed')
+    );
+    assert.equal(retryWrites.length, 0,
+      'WAIT should NOT trigger RETRY_PROMPT');
+  });
 });

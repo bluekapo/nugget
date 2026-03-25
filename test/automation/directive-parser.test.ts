@@ -38,15 +38,24 @@ describe('parseDirective', () => {
     });
   });
 
-  describe('WAIT directive (removed -- returns null)', () => {
-    it('returns null for bare WAIT (graceful no-op)', () => {
+  describe('WAIT directive', () => {
+    it('returns { type: WAIT } for bare WAIT', () => {
       const result = parseDirective('processing\n● WAIT\nstill going');
-      assert.strictEqual(result, null);
+      assert.deepStrictEqual(result, { type: 'WAIT' });
     });
 
-    it('returns null for WAIT: N (graceful no-op)', () => {
+    it('returns { type: WAIT } for WAIT: N', () => {
       const result = parseDirective('processing\n● WAIT: 30\nstill going');
-      assert.strictEqual(result, null);
+      assert.deepStrictEqual(result, { type: 'WAIT' });
+    });
+
+    it('returns { type: WAIT } in relaxed parser (under CONTEXT block)', () => {
+      const screenText = [
+        '● CONTEXT: project uses React',
+        'WAIT',
+      ].join('\n');
+      const result = parseDirectiveWithContext(screenText);
+      assert.deepStrictEqual(result.directive, { type: 'WAIT' });
     });
   });
 
@@ -119,9 +128,9 @@ describe('parseDirective', () => {
       assert.deepStrictEqual(result, { type: 'SELECT', option: 2 });
     });
 
-    it('returns null for ● WAIT: 10 (removed directive)', () => {
+    it('returns { type: WAIT } for ● WAIT: 10', () => {
       const result = parseDirective('● WAIT: 10');
-      assert.strictEqual(result, null);
+      assert.deepStrictEqual(result, { type: 'WAIT' });
     });
 
     it('strips ● prefix from ENTER directive', () => {
