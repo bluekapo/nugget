@@ -255,6 +255,8 @@ describe('AutomationHubRenderer', () => {
       await hub.handleCallback('auto:w:w');
       await hub.handleCallback('auto:o:o');
       await hub.completeCreation('deploy app');
+      // Navigate to detail view (creation stays on list view now)
+      await hub.handleCallback('auto:details:1');
       api.calls.length = 0;
 
       hub.updateCycleInfo(3, 'COMMAND: npm test');
@@ -288,6 +290,8 @@ describe('AutomationHubRenderer', () => {
       await hub.handleCallback('auto:w:w');
       await hub.handleCallback('auto:o:o');
       await hub.completeCreation('fix bugs');
+      // Navigate to detail view (creation stays on list view now)
+      await hub.handleCallback('auto:details:1');
       // Simulate engine being paused after creation
       mockEng.state = 'paused';
       api.calls.length = 0;
@@ -318,6 +322,8 @@ describe('AutomationHubRenderer', () => {
       await hub.handleCallback('auto:w:w');
       await hub.handleCallback('auto:o:o');
       await hub.completeCreation('run tests');
+      // Navigate to detail view (creation stays on list view now)
+      await hub.handleCallback('auto:details:1');
       api.calls.length = 0;
 
       hub.updateCycleInfo(5, 'ENTER');
@@ -346,6 +352,8 @@ describe('AutomationHubRenderer', () => {
       await hub.handleCallback('auto:w:w');
       await hub.handleCallback('auto:o:o');
       await hub.completeCreation('task');
+      // Navigate to detail view (creation stays on list view now)
+      await hub.handleCallback('auto:details:1');
       api.calls.length = 0;
 
       await hub.handleCallback('auto:pause');
@@ -369,6 +377,8 @@ describe('AutomationHubRenderer', () => {
       await hub.handleCallback('auto:w:w');
       await hub.handleCallback('auto:o:o');
       await hub.completeCreation('task');
+      // Navigate to detail view (creation stays on list view now)
+      await hub.handleCallback('auto:details:1');
       api.calls.length = 0;
 
       await hub.handleCallback('auto:resume');
@@ -392,6 +402,8 @@ describe('AutomationHubRenderer', () => {
       await hub.handleCallback('auto:w:w');
       await hub.handleCallback('auto:o:o');
       await hub.completeCreation('task');
+      // Navigate to detail view (creation stays on list view now)
+      await hub.handleCallback('auto:details:1');
       api.calls.length = 0;
 
       await hub.handleCallback('auto:stop');
@@ -833,8 +845,7 @@ describe('AutomationHubRenderer', () => {
       await hub.handleCallback('auto:o:o1');
       await hub.completeCreation('task A');
 
-      // Go back to list view, then create second automation: w2 -> o2
-      await hub.handleCallback('auto:back');
+      // Create second automation: w2 -> o2 (already on list view after creation)
       await hub.handleCallback('auto:new');
       await hub.handleCallback('auto:w:w2');
       await hub.handleCallback('auto:o:o2');
@@ -858,9 +869,7 @@ describe('AutomationHubRenderer', () => {
 
     it('auto:details:N sets detail view, auto:back returns to list', async () => {
       const { hub, api } = await setupTwoAutomations();
-      // Should be in detail view for the second automation (auto-set on creation)
-      // Go back to list
-      await hub.handleCallback('auto:back');
+      // After creation, hub is on list view
       api.calls.length = 0;
 
       // Navigate to detail view for automation 1
@@ -883,10 +892,10 @@ describe('AutomationHubRenderer', () => {
 
     it('stopping one automation leaves the other running', async () => {
       const { hub, engines } = await setupTwoAutomations();
-      // Currently in detail view for automation 2 (last created)
       assert.equal(hub.activeAutomationCount, 2);
 
-      // Stop the current detail-view automation (id=2)
+      // Navigate to detail view for automation 2, then stop it
+      await hub.handleCallback('auto:details:2');
       await hub.handleCallback('auto:stop');
 
       assert.equal(hub.activeAutomationCount, 1, 'should have 1 automation remaining');
@@ -898,8 +907,7 @@ describe('AutomationHubRenderer', () => {
 
     it('list view shows View Details buttons for each automation', async () => {
       const { hub, api } = await setupTwoAutomations();
-      // Go to list view
-      await hub.handleCallback('auto:back');
+      // Already on list view after creation
       api.calls.length = 0;
       await hub.render();
 
@@ -1733,8 +1741,7 @@ describe('AutomationHubRenderer', () => {
       await hub.handleCallback('auto:o:o1');
       await hub.completeCreation('task A');
 
-      // Go back to list view, then create second automation: w2 -> o2
-      await hub.handleCallback('auto:back');
+      // Create second automation: w2 -> o2 (already on list view after creation)
       await hub.handleCallback('auto:new');
       await hub.handleCallback('auto:w:w2');
       await hub.handleCallback('auto:o:o2');
@@ -1842,6 +1849,156 @@ describe('AutomationHubRenderer', () => {
 
       // Both automations should still be active (escalation doesn't remove)
       assert.equal(hub.activeAutomationCount, 2, 'both automations should still be active after escalation');
+    });
+  });
+
+  describe('NAV-01: completeCreation stays on list view', () => {
+    it('completeCreation stays on list view (detailViewId is null)', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const engines: ReturnType<typeof createMockEngine>[] = [];
+      const factory = () => {
+        const eng = createMockEngine('idle');
+        engines.push(eng);
+        return eng;
+      };
+      const { hub } = createHub(api, {
+        sessions: ['w', 'o'],
+        engineFactory: factory as any,
+        bus,
+      });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.submitTaskForReview('test task');
+      await hub.handleCallback('auto:confirm');
+
+      // After creation, the last render should show list view text
+      const lastCall = api.calls[api.calls.length - 1];
+      const text = lastCall.args[lastCall.method === 'sendMessage' ? 1 : 2] as string;
+      assert.ok(text.includes('Active Automations'), 'should show list view after creation, not detail view');
+      assert.ok(!text.includes('Worker:'), 'should NOT show detail view Worker: line');
+    });
+
+    it('restoreFromStore stays on list view with 1 automation', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const engines: ReturnType<typeof createMockEngine>[] = [];
+      const factory = () => {
+        const eng = createMockEngine('idle');
+        engines.push(eng);
+        return eng;
+      };
+      const mockStore = createMockStore();
+      mockStore._loadAllResult = [{
+        id: 1,
+        workerSession: 'w',
+        orchestratorSession: 'o',
+        taskDescription: 'restored task',
+        engineState: 'idle',
+        cycleCount: 3,
+        lastAction: 'COMMAND: test',
+        actionLog: [],
+        startTime: Date.now() - 60000,
+      }];
+
+      const { hub } = createHub(api, {
+        sessions: ['w', 'o'],
+        engineFactory: factory as any,
+        bus,
+        automationStore: mockStore,
+      });
+
+      await hub.restoreFromStore();
+      api.calls.length = 0;
+      await hub.render();
+
+      const lastCall = api.calls[api.calls.length - 1];
+      const text = lastCall.args[lastCall.method === 'sendMessage' ? 1 : 2] as string;
+      assert.ok(text.includes('Active Automations'), 'should show list view after restoreFromStore');
+      assert.ok(!text.includes('Worker:'), 'should NOT auto-navigate to detail view');
+    });
+  });
+
+  describe('NAV-02: Back to List always shown in detail view', () => {
+    it('detail view shows Back to List with only 1 automation', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const engines: ReturnType<typeof createMockEngine>[] = [];
+      const factory = () => {
+        const eng = createMockEngine('idle');
+        engines.push(eng);
+        return eng;
+      };
+      const { hub } = createHub(api, {
+        sessions: ['w', 'o'],
+        engineFactory: factory as any,
+        bus,
+      });
+
+      // Create one automation
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.completeCreation('single task');
+
+      // Navigate to detail view
+      await hub.handleCallback('auto:details:1');
+      api.calls.length = 0;
+      await hub.render();
+
+      const lastCall = api.calls[api.calls.length - 1];
+      const opts = lastCall.args[lastCall.method === 'sendMessage' ? 2 : 3] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      const allData = keyboard!.flat().map((b: any) => b.callback_data);
+      assert.ok(allData.includes('auto:back'), 'detail view should have Back to List button even with 1 automation');
+    });
+
+    it('list -> detail -> back -> detail navigation cycle works', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const engines: ReturnType<typeof createMockEngine>[] = [];
+      const factory = () => {
+        const eng = createMockEngine('idle');
+        engines.push(eng);
+        return eng;
+      };
+      const { hub } = createHub(api, {
+        sessions: ['w', 'o'],
+        engineFactory: factory as any,
+        bus,
+      });
+
+      // Create one automation
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w');
+      await hub.handleCallback('auto:o:o');
+      await hub.completeCreation('nav test task');
+
+      // Step 1: Navigate to detail view
+      api.calls.length = 0;
+      await hub.handleCallback('auto:details:1');
+      let lastCall = api.calls[api.calls.length - 1];
+      let text = lastCall.args[lastCall.method === 'sendMessage' ? 1 : 2] as string;
+      assert.ok(text.includes('Worker:') || text.includes('w'), 'step 1: should be in detail view');
+
+      // Step 2: Back to list
+      api.calls.length = 0;
+      await hub.handleCallback('auto:back');
+      lastCall = api.calls[api.calls.length - 1];
+      text = lastCall.args[lastCall.method === 'sendMessage' ? 1 : 2] as string;
+      assert.ok(text.includes('Active Automations'), 'step 2: should be in list view after back');
+
+      // Step 3: Navigate to detail again
+      api.calls.length = 0;
+      await hub.handleCallback('auto:details:1');
+      lastCall = api.calls[api.calls.length - 1];
+      text = lastCall.args[lastCall.method === 'sendMessage' ? 1 : 2] as string;
+      assert.ok(text.includes('Worker:') || text.includes('w'), 'step 3: should be back in detail view');
     });
   });
 });

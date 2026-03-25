@@ -92,13 +92,13 @@ describe('loadConfig', () => {
     assert.equal(config.commandAllowlist, undefined);
   });
 
-  it('returns maxSessions default of 3 when MAX_SESSIONS is not set', () => {
+  it('returns maxSessions default of 4 when MAX_SESSIONS is not set', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.OWNER_ID = '12345';
 
     const config = loadConfig();
 
-    assert.equal(config.maxSessions, 3);
+    assert.equal(config.maxSessions, 4);
   });
 
   it('parses MAX_SESSIONS from env var', () => {

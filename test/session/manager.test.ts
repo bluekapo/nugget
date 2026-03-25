@@ -259,17 +259,18 @@ describe('SessionManager', () => {
     assert.equal(s3.name, 's3');
   });
 
-  it('constructor defaults maxSessions to 3', async () => {
+  it('constructor defaults maxSessions to 4', async () => {
     const { fakeSpawn } = createFakePtySpawner();
     const manager = new SessionManager(bus, store, fakeSpawn);
 
     await manager.start('a');
     await manager.start('b');
     await manager.start('c');
+    await manager.start('d');
 
     await assert.rejects(
-      () => manager.start('d'),
-      { message: /Maximum 3 concurrent sessions reached/ },
+      () => manager.start('e'),
+      { message: /Maximum 4 concurrent sessions reached/ },
     );
   });
 
