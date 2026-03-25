@@ -1768,6 +1768,128 @@ describe('AutomationEngine', () => {
       'prompt should be consultation (## Question), not directive (## Your Response)');
   });
 
+  // ---------- ENG-01: SELECT menu detection in stagnation handler ----------
+
+  it('SELECT menu detected in stagnation bypasses consultation', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle to get engine back to idle
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000);
+
+    assert.equal(engine.state, 'idle', 'should be idle after first cycle');
+
+    // Emit worker output containing a SELECT menu pattern before stagnation fires
+    const selectMenu = 'This phase has a CONTEXT.md from a previous discussion.\r\n\r\n\u276F Use existing CONTEXT.md (skip discussion)\r\n  Start fresh discussion\r\n  Review CONTEXT.md first\r\n';
+    await emitOutput(bus, 'worker', selectMenu);
+
+    // Let stagnation timer fire (200ms from last worker output)
+    timer.advance(200);
+
+    // Engine should have detected SELECT menu and entered full directive cycle
+    // (capturing-worker), NOT consultation (clearing-orchestrator via consultationMode)
+    assert.notEqual(engine.state, 'consulting-orchestrator',
+      'should NOT enter consulting-orchestrator when SELECT menu detected');
+    // The engine should be in the directive cycle flow (clearing-orchestrator but NOT in consultation mode)
+    // Since onWorkerIdle transitions through capturing-worker -> clearing-orchestrator,
+    // we check the state and verify it's a directive prompt (not consultation)
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'SELECT menu detection should trigger full directive cycle (clearing-orchestrator)');
+
+    // Complete the directive cycle and verify it sends a directive prompt (not consultation)
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    const lastPromptWrite = writes
+      .filter(w => w.name === 'orchestrator' && (w.data.includes('## Question') || w.data.includes('## Your Response')))
+      .pop();
+    assert.ok(lastPromptWrite?.data.includes('## Your Response'),
+      'SELECT menu detection should send directive prompt (## Your Response), not consultation (## Question)');
+  });
+
+  it('normal stagnation without SELECT menu still enters consultation', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle to get engine back to idle
+    timer.advance(1);
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000);
+
+    assert.equal(engine.state, 'idle', 'should be idle after first cycle');
+
+    // Emit worker output with just a bare prompt (no SELECT menu)
+    await emitOutput(bus, 'worker', 'Some worker output...\r\n\u276F \r\n');
+
+    // Let stagnation fire
+    timer.advance(200);
+
+    // Should enter consultation flow as normal
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'normal stagnation without SELECT menu should enter clearing-orchestrator (consultation)');
+
+    // Complete clear and verify consultation prompt is sent
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    const lastPromptWrite = writes
+      .filter(w => w.name === 'orchestrator' && (w.data.includes('## Question') || w.data.includes('## Your Response')))
+      .pop();
+    assert.ok(lastPromptWrite?.data.includes('## Question'),
+      'normal stagnation should send consultation prompt (## Question), not directive (## Your Response)');
+  });
+
+  it('SELECT menu detection enables full directive cycle with SELECT response', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle to get engine back to idle
+    timer.advance(1);
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000);
+
+    assert.equal(engine.state, 'idle', 'should be idle after first cycle');
+
+    // Emit SELECT menu on worker
+    const selectMenu = 'Choose an option:\r\n\r\n\u276F Use existing CONTEXT.md\r\n  Start fresh discussion\r\n  Review first\r\n';
+    await emitOutput(bus, 'worker', selectMenu);
+
+    // Let stagnation fire
+    timer.advance(200);
+
+    // Complete the directive cycle
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    // Orchestrator responds with SELECT directive
+    await emitOutput(bus, 'orchestrator', directiveOutput('SELECT: 2'));
+    timer.advance(1000); // response poll fires
+
+    // Engine should process SELECT directive (writes arrow key to worker)
+    // SELECT: 2 means press down arrow once (from option 1 to option 2), then Enter
+    const workerWrites = writes.filter(w => w.name === 'worker');
+    const hasArrowOrEnter = workerWrites.some(w =>
+      w.data.includes('\x1b[B') || w.data.includes('\r')
+    );
+    assert.ok(hasArrowOrEnter,
+      'SELECT directive should write arrow keys and/or Enter to worker');
+
+    // Engine should return to idle after executing SELECT
+    assert.equal(engine.state, 'idle',
+      'engine should return to idle after SELECT directive execution');
+  });
+
   // ---------- Test: spinner lines stripped from workerScreenText ----------
 
   it('spinner lines stripped from workerScreenText before prompt', async () => {
