@@ -345,7 +345,7 @@ async function startPrimary(
   // 16. Register Telegram commands and handlers (must be before bot.start)
   let shutdownFn: ((signal: string) => Promise<void>) | null = null;
   const ephemeralTracker = new EphemeralTracker(bot.api, config.ownerId);
-  registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore);
+  registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore, (name: string, data: string) => sessionManager.writeToSession(name, data));
   bot.on('message:text', inputHandler.handler());
   registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), screenCapture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { shutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, async (view: 'sessions' | 'automationHub' | 'automationDetails' | 'cli') => { hubRenderer.setHubView(view); await hubRenderer.render(); }, automationHub, settingsStore, (locked: boolean) => { hubRenderer.setCliScrollState(locked, settingsStore.get('enter_confirmation')); });
 
@@ -858,7 +858,7 @@ async function becomeNewPrimary(
 
     let promotedShutdownFn: ((signal: string) => Promise<void>) | null = null;
     const ephemeralTracker = new EphemeralTracker(bot.api, config.ownerId);
-    registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore);
+    registerCommands(bot, sessionManager, () => router.activeSession, hubRenderer, ephemeralTracker, settingsStore, (name: string, data: string) => sessionManager.writeToSession(name, data));
     bot.on('message:text', inputHandler.handler());
     registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), capture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { promotedShutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, async (view: 'sessions' | 'automationHub' | 'automationDetails' | 'cli') => { hubRenderer.setHubView(view); await hubRenderer.render(); }, promotedAutomationHub, settingsStore, (locked: boolean) => { hubRenderer.setCliScrollState(locked, settingsStore.get('enter_confirmation')); });
 

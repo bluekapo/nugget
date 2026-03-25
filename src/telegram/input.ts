@@ -12,6 +12,8 @@ export class TelegramInputHandler {
   /** Commands registered with the bot that grammY should handle. */
   private static readonly BOT_COMMANDS = new Set([
     'start', 'help', 'hub', 'settings',
+    'execute_phase', 'plan_phase', 'validate_phase',
+    'audit_milestone', 'complete_milestone', 'quick',
   ]);
 
   constructor(

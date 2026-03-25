@@ -35,6 +35,16 @@ export class EphemeralTracker {
  * @param getActiveSession - Returns the currently active session name, or null
  * @param hubRenderer - HubRenderer to render the sessions hub (optional for backward compat)
  */
+/** GSD workflow command mapping: Telegram command name -> PTY text prefix. */
+const GSD_COMMANDS: Record<string, string> = {
+  execute_phase: '/gsd:execute-phase',
+  plan_phase: '/gsd:plan-phase',
+  validate_phase: '/gsd:validate-phase',
+  audit_milestone: '/gsd:audit-milestone',
+  complete_milestone: '/gsd:complete-milestone',
+  quick: '/gsd:quick',
+};
+
 export function registerCommands(
   bot: {
     command(name: string, handler: (ctx: { reply(text: string, opts?: unknown): Promise<unknown>; deleteMessage(): Promise<boolean> }) => Promise<void>): void;
@@ -50,6 +60,7 @@ export function registerCommands(
   hubRenderer?: { render(opts?: { forceNew?: boolean }): Promise<void> },
   ephemeralTracker?: EphemeralTracker,
   settingsStore?: SettingsStore,
+  writeToSession?: (name: string, data: string) => void,
 ): void {
   // /start - Welcome message and quick start guide
   bot.command('start', async (ctx) => {
@@ -216,6 +227,22 @@ export function registerCommands(
       const current = settingsStore.getNumber('cycle_limit', 100);
       await ctx.answerCallbackQuery({ text: `Cycle limit: ${current}` });
     });
+  }
+
+  // GSD workflow quick commands: forward /gsd:<cmd> to active worker session
+  if (writeToSession) {
+    for (const [cmdName, gsdCommand] of Object.entries(GSD_COMMANDS)) {
+      bot.command(cmdName, async (ctx: { message?: { text?: string }; reply(text: string, opts?: unknown): Promise<unknown>; deleteMessage(): Promise<boolean> }) => {
+        const args = ctx.message?.text?.split(/\s+/).slice(1).join(' ') ?? '';
+        const session = getActiveSession();
+        if (!session) {
+          await ctx.reply('No active session. Use /hub to see available sessions.');
+          return;
+        }
+        writeToSession(session, gsdCommand + (args ? ' ' + args : '') + '\n');
+        try { await ctx.deleteMessage(); } catch { /* ignore */ }
+      });
+    }
   }
 
 }
