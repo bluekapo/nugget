@@ -52,5 +52,8 @@ export function executeDirective(
     case 'YES':
     case 'NO':
       throw new Error(`${directive.type} is a consultation response, not a worker action`);
+
+    case 'WAIT':
+      throw new Error('WAIT is a no-op directive handled by the engine, not a worker action');
   }
 }

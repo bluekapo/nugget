@@ -6,7 +6,7 @@ import { logDebug } from '../logging/logger.js';
  * Prevents CONTEXT continuation from swallowing COMMAND/ESCALATE/DONE/etc. text
  * when rendered under a single ● bullet in Claude Code TUI.
  */
-const DIRECTIVE_KEYWORD_RE = /^(COMMAND|ESCALATE|DONE|SELECT|CONTEXT):\s|^(ENTER|CLEAR|RESET|YES|NO)\s*$/;
+const DIRECTIVE_KEYWORD_RE = /^(COMMAND|ESCALATE|DONE|SELECT|CONTEXT):\s|^(ENTER|CLEAR|RESET|YES|NO|WAIT)\s*$/;
 
 /**
  * Split lines where terminal wrapping placed a directive keyword mid-line.
@@ -25,7 +25,7 @@ function splitMidLineDirectives(text: string): string {
   // Handles both colon-directives (COMMAND: ...) and bare keywords (CLEAR, ENTER, etc.)
   // at end of line — bare keywords appear at line-end when terminal wrapping places them
   // after padding spaces following CONTEXT continuation text.
-  const midLineRe = /\s{2,}(?=(?:COMMAND|ESCALATE|DONE|SELECT|CONTEXT):\s|(?:ENTER|CLEAR|RESET|YES|NO)\s*$)/;
+  const midLineRe = /\s{2,}(?=(?:COMMAND|ESCALATE|DONE|SELECT|CONTEXT):\s|(?:ENTER|CLEAR|RESET|YES|NO|WAIT)\s*$)/;
 
   return text.split('\n').flatMap(line => {
     const trimmed = line.trim();
@@ -142,7 +142,7 @@ export function stripPromptArtifacts(text: string): string {
     .trim();
 }
 
-/** Match single-line directives (SELECT, ENTER). WAIT is recognized but ignored (returns null). */
+/** Match single-line directives (SELECT, ENTER, WAIT, etc.). */
 function matchSingleLine(line: string): Directive | null {
   // SELECT: <N>
   const selMatch = line.match(/^SELECT:\s+(\d+)$/);
@@ -179,9 +179,9 @@ function matchSingleLine(line: string): Directive | null {
     return { type: 'RESET' };
   }
 
-  // WAIT (removed directive -- return null so it triggers normal retry/parse-failure flow)
-  if (/^WAIT[\s\u00A0]*$/.test(line)) return null;
-  if (/^WAIT:\s+\d+$/.test(line)) return null;
+  // WAIT (no-op directive -- engine skips action execution, waits for next worker completion)
+  if (/^WAIT[\s\u00A0]*$/.test(line)) return { type: 'WAIT' };
+  if (/^WAIT:\s+\d+$/.test(line)) return { type: 'WAIT' };
 
   return null;
 }

@@ -7,7 +7,7 @@
 
 // --- Directive Types ---
 
-export type DirectiveType = 'COMMAND' | 'SELECT' | 'ENTER' | 'ESCALATE' | 'DONE' | 'YES' | 'NO' | 'CLEAR' | 'RESET';
+export type DirectiveType = 'COMMAND' | 'SELECT' | 'ENTER' | 'ESCALATE' | 'DONE' | 'YES' | 'NO' | 'CLEAR' | 'RESET' | 'WAIT';
 
 export interface CommandDirective {
   type: 'COMMAND';
@@ -49,6 +49,10 @@ export interface ResetDirective {
   type: 'RESET';
 }
 
+export interface WaitDirective {
+  type: 'WAIT';
+}
+
 export type Directive =
   | CommandDirective
   | SelectDirective
@@ -58,7 +62,8 @@ export type Directive =
   | YesDirective
   | NoDirective
   | ClearDirective
-  | ResetDirective;
+  | ResetDirective
+  | WaitDirective;
 
 /** Combined result of parsing both directive and context from the same text. */
 export interface ParseResult {
