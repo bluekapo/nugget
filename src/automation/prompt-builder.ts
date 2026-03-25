@@ -111,6 +111,7 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('- `ESCALATE: <reason>` -- Stop and notify the human operator (ONLY for genuine blockers)');
   lines.push('- `CLEAR` -- Send /clear to the worker session (clears worker context). When the human asks you to clear, you MUST issue this immediately.');
   lines.push('- `RESET` -- Clear your own context and receive a fresh full prompt with accumulated context');
+  lines.push('- `WAIT` -- Do nothing this cycle (use when the worker is still processing and no input is needed)');
   lines.push('- `CONTEXT: <text>` -- Attach persistent memory to any directive (appears in all future prompts, survives RESET)');
   lines.push('');
   lines.push('Example correct response (your ENTIRE output should look like this):');
