@@ -812,6 +812,46 @@ describe('ScreenCapture', () => {
       'should NOT fire — active spinner detected on real screen change');
   });
 
+  // ---------- setLastFiredMarker dedup ----------
+
+  it('setLastFiredMarker: same marker after seed does NOT trigger onPromptComplete', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 200 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Simulate a prior completion that already fired: seed the dedup marker
+    // with the exact text that will appear in the screen output.
+    const markerText = '\u273B Crunched for 2m 15s';
+    capture.setLastFiredMarker(markerText);
+
+    // The same marker appears in screen output (e.g. after session switch + redraw)
+    await capture.onData(markerText + '\r\n\u276F \r\n');
+    timer.advance(50);  // debounce fires
+    timer.advance(200); // idle delay elapses
+
+    assert.equal(completionFired, false,
+      'onPromptComplete should NOT fire when the same marker was already seeded via setLastFiredMarker');
+  });
+
+  it('setLastFiredMarker: different marker after seed DOES trigger onPromptComplete', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 200 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Seed a prior marker (markerA)
+    const markerA = '\u273B Crunched for 2m 15s';
+    capture.setLastFiredMarker(markerA);
+
+    // A different marker (markerB) now appears — this is new work completing
+    const markerB = '\u273B Brewed for 45s';
+    await capture.onData(markerA + '\r\n' + markerB + '\r\n\u276F \r\n');
+    timer.advance(50);  // debounce fires
+    timer.advance(200); // idle delay elapses
+
+    assert.equal(completionFired, true,
+      'onPromptComplete SHOULD fire when a different marker appears after setLastFiredMarker');
+  });
+
   // ---------- Scroll lock suppresses output ----------
 
   it('scroll unlocked: new PTY data does NOT emit output events', async () => {
