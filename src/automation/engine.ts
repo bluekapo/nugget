@@ -62,6 +62,34 @@ export function stripSpinners(text: string): string {
     .join('\n');
 }
 
+/**
+ * Detect if worker screen shows an AskUserQuestion SELECT menu.
+ * Claude Code renders these as arrow-navigable option lists with ❯ (U+276F)
+ * prefix on the selected option and indented alternatives below.
+ *
+ * Distinguished from the bare idle prompt (❯ alone or with just whitespace)
+ * by requiring substantive text after ❯ AND at least one additional option line.
+ */
+export function hasSelectMenu(screenText: string): boolean {
+  const lines = screenText.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    // Selected option: "❯ Some option text" (not just bare ❯ or ❯ + whitespace)
+    if (/^\u276F\s+\S/.test(trimmed)) {
+      // Check for at least one additional option line below (within 10 lines)
+      for (let j = i + 1; j < lines.length && j <= i + 10; j++) {
+        const next = lines[j].trim();
+        if (!next) continue;
+        // Additional option lines are text without ❯ prefix
+        if (!/^\u276F/.test(next)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 /** Check if buffer has both an orchestrator response (●) and a completion marker (✻)
  *  where the marker appears AFTER the last ● line. Prevents matching echoed prompt markers
  *  that appear before (above) the orchestrator's actual response. */
@@ -1170,6 +1198,24 @@ export class AutomationEngine {
   private onWorkerStagnation(): void {
     debugLog(`[onWorkerStagnation] state=${this._state}`);
     if (this._state !== 'idle') return;
+
+    // ENG-01: Check if worker is showing a SELECT menu (AskUserQuestion)
+    // If so, bypass consultation and trigger a full directive cycle instead.
+    // The orchestrator needs the full prompt (with SELECT directive reference) to answer.
+    if (this.workerMonitor) {
+      const rawScreen = this.workerMonitor.emulator.getScreenText();
+      const screenText = stripSpinners(rawScreen);
+      if (hasSelectMenu(screenText)) {
+        debugLog('[onWorkerStagnation] SELECT menu detected — bypassing consultation, starting full directive cycle');
+        this.workerScreenText = screenText;
+        this.retryAttempted = false;
+        this.needsFullPrompt = true;
+        this.consultationMode = false;
+        // Stay in 'idle' state so onWorkerIdle() passes its state guard
+        this.onWorkerIdle();
+        return;
+      }
+    }
 
     // Enter consultation mode -- re-arm full prompt since consultation clears orchestrator context
     this.consultationMode = true;
