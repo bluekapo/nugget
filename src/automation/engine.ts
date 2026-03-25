@@ -230,6 +230,7 @@ export class AutomationEngine {
   private workerClearDeadlineTimer: unknown = null;
   private resetMode = false;
   private needsFullPrompt = true;
+  private workerBusy = false;
   private readonly maxConsultationRetries = 3;
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
@@ -411,15 +412,18 @@ export class AutomationEngine {
 
     this.setState('idle');
 
-    // Kick off a new cycle immediately — same pattern as start().
-    // The worker is likely already idle at its prompt, so onPromptComplete
-    // won't fire without new output. This timer ensures the engine
-    // resumes cycling without waiting for worker activity.
-    this.timer.setTimeout(() => {
-      if (this._state === 'idle') {
-        this.onWorkerIdle();
-      }
-    }, 0);
+    // Check if worker is still processing a command.
+    // If worker is busy, just wait — onPromptComplete will fire when it finishes.
+    // If worker is idle (or was never sent a command), kick cycle immediately
+    // since onPromptComplete won't fire without new output.
+    if (!this.workerBusy) {
+      this.timer.setTimeout(() => {
+        if (this._state === 'idle') {
+          this.onWorkerIdle();
+        }
+      }, 0);
+    }
+    // else: worker is still processing — onPromptComplete will fire when done
   }
 
   private createMonitor(): SessionMonitor {
@@ -457,6 +461,7 @@ export class AutomationEngine {
   private onWorkerIdle(): void {
     debugLog(`[onWorkerIdle] state=${this._state} cycle=${this.cycleNumber}`);
     if (this._state !== 'idle') return;
+    this.workerBusy = false;
 
     // SAF-01: Cycle limit guard
     if (this.cycleNumber >= this.maxCycles) {
@@ -875,6 +880,7 @@ export class AutomationEngine {
       this.workerMonitor.capture.markInputSent();
       this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
     }
+    this.workerBusy = true; // Worker is now processing the command
     this.setState('idle');
   }
 
@@ -927,6 +933,7 @@ export class AutomationEngine {
           this.workerMonitor.capture.markInputSent();
           this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
         }
+        this.workerBusy = true; // Worker is now processing the selection
         this.setState('idle');
       }
     };
