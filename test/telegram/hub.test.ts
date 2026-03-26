@@ -1276,6 +1276,79 @@ describe('HubRenderer', () => {
       assert.ok(!text.includes(longTask), 'should NOT show task description in automationHub list view');
       assert.ok(!text.includes('Tap View Details'), 'should NOT show old single-automation summary text');
     });
+
+    it('automationHub delegates text to history view when isInHistoryView is true', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([{ name: 'session-1', status: 'running' }]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'session-1');
+
+      const historyMock = {
+        get activeAutomationInfo() { return null; },
+        get activeAutomationCount() { return 0; },
+        get allAutomations() { return new Map(); },
+        get pendingCreationInfo() { return null; },
+        get isInHistoryView() { return true; },
+        get historyText() { return '<b>Automation Hub \u2014 History</b>\n\nNo history yet.'; },
+        get historyKeyboard() {
+          return { inline_keyboard: [
+            [{ text: '\uD83D\uDDD1 Clear History', callback_data: 'auto:clear-history' }],
+            [{ text: '\u2190 Back', callback_data: 'auto:back' }],
+          ]};
+        },
+        isAutomatedSession() { return false; },
+      };
+      hub.setAutomationHub(historyMock as any);
+
+      hub.setHubView('automationHub');
+      await hub.render();
+
+      const sentText = api.calls[0].args[1] as string;
+      assert.ok(sentText.includes('Automation Hub \u2014 History'), 'should show history header');
+      assert.ok(sentText.includes('No history yet'), 'should show empty history state');
+      assert.ok(!sentText.includes('No automation running'), 'should NOT show automation list empty state');
+    });
+
+    it('automationHub delegates keyboard to history view when isInHistoryView is true', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([{ name: 'session-1', status: 'running' }]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'session-1');
+
+      const historyMock = {
+        get activeAutomationInfo() { return null; },
+        get activeAutomationCount() { return 0; },
+        get allAutomations() { return new Map(); },
+        get pendingCreationInfo() { return null; },
+        get isInHistoryView() { return true; },
+        get historyText() { return '<b>Automation Hub \u2014 History</b>\n\nNo history yet.'; },
+        get historyKeyboard() {
+          return { inline_keyboard: [
+            [{ text: '\uD83D\uDDD1 Clear History', callback_data: 'auto:clear-history' }],
+            [{ text: '\u2190 Back', callback_data: 'auto:back' }],
+          ]};
+        },
+        isAutomatedSession() { return false; },
+      };
+      hub.setAutomationHub(historyMock as any);
+
+      hub.setHubView('automationHub');
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'should have inline keyboard');
+
+      const allBtns: Array<{ text: string; callback_data: string }> = [];
+      for (const row of keyboard as any[][]) {
+        for (const btn of row) {
+          if (btn.callback_data) allBtns.push(btn);
+        }
+      }
+
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:clear-history'), 'should have Clear History button');
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:back'), 'should have Back button');
+      assert.ok(!allBtns.some(b => b.callback_data === 'auto:new'), 'should NOT have New Automation button');
+      assert.ok(!allBtns.some(b => b.callback_data === 'hub:auto-back'), 'should NOT have Back to Sessions button');
+    });
   });
 
   describe('multi-automation hub view (CONC-03, CONC-04)', () => {

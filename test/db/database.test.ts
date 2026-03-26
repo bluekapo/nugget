@@ -75,7 +75,7 @@ describe('runMigrations', () => {
     assert.equal(tables.length, 2);
 
     const version = db.pragma('user_version', { simple: true });
-    assert.equal(version, 6);
+    assert.equal(version, 7);
 
     db.close();
   });
@@ -85,7 +85,7 @@ describe('runMigrations', () => {
     runMigrations(db);
     runMigrations(db); // second call should not throw
     const version = db.pragma('user_version', { simple: true });
-    assert.equal(version, 6);
+    assert.equal(version, 7);
     db.close();
   });
 });
