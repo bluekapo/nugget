@@ -315,6 +315,11 @@ function buildText(
     return ['<b>Automation Details</b>', '', 'No automation running.'].join('\n');
   }
 
+  // History view delegation: AutomationHubRenderer owns history rendering
+  if (hubView === 'automationHub' && automationHub?.isInHistoryView) {
+    return automationHub.historyText;
+  }
+
   // Automation hub view: automation list (unified for 1 or many)
   if (hubView === 'automationHub') {
     if (allAutos && allAutos.size > 0) {
@@ -513,6 +518,11 @@ function buildKeyboard(
     }
     keyboard.push([{ text: '\u2190 Back to Automations', callback_data: 'auto:back' }]);
     return { inline_keyboard: keyboard };
+  }
+
+  // History view delegation: AutomationHubRenderer owns history rendering
+  if (hubView === 'automationHub' && automationHub?.isInHistoryView) {
+    return automationHub.historyKeyboard;
   }
 
   // Automation hub view: per-automation detail buttons + Back

@@ -103,6 +103,24 @@ export class AutomationHubRenderer {
     return this.pendingCreation;
   }
 
+  /** Whether the history view is currently active. Used by HubRenderer for render delegation. */
+  get isInHistoryView(): boolean {
+    return this.historyView;
+  }
+
+  /** Rendered history text (HTML). Only meaningful when isInHistoryView is true. */
+  get historyText(): string {
+    return this.buildHistoryText();
+  }
+
+  /** Rendered history keyboard. Only meaningful when isInHistoryView is true. */
+  get historyKeyboard(): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
+    const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
+    keyboard.push([{ text: '\uD83D\uDDD1 Clear History', callback_data: 'auto:clear-history' }]);
+    keyboard.push([{ text: '\u2190 Back', callback_data: 'auto:back' }]);
+    return { inline_keyboard: keyboard };
+  }
+
   constructor(
     private readonly api: {
       sendMessage(chatId: number, text: string, opts?: unknown): Promise<{ message_id: number }>;
@@ -817,11 +835,9 @@ export class AutomationHubRenderer {
   private buildKeyboard(): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
     const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
 
-    // History view: show Clear History and Back buttons
+    // History view: delegate to historyKeyboard getter
     if (this.historyView) {
-      keyboard.push([{ text: '\uD83D\uDDD1 Clear History', callback_data: 'auto:clear-history' }]);
-      keyboard.push([{ text: '\u2190 Back', callback_data: 'auto:back' }]);
-      return { inline_keyboard: keyboard };
+      return this.historyKeyboard;
     }
 
     // Detail view: show controls for the specific automation
