@@ -69,6 +69,7 @@ export class AutomationHubRenderer {
   private activeAutomations: Map<number, ActiveAutomation> = new Map();
   private nextAutomationId = 1;
   private detailViewId: number | null = null;
+  private historyView = false;
 
   /** Optional callback invoked when automation state changes and a re-render is needed. */
   onRender: (() => void | Promise<void>) | null = null;
@@ -243,6 +244,13 @@ export class AutomationHubRenderer {
       return 'Enter your task description';
     }
 
+    if (data === 'auto:history') {
+      this.historyView = true;
+      this.detailViewId = null;
+      await this.onRender?.();
+      return 'Viewing history';
+    }
+
     // Detail view: auto:details:N
     if (data.startsWith('auto:details:')) {
       const id = parseInt(data.slice('auto:details:'.length), 10);
@@ -254,8 +262,13 @@ export class AutomationHubRenderer {
       return '';
     }
 
-    // Back to list view
+    // Back to list view (or back from history)
     if (data === 'auto:back') {
+      if (this.historyView) {
+        this.historyView = false;
+        await this.onRender?.();
+        return 'Back to list';
+      }
       this.detailViewId = null;
       await this.onRender?.();
       return 'Back to list';
@@ -678,8 +691,29 @@ export class AutomationHubRenderer {
     return `${minutes}m ago`;
   }
 
+  /** Build history view text with all records or empty-state. */
+  private buildHistoryText(): string {
+    const records = this.historyStore?.loadAll() ?? [];
+    const lines = ['<b>Automation Hub — History</b>', ''];
+    if (records.length === 0) {
+      lines.push('No history yet.');
+      return lines.join('\n');
+    }
+    for (const r of records) {
+      const outcomeEmoji = r.outcome === 'done' ? '\u2705' : r.outcome === 'error' ? '\u274C' : '\uD83D\uDED1';
+      const task = r.taskDescription.length > 30 ? r.taskDescription.slice(0, 30) + '...' : r.taskDescription;
+      lines.push(`${outcomeEmoji} ${r.orchestratorSession} -> ${r.workerSession} | ${task} | ${formatDuration(r.durationMs)} | ${r.cycleCount} cycles`);
+    }
+    return lines.join('\n');
+  }
+
   /** Build HTML text based on current state. */
   private buildText(): string {
+    // History view
+    if (this.historyView) {
+      return this.buildHistoryText();
+    }
+
     // Detail view for a specific automation
     if (this.detailViewId !== null) {
       const a = this.activeAutomations.get(this.detailViewId);
@@ -776,6 +810,13 @@ export class AutomationHubRenderer {
   private buildKeyboard(): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
     const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
 
+    // History view: show Clear History and Back buttons
+    if (this.historyView) {
+      keyboard.push([{ text: '\uD83D\uDDD1 Clear History', callback_data: 'auto:clear-history' }]);
+      keyboard.push([{ text: '\u2190 Back', callback_data: 'auto:back' }]);
+      return { inline_keyboard: keyboard };
+    }
+
     // Detail view: show controls for the specific automation
     if (this.detailViewId !== null && this.activeAutomations.has(this.detailViewId)) {
       const auto = this.activeAutomations.get(this.detailViewId)!;
@@ -808,6 +849,7 @@ export class AutomationHubRenderer {
         ]);
       }
       keyboard.push([{ text: '\uD83E\uDD16 New Automation', callback_data: 'auto:new' }]);
+      keyboard.push([{ text: '\uD83D\uDCDC History', callback_data: 'auto:history' }]);
       keyboard.push([{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]);
       return { inline_keyboard: keyboard };
     }
@@ -851,6 +893,7 @@ export class AutomationHubRenderer {
 
     // Idle state
     keyboard.push([{ text: '\uD83E\uDD16 New Automation', callback_data: 'auto:new' }]);
+    keyboard.push([{ text: '\uD83D\uDCDC History', callback_data: 'auto:history' }]);
     keyboard.push([{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]);
     return { inline_keyboard: keyboard };
   }

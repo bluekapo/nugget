@@ -2440,7 +2440,7 @@ describe('AutomationHubRenderer', () => {
       assert.ok(text.includes('1m'), 'should show duration via formatDuration');
       // Task should be truncated to 30 chars
       assert.ok(!text.includes('A very long task description that should be truncated to thirty chars'), 'task should be truncated');
-      assert.ok(text.includes('A very long task description th'), 'task should be truncated to 30 chars');
+      assert.ok(text.includes('A very long task description t'), 'task should be truncated to 30 chars');
       // Outcome emojis: checkmark for done, X for error, stop for stopped
       assert.ok(text.includes('\u2705') || text.includes('\u2714'), 'should have checkmark for done');
       assert.ok(text.includes('\u274C'), 'should have X for error');
