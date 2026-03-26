@@ -214,6 +214,40 @@ function ipcPort(token: string): number {
   return 49152 + (raw % (65535 - 49152 + 1));
 }
 
+/** Path to the port coordination file for a given token. */
+function portFilePath(token: string): string {
+  return join(tmpdir(), `nugget-bot-${tokenHash(token)}.port`);
+}
+
+/** Write the actual IPC port to the coordination file so secondaries can find it. */
+function writePortFile(token: string, port: number): void {
+  try {
+    writeFileSync(portFilePath(token), String(port));
+  } catch {
+    logWarn('Failed to write IPC port file');
+  }
+}
+
+/** Read the IPC port from the coordination file. Returns null if not found. */
+function readPortFile(token: string): number | null {
+  try {
+    const content = readFileSync(portFilePath(token), 'utf-8').trim();
+    const port = parseInt(content, 10);
+    return isNaN(port) ? null : port;
+  } catch {
+    return null;
+  }
+}
+
+/** Delete the IPC port coordination file. */
+export function removePortFile(token: string): void {
+  try {
+    unlinkSync(portFilePath(token));
+  } catch {
+    // Ignore -- file may not exist
+  }
+}
+
 let ipcServer: Server | null = null;
 
 // ── Bidirectional IPC Protocol ──────────────────────────────────────────
@@ -268,9 +302,9 @@ export function startIpcServer(
   token: string,
   callbacks: IpcCallbacks,
 ): void {
-  const port = ipcPort(token);
+  const preferredPort = ipcPort(token);
 
-  ipcServer = createServer((socket) => {
+  const createIpcServer = () => createServer((socket) => {
     // Handle socket errors first -- MUST be registered before any async work
     // to prevent unhandled 'error' events from crashing the process.
     socket.on('error', (err: NodeJS.ErrnoException) => {
@@ -393,17 +427,54 @@ export function startIpcServer(
     });
   });
 
-  ipcServer.on('error', (err: NodeJS.ErrnoException) => {
-    if (err.code === 'EADDRINUSE') {
-      logWarn(`IPC port ${port} already in use — another instance may be running`);
-    } else {
-      logError('IPC server error:', err.message);
-    }
-  });
+  /** Try to listen on the given port. Returns a promise that resolves to true on success. */
+  const tryListen = (server: Server, port: number): Promise<boolean> =>
+    new Promise((resolve) => {
+      const onError = (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EACCES' || err.code === 'EADDRINUSE') {
+          logWarn(`IPC port ${port} unavailable (${err.code}) — will retry`);
+          resolve(false);
+        } else {
+          logError('IPC server error:', err.message);
+          resolve(false);
+        }
+      };
+      server.once('error', onError);
+      server.listen(port, '127.0.0.1', () => {
+        server.removeListener('error', onError);
+        resolve(true);
+      });
+    });
 
-  ipcServer.listen(port, '127.0.0.1', () => {
-    logInfo(`IPC server listening on 127.0.0.1:${port}`);
-  });
+  // Try preferred port first, then fall back to OS-assigned port (0).
+  // On Windows, certain ports in 49152-65535 are reserved by Hyper-V/WSL2
+  // and cause EACCES. Using port 0 lets the OS pick a guaranteed-free port.
+  (async () => {
+    ipcServer = createIpcServer();
+    let bound = await tryListen(ipcServer, preferredPort);
+
+    if (!bound) {
+      // Close the failed server and create a fresh one
+      ipcServer.close();
+      ipcServer = createIpcServer();
+      logInfo('Retrying IPC server with OS-assigned port...');
+      bound = await tryListen(ipcServer, 0);
+    }
+
+    if (bound) {
+      const addr = ipcServer.address();
+      const actualPort = typeof addr === 'object' && addr ? addr.port : preferredPort;
+      writePortFile(token, actualPort);
+      logInfo(`IPC server listening on 127.0.0.1:${actualPort}`);
+
+      // Re-register error handler for runtime errors (after successful listen)
+      ipcServer.on('error', (err: NodeJS.ErrnoException) => {
+        logError('IPC server error:', err.message);
+      });
+    } else {
+      logError('IPC server failed to bind on any port — secondary instances will not be able to connect');
+    }
+  })();
 }
 
 /**
@@ -415,7 +486,8 @@ export function connectToPrimary(
   sessionName: string,
   metadata?: RemoteSessionMeta,
 ): { sendOutput(data: string): void; onInput(cb: (data: string) => void): void; onRedraw(cb: () => void): void; onDisconnect(cb: () => void): void; onPromote(cb: () => void): void; onExit(cb: () => void): void; onConnect(cb: () => void): void; unregister(): void } {
-  const port = ipcPort(token);
+  // Read port file first (primary may have used a fallback port), then fall back to deterministic port
+  const port = readPortFile(token) ?? ipcPort(token);
   let inputCallback: ((data: string) => void) | null = null;
   let redrawCallback: (() => void) | null = null;
   let disconnectCallback: (() => void) | null = null;

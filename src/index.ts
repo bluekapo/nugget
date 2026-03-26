@@ -8,6 +8,7 @@ import { SessionRouter } from './session/router.js';
 import {
   createBot,
   releaseBotLock,
+  removePortFile,
   tryAcquireBotLock,
   startIpcServer,
   stopIpcServer,
@@ -1158,8 +1159,9 @@ function setupPrimaryShutdown(
       // Ignore -- best effort
     }
 
-    // Stop IPC server and clean up socket
+    // Stop IPC server and clean up socket + port file
     stopIpcServer(botToken);
+    removePortFile(botToken);
 
     // Release bot polling lock so another Nugget instance can start
     releaseBotLock(botToken);
