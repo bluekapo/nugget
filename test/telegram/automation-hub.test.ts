@@ -2274,4 +2274,235 @@ describe('AutomationHubRenderer', () => {
       // No assertion needed -- just checking no throw
     });
   });
+
+  describe('history tab', () => {
+    function createMockHistoryStoreForTab() {
+      const inserted: unknown[] = [];
+      let loadAllResult: Array<{
+        id: number;
+        orchestratorSession: string;
+        workerSession: string;
+        taskDescription: string;
+        startTime: number;
+        endTime: number;
+        durationMs: number;
+        cycleCount: number;
+        outcome: 'done' | 'error' | 'stopped';
+      }> = [];
+      let clearCalled = false;
+      return {
+        insert(record: unknown) { inserted.push(record); },
+        loadAll() { return loadAllResult; },
+        clearAll() { clearCalled = true; loadAllResult = []; },
+        // Test helpers
+        inserted,
+        get clearCalled() { return clearCalled; },
+        set _loadAllResult(v: typeof loadAllResult) { loadAllResult = v; },
+      };
+    }
+
+    function createHubWithHistory(
+      api: ReturnType<typeof createMockApi>,
+      opts?: {
+        sessions?: string[];
+        historyStore?: ReturnType<typeof createMockHistoryStoreForTab>;
+        bus?: EventBus;
+      },
+    ) {
+      const sessions = opts?.sessions ?? [];
+      const bus = opts?.bus ?? new EventBus();
+      const mockEngine = createMockEngine();
+      const engineFactory = () => mockEngine;
+      const hub = new AutomationHubRenderer(
+        api as any,
+        123,
+        () => sessions,
+        engineFactory as any,
+        bus,
+        undefined, // automationStore
+        opts?.historyStore as any,
+      );
+      hub.onRender = async () => { await hub.render(); };
+      return { hub, bus, mockEngine };
+    }
+
+    it('idle state keyboard includes a History button with callback_data auto:history', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStoreForTab();
+      const { hub } = createHubWithHistory(api, { historyStore });
+
+      await hub.render();
+
+      // Find the keyboard from the last sendMessage call
+      const sendCall = api.calls.find(c => c.method === 'sendMessage');
+      assert.ok(sendCall, 'sendMessage should have been called');
+      const opts = sendCall.args[2] as any;
+      const keyboard = opts.reply_markup.inline_keyboard as Array<Array<{ text: string; callback_data: string }>>;
+      const historyBtn = keyboard.flat().find(btn => btn.callback_data === 'auto:history');
+      assert.ok(historyBtn, 'should have a History button');
+      assert.ok(historyBtn.text.includes('History'), 'button text should contain History');
+    });
+
+    it('list view keyboard includes a History button when automations are active and no pending creation', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStoreForTab();
+      const { hub } = createHubWithHistory(api, {
+        sessions: ['worker-1', 'orch-1'],
+        historyStore,
+      });
+
+      // Create a running automation
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:worker-1');
+      await hub.handleCallback('auto:o:orch-1');
+      await hub.completeCreation('test task');
+
+      // Now in list view with 1 active automation - find the last editMessageText call
+      const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+      const lastEdit = editCalls[editCalls.length - 1];
+      assert.ok(lastEdit, 'editMessageText should have been called');
+      const opts = lastEdit.args[3] as any;
+      const keyboard = opts.reply_markup.inline_keyboard as Array<Array<{ text: string; callback_data: string }>>;
+      const historyBtn = keyboard.flat().find(btn => btn.callback_data === 'auto:history');
+      assert.ok(historyBtn, 'list view should have a History button');
+    });
+
+    it('handleCallback auto:history sets view to history mode and triggers re-render', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStoreForTab();
+      historyStore._loadAllResult = [];
+      const { hub } = createHubWithHistory(api, { historyStore });
+
+      await hub.render();
+      const result = await hub.handleCallback('auto:history');
+
+      assert.ok(result.length > 0, 'should return non-empty acknowledgment');
+      // After render, text should contain history header or empty state
+      const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+      const lastEdit = editCalls[editCalls.length - 1];
+      assert.ok(lastEdit, 'editMessageText should have been called');
+      const text = lastEdit.args[2] as string;
+      assert.ok(text.includes('No history yet'), 'empty history should show "No history yet."');
+    });
+
+    it('history view renders records showing orchestrator, worker, task, duration, cycle count, and outcome emoji', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStoreForTab();
+      historyStore._loadAllResult = [
+        {
+          id: 1,
+          orchestratorSession: 'orch-1',
+          workerSession: 'worker-1',
+          taskDescription: 'A very long task description that should be truncated to thirty chars',
+          startTime: 1000,
+          endTime: 61000,
+          durationMs: 60000,
+          cycleCount: 5,
+          outcome: 'done' as const,
+        },
+        {
+          id: 2,
+          orchestratorSession: 'orch-2',
+          workerSession: 'worker-2',
+          taskDescription: 'Failed task',
+          startTime: 2000,
+          endTime: 12000,
+          durationMs: 10000,
+          cycleCount: 2,
+          outcome: 'error' as const,
+        },
+        {
+          id: 3,
+          orchestratorSession: 'orch-3',
+          workerSession: 'worker-3',
+          taskDescription: 'Stopped task',
+          startTime: 3000,
+          endTime: 8000,
+          durationMs: 5000,
+          cycleCount: 1,
+          outcome: 'stopped' as const,
+        },
+      ];
+      const { hub } = createHubWithHistory(api, { historyStore });
+
+      await hub.render();
+      await hub.handleCallback('auto:history');
+
+      const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+      const lastEdit = editCalls[editCalls.length - 1];
+      const text = lastEdit.args[2] as string;
+
+      // Check all metadata fields present
+      assert.ok(text.includes('orch-1'), 'should show orchestrator session');
+      assert.ok(text.includes('worker-1'), 'should show worker session');
+      assert.ok(text.includes('5 cycles') || text.includes('5'), 'should show cycle count');
+      assert.ok(text.includes('1m'), 'should show duration via formatDuration');
+      // Task should be truncated to 30 chars
+      assert.ok(!text.includes('A very long task description that should be truncated to thirty chars'), 'task should be truncated');
+      assert.ok(text.includes('A very long task description th'), 'task should be truncated to 30 chars');
+      // Outcome emojis: checkmark for done, X for error, stop for stopped
+      assert.ok(text.includes('\u2705') || text.includes('\u2714'), 'should have checkmark for done');
+      assert.ok(text.includes('\u274C'), 'should have X for error');
+      assert.ok(text.includes('\uD83D\uDED1'), 'should have stop sign for stopped');
+    });
+
+    it('history view with no records shows empty-state message', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStoreForTab();
+      historyStore._loadAllResult = [];
+      const { hub } = createHubWithHistory(api, { historyStore });
+
+      await hub.render();
+      await hub.handleCallback('auto:history');
+
+      const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+      const lastEdit = editCalls[editCalls.length - 1];
+      const text = lastEdit.args[2] as string;
+      assert.ok(text.includes('No history yet'), 'should show empty state message');
+    });
+
+    it('history view keyboard has Back button and auto:back from history returns to list/idle', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStoreForTab();
+      const { hub } = createHubWithHistory(api, { historyStore });
+
+      await hub.render();
+      await hub.handleCallback('auto:history');
+
+      // Verify keyboard has Back button
+      const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+      const historyEdit = editCalls[editCalls.length - 1];
+      const opts = historyEdit.args[3] as any;
+      const keyboard = opts.reply_markup.inline_keyboard as Array<Array<{ text: string; callback_data: string }>>;
+      const backBtn = keyboard.flat().find(btn => btn.callback_data === 'auto:back');
+      assert.ok(backBtn, 'history view should have a Back button');
+
+      // Now press Back
+      await hub.handleCallback('auto:back');
+
+      // Should be back in idle view
+      const afterBackCalls = api.calls.filter(c => c.method === 'editMessageText');
+      const lastAfterBack = afterBackCalls[afterBackCalls.length - 1];
+      const text = lastAfterBack.args[2] as string;
+      assert.ok(text.includes('No automation running') || text.includes('Automation Hub'), 'should return to idle view');
+      assert.ok(!text.includes('No history yet'), 'should NOT show history view after Back');
+    });
+
+    it('no crash when historyStore is undefined and auto:history is triggered', async () => {
+      const api = createMockApi();
+      // Use createHub WITHOUT historyStore (standard helper without history)
+      const { hub } = createHub(api);
+
+      await hub.render();
+      const result = await hub.handleCallback('auto:history');
+
+      // Should gracefully show empty state, not crash
+      assert.ok(result.length > 0, 'should return acknowledgment');
+      const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+      const lastEdit = editCalls[editCalls.length - 1];
+      const text = lastEdit.args[2] as string;
+      assert.ok(text.includes('No history yet'), 'should show empty state when store is undefined');
+    });
+  });
 });
