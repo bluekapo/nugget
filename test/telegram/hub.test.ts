@@ -1545,6 +1545,66 @@ describe('HubRenderer', () => {
       const backBtn = allBtns.find(b => b.callback_data === 'auto:back');
       assert.ok(backBtn?.text.includes('Back'), 'back button should have Back text');
     });
+
+    it('automationHub keyboard has History button when idle (no automations)', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => null);
+      hub.setAutomationHub({
+        get activeAutomationInfo() { return null; },
+        get activeAutomationCount() { return 0; },
+        get allAutomations() { return new Map(); },
+        get pendingCreationInfo() { return null; },
+        get isInHistoryView() { return false; },
+      } as any);
+
+      hub.setHubView('automationHub');
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'should have inline keyboard');
+
+      const allBtns: Array<{ text: string; callback_data: string }> = [];
+      for (const row of keyboard as any[][]) {
+        for (const btn of row) {
+          if (btn.callback_data) allBtns.push(btn);
+        }
+      }
+
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:history'), 'should have History button in idle state');
+      const histBtn = allBtns.find(b => b.callback_data === 'auto:history');
+      assert.ok(histBtn?.text.includes('History'), 'History button text should contain "History"');
+    });
+
+    it('automationHub keyboard has History button when automations running (list state)', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'worker-1', status: 'running' },
+        { name: 'orch-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'worker-1');
+      hub.setAutomationHub(createMultiMockAutomationHub([
+        { id: 1, engine: { state: 'executing' }, workerSession: 'worker-1', orchestratorSession: 'orch-1', taskDescription: 'Fix bugs', cycleCount: 5, lastAction: null },
+      ]) as any);
+
+      hub.setHubView('automationHub');
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      assert.ok(keyboard, 'should have inline keyboard');
+
+      const allBtns: Array<{ text: string; callback_data: string }> = [];
+      for (const row of keyboard as any[][]) {
+        for (const btn of row) {
+          if (btn.callback_data) allBtns.push(btn);
+        }
+      }
+
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:history'), 'should have History button in list state');
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:new'), 'should still have New Automation button');
+    });
   });
 
   describe('CLI view state', () => {
