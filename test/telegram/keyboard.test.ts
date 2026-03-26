@@ -1271,6 +1271,68 @@ describe('InlineKeyboard', () => {
       assert.equal(setHubViewCalledWith, 'automationHub', 'auto:back should transition hub view to automationHub (not sessions)');
     });
 
+    it('auto:stop callback transitions hub view to automationHub (NAV-01)', async () => {
+      const regexHandlers: Array<{ pattern: RegExp; handler: (ctx: any) => Promise<void> }> = [];
+      const mockBot = {
+        callbackQuery(data: string | RegExp, handler: (ctx: any) => Promise<void>) {
+          if (data instanceof RegExp) {
+            regexHandlers.push({ pattern: data, handler });
+          }
+        },
+        on(_filter: string, _handler: unknown) {},
+      };
+
+      const mockSm = {
+        writeToSession(_name: string, _data: string) {},
+        async stop(_name: string) {},
+      };
+
+      const mockRouter = {
+        switchTo(_name: string) {},
+        remove(_name: string) {},
+        isRemote(_name: string) { return false; },
+        removeRemote(_name: string) {},
+        getAll() { return []; },
+        getRemoteBridge(_name: string) { return undefined; },
+      };
+
+      let setHubViewCalledWith = '';
+      const mockSetHubView = async (view: string) => {
+        setHubViewCalledWith = view;
+      };
+
+      const mockAutomationHub = {
+        async handleCallback(_data: string) { return ''; },
+        async render() {},
+      };
+
+      registerCallbackHandlers(
+        mockBot as any,
+        mockSm as any,
+        () => 'test-session',
+        mockRouter as any,
+        undefined, // refreshHub
+        undefined, // scrollHandler
+        undefined, // toggleAdvanced
+        undefined, // onShutdown
+        undefined, // deleteHub
+        mockSetHubView as any, // setHubView
+        mockAutomationHub, // automationHub
+      );
+
+      const autoHandler = regexHandlers.find(h => h.pattern.test('auto:stop'));
+      assert.ok(autoHandler, 'auto:* regex handler should be registered');
+
+      const mockCtx = {
+        callbackQuery: { data: 'auto:stop' },
+        async answerCallbackQuery(_opts?: { text?: string }) {},
+      };
+
+      await autoHandler.handler(mockCtx);
+
+      assert.equal(setHubViewCalledWith, 'automationHub', 'auto:stop should transition hub view to automationHub');
+    });
+
     it('does not register auto:* handler when automationHub is not provided', () => {
       const registeredQueries: Array<string | RegExp> = [];
       const mockBot = {
