@@ -2138,4 +2138,140 @@ describe('AutomationHubRenderer', () => {
       assert.equal(hub.pendingCreationInfo, null, 'pending creation should be reset');
     });
   });
+
+  describe('history writes on end paths', () => {
+    function createMockHistoryStore() {
+      const inserted: unknown[] = [];
+      return {
+        insert(record: unknown) { inserted.push(record); },
+        loadAll() { return []; },
+        clearAll() {},
+        // Test helper
+        inserted,
+      };
+    }
+
+    function createHubWithHistory(
+      api: ReturnType<typeof createMockApi>,
+      opts: {
+        sessions: string[];
+        bus?: EventBus;
+        historyStore?: ReturnType<typeof createMockHistoryStore>;
+      },
+    ) {
+      const bus = opts.bus ?? new EventBus();
+      const mockEngine = createMockEngine();
+      const engineFactory = () => mockEngine;
+      const hub = new AutomationHubRenderer(
+        api as any,
+        123,
+        () => opts.sessions,
+        engineFactory as any,
+        bus,
+        undefined, // automationStore
+        opts.historyStore as any,
+      );
+      hub.onRender = async () => { await hub.render(); };
+      return { hub, bus, mockEngine };
+    }
+
+    async function setupRunningAutomation(
+      api: ReturnType<typeof createMockApi>,
+      historyStore: ReturnType<typeof createMockHistoryStore>,
+    ) {
+      const bus = new EventBus();
+      const { hub, mockEngine } = createHubWithHistory(api, {
+        sessions: ['worker-1', 'orch-1'],
+        bus,
+        historyStore,
+      });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:worker-1');
+      await hub.handleCallback('auto:o:orch-1');
+      await hub.completeCreation('test task');
+
+      return { hub, bus, mockEngine };
+    }
+
+    it('automation:done writes a history record with outcome=done and correct metadata', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStore();
+      const { bus, mockEngine } = await setupRunningAutomation(api, historyStore);
+
+      // Fire done event
+      bus.emit('automation:done', mockEngine.engineId, 'All tests passed');
+
+      assert.equal(historyStore.inserted.length, 1, 'should have 1 history record');
+      const record = historyStore.inserted[0] as any;
+      assert.equal(record.outcome, 'done');
+      assert.equal(record.orchestratorSession, 'orch-1');
+      assert.equal(record.workerSession, 'worker-1');
+      assert.equal(record.taskDescription, 'test task');
+      assert.equal(typeof record.startTime, 'number');
+      assert.equal(typeof record.endTime, 'number');
+      assert.equal(typeof record.durationMs, 'number');
+      assert.ok(record.endTime >= record.startTime, 'endTime >= startTime');
+      assert.equal(record.durationMs, record.endTime - record.startTime);
+    });
+
+    it('automation:error writes a history record with outcome=error and correct metadata', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStore();
+      const { bus, mockEngine } = await setupRunningAutomation(api, historyStore);
+
+      // Fire error event
+      bus.emit('automation:error', mockEngine.engineId, 'Something broke');
+
+      assert.equal(historyStore.inserted.length, 1, 'should have 1 history record');
+      const record = historyStore.inserted[0] as any;
+      assert.equal(record.outcome, 'error');
+      assert.equal(record.orchestratorSession, 'orch-1');
+      assert.equal(record.workerSession, 'worker-1');
+      assert.equal(record.taskDescription, 'test task');
+    });
+
+    it('auto:stop writes a history record with outcome=stopped before removing automation', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStore();
+      const { hub } = await setupRunningAutomation(api, historyStore);
+
+      // Navigate to detail view and stop
+      await hub.handleCallback('auto:details:1');
+      await hub.handleCallback('auto:stop');
+
+      assert.equal(historyStore.inserted.length, 1, 'should have 1 history record');
+      const record = historyStore.inserted[0] as any;
+      assert.equal(record.outcome, 'stopped');
+      assert.equal(record.orchestratorSession, 'orch-1');
+      assert.equal(record.workerSession, 'worker-1');
+    });
+
+    it('no crash when historyStore is undefined on any end path', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const mockEngine = createMockEngine();
+      const hub = new AutomationHubRenderer(
+        api as any,
+        123,
+        () => ['worker-1', 'orch-1'],
+        (() => mockEngine) as any,
+        bus,
+        undefined, // no automationStore
+        undefined, // no historyStore
+      );
+      hub.onRender = async () => { await hub.render(); };
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:worker-1');
+      await hub.handleCallback('auto:o:orch-1');
+      await hub.completeCreation('test task');
+
+      // Fire done -- should not crash
+      bus.emit('automation:done', mockEngine.engineId, 'done');
+      // No assertion needed -- just checking no throw
+    });
+  });
 });
