@@ -2001,4 +2001,141 @@ describe('AutomationHubRenderer', () => {
       assert.ok(text.includes('Worker:') || text.includes('w'), 'step 3: should be back in detail view');
     });
   });
+
+  describe('session filtering', () => {
+    it('select-worker keyboard excludes sessions claimed by active automations', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const engines: ReturnType<typeof createMockEngine>[] = [];
+      const factory = () => {
+        const eng = createMockEngine('idle');
+        engines.push(eng);
+        return eng;
+      };
+      const { hub } = createHub(api, {
+        sessions: ['a', 'b', 'c'],
+        engineFactory: factory as any,
+        bus,
+      });
+
+      // Create an active automation using sessions 'a' and 'b'
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:a');
+      await hub.handleCallback('auto:o:b');
+      await hub.completeCreation('task 1');
+
+      // Start a new creation
+      api.calls.length = 0;
+      await hub.handleCallback('auto:new');
+
+      // Inspect the keyboard -- only 'c' should appear as a worker button
+      const lastCall = api.calls[api.calls.length - 1];
+      const opts = lastCall.args[lastCall.method === 'sendMessage' ? 2 : 3] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      const allData = keyboard!.flat().map((b: any) => b.callback_data);
+      assert.ok(allData.includes('auto:w:c'), 'unclaimed session c should appear');
+      assert.ok(!allData.includes('auto:w:a'), 'claimed session a should NOT appear');
+      assert.ok(!allData.includes('auto:w:b'), 'claimed session b should NOT appear');
+    });
+
+    it('select-orchestrator keyboard excludes worker AND claimed sessions', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const engines: ReturnType<typeof createMockEngine>[] = [];
+      const factory = () => {
+        const eng = createMockEngine('idle');
+        engines.push(eng);
+        return eng;
+      };
+      const { hub } = createHub(api, {
+        sessions: ['a', 'b', 'c'],
+        engineFactory: factory as any,
+        bus,
+      });
+
+      // Create an active automation using sessions 'a' and 'b'
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:a');
+      await hub.handleCallback('auto:o:b');
+      await hub.completeCreation('task 1');
+
+      // Start new creation, select 'c' as worker
+      await hub.handleCallback('auto:new');
+      api.calls.length = 0;
+      await hub.handleCallback('auto:w:c');
+
+      // Inspect the keyboard -- 'a' and 'b' are claimed, 'c' is the worker
+      // NO orchestrator buttons should appear (all other sessions are claimed)
+      const lastCall = api.calls[api.calls.length - 1];
+      const opts = lastCall.args[lastCall.method === 'sendMessage' ? 2 : 3] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      const allData = keyboard!.flat().map((b: any) => b.callback_data);
+      assert.ok(!allData.includes('auto:o:a'), 'claimed session a should NOT appear as orchestrator');
+      assert.ok(!allData.includes('auto:o:b'), 'claimed session b should NOT appear as orchestrator');
+      assert.ok(!allData.includes('auto:o:c'), 'worker session c should NOT appear as orchestrator');
+    });
+
+    it('post-selection rejection for claimed worker', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const engines: ReturnType<typeof createMockEngine>[] = [];
+      const factory = () => {
+        const eng = createMockEngine('idle');
+        engines.push(eng);
+        return eng;
+      };
+      const { hub } = createHub(api, {
+        sessions: ['a', 'b', 'c'],
+        engineFactory: factory as any,
+        bus,
+      });
+
+      // Create an active automation using sessions 'a' and 'b'
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:a');
+      await hub.handleCallback('auto:o:b');
+      await hub.completeCreation('task 1');
+
+      // Start new creation, try selecting claimed session 'a' as worker
+      await hub.handleCallback('auto:new');
+      const result = await hub.handleCallback('auto:w:a');
+
+      assert.ok(result.includes('already in use'), 'should reject with "already in use" message');
+      assert.equal(hub.pendingCreationInfo, null, 'pending creation should be reset');
+    });
+
+    it('post-selection rejection for claimed orchestrator', async () => {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const engines: ReturnType<typeof createMockEngine>[] = [];
+      const factory = () => {
+        const eng = createMockEngine('idle');
+        engines.push(eng);
+        return eng;
+      };
+      const { hub } = createHub(api, {
+        sessions: ['a', 'b', 'c'],
+        engineFactory: factory as any,
+        bus,
+      });
+
+      // Create an active automation using sessions 'a' and 'b'
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:a');
+      await hub.handleCallback('auto:o:b');
+      await hub.completeCreation('task 1');
+
+      // Start new creation, select 'c' as worker, try selecting claimed session 'b' as orchestrator
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:c');
+      const result = await hub.handleCallback('auto:o:b');
+
+      assert.ok(result.includes('already in use'), 'should reject with "already in use" message');
+      assert.equal(hub.pendingCreationInfo, null, 'pending creation should be reset');
+    });
+  });
 });

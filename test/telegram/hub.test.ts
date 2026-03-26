@@ -1904,6 +1904,63 @@ describe('HubRenderer', () => {
     });
   });
 
+  describe('session filtering in pending creation', () => {
+    it('select-worker keyboard excludes sessions claimed by automationHub.isAutomatedSession', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'a', status: 'running' },
+        { name: 'b', status: 'running' },
+        { name: 'c', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => null);
+      const mockAutoHub = {
+        get activeAutomationInfo() { return null; },
+        get activeAutomationCount() { return 1; },
+        get allAutomations() { return new Map(); },
+        get pendingCreationInfo() { return { step: 'select-worker' as const }; },
+        isAutomatedSession(name: string) { return name === 'a' || name === 'b'; },
+      };
+      hub.setAutomationHub(mockAutoHub as any);
+
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      const allData = keyboard!.flat().map((b: any) => b.callback_data);
+      assert.ok(allData.includes('auto:w:c'), 'unclaimed session c should appear');
+      assert.ok(!allData.includes('auto:w:a'), 'claimed session a should NOT appear');
+      assert.ok(!allData.includes('auto:w:b'), 'claimed session b should NOT appear');
+    });
+
+    it('select-orchestrator keyboard excludes both worker AND claimed sessions', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'a', status: 'running' },
+        { name: 'b', status: 'running' },
+        { name: 'c', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => null);
+      const mockAutoHub = {
+        get activeAutomationInfo() { return null; },
+        get activeAutomationCount() { return 1; },
+        get allAutomations() { return new Map(); },
+        get pendingCreationInfo() { return { step: 'select-orchestrator' as const, workerSession: 'c' }; },
+        isAutomatedSession(name: string) { return name === 'a'; },
+      };
+      hub.setAutomationHub(mockAutoHub as any);
+
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      const allData = keyboard!.flat().map((b: any) => b.callback_data);
+      // 'a' is claimed, 'c' is the worker -- only 'b' should appear
+      assert.ok(allData.includes('auto:o:b'), 'unclaimed non-worker session b should appear');
+      assert.ok(!allData.includes('auto:o:a'), 'claimed session a should NOT appear');
+      assert.ok(!allData.includes('auto:o:c'), 'worker session c should NOT appear');
+    });
+  });
+
   describe('error helpers', () => {
     it('isNotModifiedError detects "not modified" in message', () => {
       assert.equal(isNotModifiedError(new Error('message is not modified')), true);
