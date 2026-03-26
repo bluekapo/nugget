@@ -2504,5 +2504,79 @@ describe('AutomationHubRenderer', () => {
       const text = lastEdit.args[2] as string;
       assert.ok(text.includes('No history yet'), 'should show empty state when store is undefined');
     });
+
+    describe('clear history', () => {
+      it('history view keyboard includes a Clear History button with callback_data auto:clear-history', async () => {
+        const api = createMockApi();
+        const historyStore = createMockHistoryStoreForTab();
+        historyStore._loadAllResult = [
+          {
+            id: 1, orchestratorSession: 'o', workerSession: 'w',
+            taskDescription: 'task', startTime: 1000, endTime: 2000,
+            durationMs: 1000, cycleCount: 1, outcome: 'done' as const,
+          },
+        ];
+        const { hub } = createHubWithHistory(api, { historyStore });
+
+        await hub.render();
+        await hub.handleCallback('auto:history');
+
+        const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+        const lastEdit = editCalls[editCalls.length - 1];
+        const opts = lastEdit.args[3] as any;
+        const keyboard = opts.reply_markup.inline_keyboard as Array<Array<{ text: string; callback_data: string }>>;
+        const clearBtn = keyboard.flat().find(btn => btn.callback_data === 'auto:clear-history');
+        assert.ok(clearBtn, 'history view should have a Clear History button');
+        assert.ok(clearBtn.text.includes('Clear'), 'button text should contain Clear');
+      });
+
+      it('handleCallback auto:clear-history calls historyStore.clearAll() and re-renders showing empty state', async () => {
+        const api = createMockApi();
+        const historyStore = createMockHistoryStoreForTab();
+        historyStore._loadAllResult = [
+          {
+            id: 1, orchestratorSession: 'o', workerSession: 'w',
+            taskDescription: 'task', startTime: 1000, endTime: 2000,
+            durationMs: 1000, cycleCount: 1, outcome: 'done' as const,
+          },
+        ];
+        const { hub } = createHubWithHistory(api, { historyStore });
+
+        await hub.render();
+        await hub.handleCallback('auto:history');
+        await hub.handleCallback('auto:clear-history');
+
+        assert.ok(historyStore.clearCalled, 'clearAll() should have been called');
+        // After clearing, the loadAll returns [] (mock wipes on clearAll), so re-render shows empty state
+        const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+        const lastEdit = editCalls[editCalls.length - 1];
+        const text = lastEdit.args[2] as string;
+        assert.ok(text.includes('No history yet'), 'should show empty state after clearing');
+      });
+
+      it('handleCallback auto:clear-history returns acknowledgment text', async () => {
+        const api = createMockApi();
+        const historyStore = createMockHistoryStoreForTab();
+        const { hub } = createHubWithHistory(api, { historyStore });
+
+        await hub.render();
+        await hub.handleCallback('auto:history');
+        const result = await hub.handleCallback('auto:clear-history');
+
+        assert.equal(result, 'History cleared');
+      });
+
+      it('no crash when historyStore is undefined and auto:clear-history is triggered', async () => {
+        const api = createMockApi();
+        const { hub } = createHub(api);
+
+        await hub.render();
+        await hub.handleCallback('auto:history');
+        const result = await hub.handleCallback('auto:clear-history');
+
+        // Should not crash, just return acknowledgment
+        assert.equal(result, 'History cleared');
+      });
+    });
   });
 });
