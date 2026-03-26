@@ -431,14 +431,15 @@ function buildKeyboard(
   if (pendingCreation) {
     if (pendingCreation.step === 'select-worker') {
       for (const s of sessions) {
+        if (automationHub?.isAutomatedSession(s.name)) continue;
         keyboard.push([{ text: `\uD83D\uDD27 ${s.name}`, callback_data: `auto:w:${s.name}` }]);
       }
       keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
     } else if (pendingCreation.step === 'select-orchestrator') {
       for (const s of sessions) {
-        if (s.name !== pendingCreation.workerSession) {
-          keyboard.push([{ text: `\uD83C\uDFAF ${s.name}`, callback_data: `auto:o:${s.name}` }]);
-        }
+        if (s.name === pendingCreation.workerSession) continue;
+        if (automationHub?.isAutomatedSession(s.name)) continue;
+        keyboard.push([{ text: `\uD83C\uDFAF ${s.name}`, callback_data: `auto:o:${s.name}` }]);
       }
       keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
     } else if (pendingCreation.step === 'enter-task') {

@@ -292,10 +292,12 @@ export function registerCallbackHandlers(
   if (automationHub) {
     bot.callbackQuery(/^auto:/, async (ctx) => {
       const data = ctx.callbackQuery.data;
-      // Transition hub view state for detail/back navigation
+      // Transition hub view state for detail/back/stop navigation
       if (setHubView && data.startsWith('auto:details:')) {
         await setHubView('automationDetails');
       } else if (setHubView && data === 'auto:back') {
+        await setHubView('automationHub');
+      } else if (setHubView && data === 'auto:stop') {
         await setHubView('automationHub');
       }
       const text = await automationHub.handleCallback(data);

@@ -788,6 +788,7 @@ export class AutomationHubRenderer {
       switch (this.pendingCreation.step) {
         case 'select-worker':
           for (const name of sessions) {
+            if (this.isAutomatedSession(name)) continue;
             keyboard.push([{ text: `\uD83D\uDD27 ${name}`, callback_data: `auto:w:${name}` }]);
           }
           keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
@@ -795,9 +796,9 @@ export class AutomationHubRenderer {
 
         case 'select-orchestrator':
           for (const name of sessions) {
-            if (name !== this.pendingCreation.workerSession) {
-              keyboard.push([{ text: `\uD83C\uDFAF ${name}`, callback_data: `auto:o:${name}` }]);
-            }
+            if (name === this.pendingCreation.workerSession) continue;
+            if (this.isAutomatedSession(name)) continue;
+            keyboard.push([{ text: `\uD83C\uDFAF ${name}`, callback_data: `auto:o:${name}` }]);
           }
           keyboard.push([{ text: '\u274C Cancel', callback_data: 'auto:cancel' }]);
           break;
