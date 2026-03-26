@@ -251,6 +251,13 @@ export class AutomationHubRenderer {
       return 'Viewing history';
     }
 
+    if (data === 'auto:clear-history') {
+      this.historyStore?.clearAll();
+      this.historyView = true;
+      await this.onRender?.();
+      return 'History cleared';
+    }
+
     // Detail view: auto:details:N
     if (data.startsWith('auto:details:')) {
       const id = parseInt(data.slice('auto:details:'.length), 10);
