@@ -92,6 +92,22 @@ const migrations: Migration[] = [
       );
     `,
   },
+  {
+    version: 7,
+    up: `
+      CREATE TABLE automation_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        orchestrator_session TEXT NOT NULL,
+        worker_session TEXT NOT NULL,
+        task_description TEXT NOT NULL,
+        start_time INTEGER NOT NULL,
+        end_time INTEGER NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        cycle_count INTEGER NOT NULL,
+        outcome TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
