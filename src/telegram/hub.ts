@@ -534,6 +534,10 @@ function buildKeyboard(
         keyboard.push([{ text: `${stateEmoji} ${auto.orchestratorSession} \u2192 ${auto.workerSession}`, callback_data: `auto:details:${id}` }]);
       }
       keyboard.push([{ text: '\uD83E\uDD16 New Automation', callback_data: 'auto:new' }]);
+      keyboard.push([{ text: '\uD83D\uDCDC History', callback_data: 'auto:history' }]);
+    }
+    if (!allAutos || allAutos.size === 0) {
+      keyboard.push([{ text: '\uD83D\uDCDC History', callback_data: 'auto:history' }]);
     }
     keyboard.push([{ text: '\u2190 Back to Sessions', callback_data: 'hub:auto-back' }]);
     return { inline_keyboard: keyboard };
