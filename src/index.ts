@@ -21,6 +21,7 @@ import { RateLimiter } from './telegram/rate-limiter.js';
 import { HubStore } from './db/hub-store.js';
 import { SettingsStore } from './db/settings-store.js';
 import { AutomationStore } from './db/automation-store.js';
+import { HistoryStore } from './db/history-store.js';
 import { registerCallbackHandlers } from './telegram/keyboard.js';
 import { registerCommands, EphemeralTracker } from './telegram/commands.js';
 import { CommandAllowlist } from './security/allowlist.js';
@@ -181,6 +182,7 @@ async function startPrimary(
 
   // 11c. Create AutomationHubRenderer with engine factory and persistence store
   const automationStore = new AutomationStore(db);
+  const historyStore = new HistoryStore(db);
   const automationHub = new AutomationHubRenderer(
     bot.api,
     config.ownerId,
@@ -207,6 +209,7 @@ async function startPrimary(
       ),
     bus,
     automationStore,
+    historyStore,
   );
 
   // 11d. Wire automationHub into HubRenderer for integrated display
@@ -753,6 +756,7 @@ async function becomeNewPrimary(
 
     // Create AutomationHubRenderer for promoted primary with persistence store
     const promotedAutomationStore = new AutomationStore(db);
+    const promotedHistoryStore = new HistoryStore(db);
     const promotedAutomationHub = new AutomationHubRenderer(
       bot.api,
       config.ownerId,
@@ -778,6 +782,7 @@ async function becomeNewPrimary(
         ),
       bus,
       promotedAutomationStore,
+      promotedHistoryStore,
     );
 
     // Wire automationHub into HubRenderer for integrated display

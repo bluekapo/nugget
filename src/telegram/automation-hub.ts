@@ -17,6 +17,7 @@ import type { EventBus } from '../events/bus.js';
 import { isNotModifiedError, isMessageNotFoundError } from './hub.js';
 import { logDebug, logInfo, logError } from '../logging/logger.js';
 import type { AutomationStore } from '../db/automation-store.js';
+import type { HistoryStore } from '../db/history-store.js';
 
 export interface PendingCreation {
   step: 'select-worker' | 'select-orchestrator' | 'enter-task' | 'confirm-task';
@@ -112,6 +113,7 @@ export class AutomationHubRenderer {
     private readonly engineFactory: (config: EngineConfig, bus: EventBus) => AutomationEngine,
     private readonly bus: EventBus,
     private readonly automationStore?: AutomationStore,
+    private readonly historyStore?: HistoryStore,
   ) {}
 
   /**
@@ -285,6 +287,7 @@ export class AutomationHubRenderer {
       if (id !== null) {
         const auto = this.activeAutomations.get(id);
         if (auto) {
+          this.writeHistory(auto, 'stopped');
           this.removeAutomation(id);
           // Return to list or clear detail view
           this.detailViewId = null;
@@ -361,6 +364,7 @@ export class AutomationHubRenderer {
         // Capture automation state BEFORE cleanup
         const auto = this.activeAutomations.get(id);
         if (auto) {
+          this.writeHistory(auto, 'done');
           this.bus.off('automation:error', auto.handlers.error);
           this.bus.off('automation:warning', auto.handlers.warning);
         }
@@ -381,6 +385,8 @@ export class AutomationHubRenderer {
       },
       error: (eid: string, error: string) => {
         if (eid !== engine.engineId) return;
+        const auto = this.activeAutomations.get(id);
+        if (auto) this.writeHistory(auto, 'error');
         this.api.sendMessage(this.chatId, `Automation error: ${error}`, {
           parse_mode: 'HTML',
           reply_markup: {
@@ -470,6 +476,27 @@ export class AutomationHubRenderer {
     this.automationStore?.clearAll();
   }
 
+  /** Write a completed automation to history storage. */
+  private writeHistory(auto: ActiveAutomation, outcome: 'done' | 'error' | 'stopped'): void {
+    if (!this.historyStore) return;
+    try {
+      const endTime = Date.now();
+      const durationMs = endTime - auto.startTime;
+      this.historyStore.insert({
+        orchestratorSession: auto.orchestratorSession,
+        workerSession: auto.workerSession,
+        taskDescription: auto.taskDescription,
+        startTime: auto.startTime,
+        endTime,
+        durationMs,
+        cycleCount: auto.cycleCount,
+        outcome,
+      });
+    } catch (err) {
+      logError('[automation-hub] Failed to write history record:', err);
+    }
+  }
+
   /** Persist all active automations to SQLite for crash recovery. */
   private persistState(): void {
     if (!this.automationStore) return;
@@ -545,6 +572,7 @@ export class AutomationHubRenderer {
           // Capture automation state BEFORE cleanup
           const auto = this.activeAutomations.get(id);
           if (auto) {
+            this.writeHistory(auto, 'done');
             this.bus.off('automation:error', auto.handlers.error);
             this.bus.off('automation:warning', auto.handlers.warning);
           }
@@ -565,6 +593,8 @@ export class AutomationHubRenderer {
         },
         error: (eid: string, error: string) => {
           if (eid !== engine.engineId) return;
+          const auto = this.activeAutomations.get(id);
+          if (auto) this.writeHistory(auto, 'error');
           this.api.sendMessage(this.chatId, `Automation error: ${error}`, {
             parse_mode: 'HTML',
             reply_markup: {
