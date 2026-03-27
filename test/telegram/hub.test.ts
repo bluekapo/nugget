@@ -879,8 +879,38 @@ describe('HubRenderer', () => {
         }
       }
 
-      assert.ok(allBtns.some(b => b.callback_data === 'auto:new'), 'should have Automate button when idle');
-      assert.ok(!allBtns.some(b => b.callback_data === 'hub:automations'), 'should NOT have Automations button when idle');
+      assert.ok(allBtns.some(b => b.callback_data === 'hub:automations'), 'should have Automate button (hub:automations) when idle');
+      assert.ok(!allBtns.some(b => b.callback_data === 'auto:new'), 'should NOT have auto:new button when idle (navigates to list first)');
+    });
+
+    it('NAV-02: empty automation list shows New Automation and History buttons', async () => {
+      const api = createMockApi();
+      const sm = createMockSessionManager([
+        { name: 'session-1', status: 'running' },
+      ]);
+      const hub = new HubRenderer(api as any, 123, sm as any, () => 'session-1');
+      hub.setAutomationHub(createMockAutomationHub(false) as any);
+      hub.setHubView('automationHub');
+
+      await hub.render();
+
+      const opts = api.calls[0].args[2] as { reply_markup?: { inline_keyboard: any[][] } };
+      const keyboard = opts?.reply_markup?.inline_keyboard;
+      const allBtns: Array<{ text: string; callback_data: string }> = [];
+      for (const row of keyboard as any[][]) {
+        for (const btn of row) {
+          if (btn.callback_data) allBtns.push(btn);
+        }
+      }
+
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:new'), 'should have New Automation button in empty automation list');
+      assert.ok(allBtns.some(b => b.callback_data === 'auto:history'), 'should have History button in empty automation list');
+      assert.ok(allBtns.some(b => b.callback_data === 'hub:auto-back'), 'should have Back to Sessions button');
+
+      // Verify order: auto:new appears before auto:history
+      const newIdx = allBtns.findIndex(b => b.callback_data === 'auto:new');
+      const histIdx = allBtns.findIndex(b => b.callback_data === 'auto:history');
+      assert.ok(newIdx < histIdx, 'New Automation button should appear before History button');
     });
 
     it('buildText does not show automation status line when no automation active', async () => {

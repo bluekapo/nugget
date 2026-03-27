@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus } from '../../src/events/bus.js';
-import { AutomationEngine, RETRY_PROMPT } from '../../src/automation/engine.js';
+import { AutomationEngine, RETRY_PROMPT, isTrivialCapture } from '../../src/automation/engine.js';
 import type { EngineState, EngineConfig } from '../../src/automation/engine.js';
 import type { TimerProvider } from '../../src/terminal/capture.js';
 
@@ -3740,5 +3740,110 @@ describe('AutomationEngine engineId (CONC-02)', () => {
 
     engine1.stop();
     engine2.stop();
+  });
+
+  // ---------- isTrivialCapture unit tests ----------
+
+  describe('isTrivialCapture', () => {
+    it('returns true for empty string', () => {
+      assert.equal(isTrivialCapture(''), true);
+    });
+
+    it('returns true for whitespace only', () => {
+      assert.equal(isTrivialCapture('   \n  \n  '), true);
+    });
+
+    it('returns true for bare prompt character', () => {
+      assert.equal(isTrivialCapture('\u276F '), true);
+    });
+
+    it('returns true for bare completion marker', () => {
+      assert.equal(isTrivialCapture('\u273B'), true);
+    });
+
+    it('returns true for prompt + completion chars only', () => {
+      assert.equal(isTrivialCapture('\u276F \n\u273B\n'), true);
+    });
+
+    it('returns false for real content with prompt', () => {
+      assert.equal(isTrivialCapture('Some actual output\n\u276F '), false);
+    });
+
+    it('returns false for error output', () => {
+      assert.equal(isTrivialCapture('Error: something went wrong'), false);
+    });
+  });
+
+  // ---------- ENG-01: trivial capture guard in onWorkerIdle ----------
+
+  describe('ENG-01: trivial capture guard in onWorkerIdle', () => {
+    it('returns to idle when worker screen is trivial after CLEAR', async () => {
+      const stagnationConfig = { ...config, stagnationDelay: 200 };
+      engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+      engine.start();
+
+      // Complete first cycle
+      timer.advance(1); // deferred start -> clearing-orchestrator
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+      timer.advance(1000);
+      // Engine is idle after directive cycle
+
+      // Now worker emits the CLEAR response (effectively empty screen)
+      // The worker emulator will only have trivial content (idle prompt)
+      await emitOutput(bus, 'worker', '\u276F \r\n');
+      timer.advance(50);   // debounce
+      timer.advance(100);  // idle delay -> onWorkerIdle fires
+
+      // Engine should return to idle (trivial capture guard), NOT proceed to clearing-orchestrator
+      assert.equal(engine.state, 'idle',
+        'engine should return to idle when worker screen is trivial');
+    });
+
+    it('stagnation timer is running after trivial capture early return', async () => {
+      const stagnationConfig = { ...config, stagnationDelay: 200 };
+      engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+      engine.start();
+
+      // Complete first cycle
+      timer.advance(1); // deferred start -> clearing-orchestrator
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+      timer.advance(1000);
+
+      // Worker emits trivial output
+      await emitOutput(bus, 'worker', '\u276F \r\n');
+      timer.advance(50);   // debounce
+      timer.advance(100);  // idle delay -> onWorkerIdle fires
+
+      assert.equal(engine.state, 'idle', 'should be idle after trivial capture');
+      // Stagnation timer should be armed (pendingCount > 0)
+      assert.ok(timer.pendingCount > 0,
+        'stagnation timer should be armed after trivial capture early return');
+    });
+
+    it('proceeds normally when worker screen has real content (no regression)', async () => {
+      const stagnationConfig = { ...config, stagnationDelay: 200 };
+      engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+      engine.start();
+
+      // Complete first cycle
+      timer.advance(1); // deferred start -> clearing-orchestrator
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+      timer.advance(1000);
+
+      // Worker emits real content
+      await emitOutput(bus, 'worker', completionOutput('Tests passed: 42'));
+      timer.advance(50);   // debounce
+      timer.advance(100);  // idle delay -> onWorkerIdle fires
+
+      // Engine should proceed to clearing-orchestrator (normal cycle)
+      assert.notEqual(engine.state, 'idle',
+        'engine should proceed normally when worker screen has real content');
+    });
   });
 });
