@@ -32,7 +32,7 @@ import { TERMINAL_COLS, TERMINAL_ROWS } from './terminal/constants.js';
 import { AutomationHubRenderer } from './telegram/automation-hub.js';
 import { AutomationEngine } from './automation/engine.js';
 import type { EngineConfig } from './automation/engine.js';
-import { logDebug, logInfo, logWarn, logError, cleanOldLogs } from './logging/logger.js';
+import { logDebug, logInfo, logWarn, logError, cleanOldLogs, rotateLog } from './logging/logger.js';
 import type { Bot } from 'grammy';
 import type Database from 'better-sqlite3';
 
@@ -81,7 +81,8 @@ async function startPrimary(
 ): Promise<void> {
   logInfo(`[primary] Starting primary instance, session='${sessionName}', runtime='${config.runtime}'`);
 
-  // 1b. Clean up old log files
+  // 1b. Rotate previous log and clean up old log files
+  rotateLog();
   cleanOldLogs(config.logTtlHours);
 
   // 2. Open SQLite database
