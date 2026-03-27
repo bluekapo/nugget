@@ -3303,6 +3303,125 @@ describe('AutomationEngine', () => {
       'prompt should contain all viewport lines');
   });
 
+  // ---------- ENG-02: Orchestrator clear deadline timeout ----------
+
+  describe('orchestrator clear deadline timeout (ENG-02)', () => {
+
+    it('ENG-02: clearing-orchestrator times out after 30s, fires onClearComplete, and emits warning', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      const warnings: string[] = [];
+      bus.on('automation:warning', (_engineId: string, msg: string) => {
+        warnings.push(msg);
+      });
+
+      engine.start();
+
+      // First cycle -> clearing-orchestrator
+      timer.advance(1);
+      assert.equal(engine.state, 'clearing-orchestrator');
+
+      // Do NOT emit "(no content)" — let the deadline fire
+      // CLEAR_TIMEOUT_MS is 30_000ms. The deadline was set at _now=0 so fires at 30_000.
+      // After advance(1), _now=1. Advance to 29_998 (target=29_999) to stay below deadline.
+      timer.advance(29_998);
+      assert.equal(engine.state, 'clearing-orchestrator', 'should still be clearing before timeout');
+
+      // Advance past the deadline (target=29_999+2=30_001 > 30_000)
+      timer.advance(2);
+      // After deadline: cancelClearPolling + onClearComplete should fire
+      // onClearComplete sets state to prompting-orchestrator, then timer sends Enter
+      assert.notEqual(engine.state, 'clearing-orchestrator',
+        'ENG-02: should exit clearing-orchestrator after 30s deadline');
+
+      // Warning should have been emitted
+      const timeoutWarning = warnings.find(w => w.includes('timed out'));
+      assert.ok(timeoutWarning, 'ENG-02: should emit automation:warning on timeout');
+      assert.ok(timeoutWarning!.includes('30s'), 'warning should mention 30s');
+    });
+
+    it('ENG-02: deadline timer is cancelled when clear succeeds normally (no double-fire)', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      const warnings: string[] = [];
+      bus.on('automation:warning', (_engineId: string, msg: string) => {
+        warnings.push(msg);
+      });
+
+      engine.start();
+
+      // First cycle -> clearing-orchestrator
+      timer.advance(1);
+      assert.equal(engine.state, 'clearing-orchestrator');
+
+      // Clear succeeds normally
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); // poll finds "(no content)"
+      timer.advance(500);  // settling delay -> onClearComplete
+      timer.advance(50);   // Enter -> waiting-response
+
+      assert.equal(engine.state, 'waiting-response');
+
+      // Advance past what would have been the deadline
+      timer.advance(30_000);
+
+      // No warning should fire (deadline was cancelled)
+      const timeoutWarning = warnings.find(w => w.includes('timed out'));
+      assert.equal(timeoutWarning, undefined,
+        'ENG-02: deadline should be cancelled when clear succeeds normally');
+    });
+
+    it('ENG-02: deadline timer is cancelled when engine stops mid-clear', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      const warnings: string[] = [];
+      bus.on('automation:warning', (_engineId: string, msg: string) => {
+        warnings.push(msg);
+      });
+
+      engine.start();
+
+      // First cycle -> clearing-orchestrator
+      timer.advance(1);
+      assert.equal(engine.state, 'clearing-orchestrator');
+
+      // Stop the engine while clearing
+      engine.stop();
+      assert.equal(engine.state, 'stopped');
+
+      // Advance past deadline
+      timer.advance(31_000);
+
+      // No warning — deadline was cancelled by stop()
+      const timeoutWarning = warnings.find(w => w.includes('timed out'));
+      assert.equal(timeoutWarning, undefined,
+        'ENG-02: deadline should be cancelled when engine stops');
+    });
+
+    it('ENG-02: after timeout, engine continues to prompting-orchestrator and sends prompt', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+
+      engine.start();
+
+      // First cycle -> clearing-orchestrator
+      timer.advance(1);
+      assert.equal(engine.state, 'clearing-orchestrator');
+
+      // Let the deadline fire
+      timer.advance(30_001);
+
+      // onClearComplete should proceed: prompting-orchestrator -> write prompt -> Enter -> waiting-response
+      // After deadline, onClearComplete fires. It calls setState('prompting-orchestrator'),
+      // writes the prompt, then schedules Enter after baseDelay (50ms).
+      timer.advance(50); // Enter sent -> waiting-response
+
+      assert.equal(engine.state, 'waiting-response',
+        'ENG-02: after timeout, engine should recover and continue to waiting-response');
+
+      // Verify prompt was written to orchestrator
+      const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('Worker'));
+      assert.ok(promptWrite, 'ENG-02: prompt should be written to orchestrator after timeout recovery');
+    });
+
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------

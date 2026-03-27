@@ -239,6 +239,7 @@ export class AutomationEngine {
   private readonly maxCycles: number;
   private sessionExitHandler: ((name: string, exitCode: number) => void) | null = null;
   private clearPollTimer: unknown = null;
+  private clearDeadlineTimer: unknown = null;  // Deadline for clearing-orchestrator state (ENG-02)
   private responsePollTimer: unknown = null;
   private clearingBuffer = '';
   private responseBuffer = '';
@@ -1020,7 +1021,33 @@ export class AutomationEngine {
   }
 
   private startClearPolling(): void {
-    this.cancelClearPolling();
+    // Cancel only the poll timer, NOT the deadline (deadline is set once and persists)
+    if (this.clearPollTimer !== null) {
+      this.timer.clearTimeout(this.clearPollTimer);
+      this.clearPollTimer = null;
+    }
+
+    // ENG-02: Deadline timer — fires once after CLEAR_TIMEOUT_MS to prevent indefinite hang
+    // in clearing-orchestrator state. Matches worker's workerClearDeadlineTimer pattern.
+    // The guard prevents creating a new deadline on each recursive startClearPolling() call.
+    if (this.clearDeadlineTimer === null) {
+      this.clearDeadlineTimer = this.timer.setTimeout(() => {
+        if (this._state !== 'clearing-orchestrator') return;
+        debugLog(`[orchestrator-clear-timeout] TIMEOUT after ${CLEAR_TIMEOUT_MS}ms — forcing clear completion`);
+        this.clearDeadlineTimer = null;
+        this.cancelClearPolling();
+        this.clearingBuffer = '';
+        this.bus.emit('automation:warning', this.engineId,
+          `Orchestrator CLEAR poll timed out after ${CLEAR_TIMEOUT_MS / 1000}s — continuing`);
+        // Proceed as if clear completed normally
+        if (this.consultationMode) {
+          this.onConsultationClearComplete();
+        } else {
+          this.onClearComplete();
+        }
+      }, CLEAR_TIMEOUT_MS);
+    }
+
     debugLog(`[startClearPolling] scheduling poll in 1000ms, bufferLen=${this.clearingBuffer.length}`);
     this.clearPollTimer = this.timer.setTimeout(() => {
       try {
@@ -1062,6 +1089,10 @@ export class AutomationEngine {
     if (this.clearPollTimer !== null) {
       this.timer.clearTimeout(this.clearPollTimer);
       this.clearPollTimer = null;
+    }
+    if (this.clearDeadlineTimer !== null) {
+      this.timer.clearTimeout(this.clearDeadlineTimer);
+      this.clearDeadlineTimer = null;
     }
   }
 
