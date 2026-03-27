@@ -812,6 +812,81 @@ describe('ScreenCapture', () => {
       'should NOT fire — active spinner detected on real screen change');
   });
 
+  // ---------- ENG-03: ❯ prompt-visibility guard ----------
+
+  it('ENG-03: no ❯ line visible blocks onPromptComplete even with completion marker', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 200 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Completion marker present, but NO bare ❯ prompt visible on screen
+    // This simulates mid-automation: marker appears but Claude is still processing
+    await capture.onData('\u273B Crunched for 1m 22s\r\nSome other output\r\n');
+    timer.advance(50); // debounce fires, crunched=true, idle timer starts
+    timer.advance(200); // idle fires
+
+    assert.equal(completionFired, false,
+      'onPromptComplete should NOT fire when ❯ prompt is not visible on screen');
+  });
+
+  it('ENG-03: bare ❯ line on screen allows onPromptComplete to fire', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 200 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Completion marker AND bare ❯ prompt visible — Claude is truly idle
+    await capture.onData('\u273B Crunched for 1m 22s\r\n\u276F \r\n');
+    timer.advance(50); // debounce fires, crunched=true, idle timer starts
+    timer.advance(200); // idle fires
+
+    assert.equal(completionFired, true,
+      'onPromptComplete should fire when ❯ prompt is visible on screen');
+  });
+
+  it('ENG-03: requireMarker=false skips ❯ guard (clear path)', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 200 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+    capture.requireMarker = false;
+
+    // No completion marker, no ❯ prompt — but requireMarker=false should skip guard
+    await capture.onData('Some output after /clear\r\n');
+    timer.advance(50); // debounce fires
+    timer.advance(200); // idle fires
+
+    assert.equal(completionFired, true,
+      'onPromptComplete should fire with requireMarker=false even without ❯ prompt');
+  });
+
+  it('ENG-03: ❯ in SELECT menu line does NOT count as idle prompt', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 200 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Completion marker present, but ❯ appears as part of a SELECT menu option, not as bare prompt
+    await capture.onData('\u273B Crunched for 1m 22s\r\n\u276F Some option text\r\nAnother option\r\n');
+    timer.advance(50); // debounce fires, crunched=true, idle timer starts
+    timer.advance(200); // idle fires
+
+    assert.equal(completionFired, false,
+      'onPromptComplete should NOT fire when ❯ is part of a SELECT menu line, not a bare prompt');
+  });
+
+  it('ENG-03: existing hasActiveSpinner guard still blocks for ✻ spinners (regression)', async () => {
+    createCapture({ baseDelay: 50, idleDelay: 200 });
+    let completionFired = false;
+    capture.onPromptComplete = () => { completionFired = true; };
+
+    // Completion marker + active ✻ spinner on another line + bare ❯ visible
+    // Even with ❯ visible, the spinner guard should still block
+    await capture.onData('\u273B Crunched for 1m 22s\r\n\u273B Working on code...\r\n\u276F \r\n');
+    timer.advance(50); // debounce fires
+    timer.advance(200); // idle fires
+
+    assert.equal(completionFired, false,
+      'onPromptComplete should NOT fire when ✻ spinner is active, even if ❯ is visible');
+  });
+
   // ---------- setLastFiredMarker dedup ----------
 
   it('setLastFiredMarker: same marker after seed does NOT trigger onPromptComplete', async () => {
