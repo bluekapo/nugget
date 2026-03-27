@@ -152,16 +152,14 @@ describe('AutomationEngine', () => {
     // advance(1) because ManualTimer needs _now < target to enter the loop
     timer.advance(1);
 
-    // Engine should have transitioned out of idle into clearing-orchestrator
-    // (capturing-worker is transient within onWorkerIdle)
+    // First cycle (cycleNumber === 0) bypasses ENG-01 guard because the initial
+    // prompt legitimately sends with an empty worker screen (task description only).
     assert.equal(engine.state, 'clearing-orchestrator',
       'engine should start first cycle immediately via deferred timer, without any worker output');
 
     // Verify /clear was written to orchestrator (proves first cycle started)
     const clearWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('/clear'));
     assert.ok(clearWrite, 'engine should send /clear to orchestrator on first cycle');
-
-    // No session:output was emitted -- proves this is purely the deferred start, not prompt detection
   });
 
   // ---------- Test 3: subsequent cycle triggers via prompt completion (existing behavior) ----------
@@ -3741,109 +3739,141 @@ describe('AutomationEngine engineId (CONC-02)', () => {
     engine1.stop();
     engine2.stop();
   });
+});
 
-  // ---------- isTrivialCapture unit tests ----------
+// ---------- isTrivialCapture unit tests ----------
 
-  describe('isTrivialCapture', () => {
-    it('returns true for empty string', () => {
-      assert.equal(isTrivialCapture(''), true);
-    });
-
-    it('returns true for whitespace only', () => {
-      assert.equal(isTrivialCapture('   \n  \n  '), true);
-    });
-
-    it('returns true for bare prompt character', () => {
-      assert.equal(isTrivialCapture('\u276F '), true);
-    });
-
-    it('returns true for bare completion marker', () => {
-      assert.equal(isTrivialCapture('\u273B'), true);
-    });
-
-    it('returns true for prompt + completion chars only', () => {
-      assert.equal(isTrivialCapture('\u276F \n\u273B\n'), true);
-    });
-
-    it('returns false for real content with prompt', () => {
-      assert.equal(isTrivialCapture('Some actual output\n\u276F '), false);
-    });
-
-    it('returns false for error output', () => {
-      assert.equal(isTrivialCapture('Error: something went wrong'), false);
-    });
+describe('isTrivialCapture', () => {
+  it('returns true for empty string', () => {
+    assert.equal(isTrivialCapture(''), true);
   });
 
-  // ---------- ENG-01: trivial capture guard in onWorkerIdle ----------
+  it('returns true for whitespace only', () => {
+    assert.equal(isTrivialCapture('   \n  \n  '), true);
+  });
 
-  describe('ENG-01: trivial capture guard in onWorkerIdle', () => {
-    it('returns to idle when worker screen is trivial after CLEAR', async () => {
-      const stagnationConfig = { ...config, stagnationDelay: 200 };
-      engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
-      engine.start();
+  it('returns true for bare prompt character', () => {
+    assert.equal(isTrivialCapture('\u276F '), true);
+  });
 
-      // Complete first cycle
-      timer.advance(1); // deferred start -> clearing-orchestrator
-      await emitOutput(bus, 'orchestrator', clearOutput());
-      timer.advance(1000); timer.advance(500); timer.advance(50);
-      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
-      timer.advance(1000);
-      // Engine is idle after directive cycle
+  it('returns true for bare completion marker', () => {
+    assert.equal(isTrivialCapture('\u273B'), true);
+  });
 
-      // Now worker emits the CLEAR response (effectively empty screen)
-      // The worker emulator will only have trivial content (idle prompt)
-      await emitOutput(bus, 'worker', '\u276F \r\n');
-      timer.advance(50);   // debounce
-      timer.advance(100);  // idle delay -> onWorkerIdle fires
+  it('returns true for prompt + completion chars only', () => {
+    assert.equal(isTrivialCapture('\u276F \n\u273B\n'), true);
+  });
 
-      // Engine should return to idle (trivial capture guard), NOT proceed to clearing-orchestrator
-      assert.equal(engine.state, 'idle',
-        'engine should return to idle when worker screen is trivial');
-    });
+  it('returns false for real content with prompt', () => {
+    assert.equal(isTrivialCapture('Some actual output\n\u276F '), false);
+  });
 
-    it('stagnation timer is running after trivial capture early return', async () => {
-      const stagnationConfig = { ...config, stagnationDelay: 200 };
-      engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
-      engine.start();
+  it('returns false for error output', () => {
+    assert.equal(isTrivialCapture('Error: something went wrong'), false);
+  });
+});
 
-      // Complete first cycle
-      timer.advance(1); // deferred start -> clearing-orchestrator
-      await emitOutput(bus, 'orchestrator', clearOutput());
-      timer.advance(1000); timer.advance(500); timer.advance(50);
-      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
-      timer.advance(1000);
+// ---------- ENG-01: trivial capture guard in onWorkerIdle ----------
 
-      // Worker emits trivial output
-      await emitOutput(bus, 'worker', '\u276F \r\n');
-      timer.advance(50);   // debounce
-      timer.advance(100);  // idle delay -> onWorkerIdle fires
+describe('ENG-01: trivial capture guard in onWorkerIdle', () => {
+  let bus: EventBus;
+  let timer: ManualTimer;
+  let engine: AutomationEngine;
+  let writes: Array<{ name: string; data: string }>;
+  let mockSessionManager: { writeToSession: (name: string, data: string) => void };
+  let config: EngineConfig;
 
-      assert.equal(engine.state, 'idle', 'should be idle after trivial capture');
-      // Stagnation timer should be armed (pendingCount > 0)
-      assert.ok(timer.pendingCount > 0,
-        'stagnation timer should be armed after trivial capture early return');
-    });
+  beforeEach(() => {
+    bus = new EventBus();
+    timer = new ManualTimer();
+    writes = [];
+    mockSessionManager = {
+      writeToSession: (name: string, data: string) => {
+        writes.push({ name, data });
+      },
+    };
+    config = {
+      workerSession: 'worker',
+      orchestratorSession: 'orchestrator',
+      taskDescription: 'Run the tests',
+      timer,
+      baseDelay: 50,
+      idleDelay: 100,
+    };
+  });
 
-    it('proceeds normally when worker screen has real content (no regression)', async () => {
-      const stagnationConfig = { ...config, stagnationDelay: 200 };
-      engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
-      engine.start();
+  afterEach(() => {
+    engine?.stop();
+  });
 
-      // Complete first cycle
-      timer.advance(1); // deferred start -> clearing-orchestrator
-      await emitOutput(bus, 'orchestrator', clearOutput());
-      timer.advance(1000); timer.advance(500); timer.advance(50);
-      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
-      timer.advance(1000);
+  it('returns to idle when worker screen is trivial after CLEAR (cycle 2+)', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
 
-      // Worker emits real content
-      await emitOutput(bus, 'worker', completionOutput('Tests passed: 42'));
-      timer.advance(50);   // debounce
-      timer.advance(100);  // idle delay -> onWorkerIdle fires
+    // Complete first cycle (cycleNumber becomes 1)
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    // Orchestrator responds with CLEAR directive (clears worker screen)
+    await emitOutput(bus, 'orchestrator', directiveOutput('CLEAR'));
+    timer.advance(1000); // response poll -> finds CLEAR -> engine sends /clear to worker
 
-      // Engine should proceed to clearing-orchestrator (normal cycle)
-      assert.notEqual(engine.state, 'idle',
-        'engine should proceed normally when worker screen has real content');
-    });
+    // Worker CLEAR completes
+    await emitOutput(bus, 'worker', clearOutput());
+    timer.advance(1000); // worker clear poll fires
+    timer.advance(500);  // settling delay -> onWorkerIdle called directly
+
+    // Now on cycle 2+, ENG-01 guard should fire because the worker emulator
+    // has only "(no content)" style trivial text after CLEAR.
+    // The guard should return to idle instead of proceeding.
+    assert.equal(engine.state, 'idle',
+      'engine should return to idle when worker screen is trivial after CLEAR (ENG-01)');
+  });
+
+  it('stagnation timer is running after trivial capture early return', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle
+    timer.advance(1);
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('CLEAR'));
+    timer.advance(1000);
+
+    // Worker CLEAR completes
+    await emitOutput(bus, 'worker', clearOutput());
+    timer.advance(1000);
+    timer.advance(500); // settling -> onWorkerIdle with trivial screen
+
+    assert.equal(engine.state, 'idle', 'should be idle after trivial capture');
+    // Stagnation timer should be armed (pendingCount > 0)
+    assert.ok(timer.pendingCount > 0,
+      'stagnation timer should be armed after trivial capture early return');
+  });
+
+  it('proceeds normally when worker screen has real content (no regression)', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle
+    timer.advance(1);
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000);
+    // Engine is idle after directive cycle (cycleNumber > 0)
+
+    // Worker emits real content with completion marker AND idle prompt (❯)
+    // The ScreenCapture requires both crunched marker and idle prompt to fire onPromptComplete
+    await emitOutput(bus, 'worker', 'Tests passed: 42\r\n\u273B Crunched for 1m 22s\r\n\u276F \r\n');
+    timer.advance(50);   // debounce fires capture, detects crunched marker
+    timer.advance(100);  // idle delay -> onPromptComplete -> onWorkerIdle fires
+
+    // Engine should proceed past idle (follow-up prompt path since needsFullPrompt=false)
+    assert.notEqual(engine.state, 'idle',
+      'engine should proceed normally when worker screen has real content');
   });
 });

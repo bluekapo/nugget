@@ -91,6 +91,21 @@ export function hasSelectMenu(screenText: string): boolean {
   return false;
 }
 
+/**
+ * Detect trivial/empty worker screen captures that should not be sent to the orchestrator.
+ * Returns true for empty, whitespace-only, or prompt-character-only captures.
+ * Used by ENG-01 (onWorkerIdle guard) and ENG-03 (onWorkerStagnation guard).
+ */
+export function isTrivialCapture(text: string): boolean {
+  const stripped = text.replace(/\s+/g, '');
+  if (stripped.length === 0) return true;
+  const lines = text.split('\n');
+  return lines.every(line => {
+    const trimmed = line.trim();
+    return trimmed === '' || /^[\u276F\u273B]{1,2}\s*$/.test(trimmed);
+  });
+}
+
 /** Check if buffer has both an orchestrator response (●) and a completion marker (✻)
  *  where the marker appears AFTER the last ● line. Prevents matching echoed prompt markers
  *  that appear before (above) the orchestrator's actual response.
@@ -540,6 +555,19 @@ export class AutomationEngine {
       const scrollback = this.workerMonitor.emulator.getScrollbackText();
       debugLog(`[onWorkerIdle] SCROLLBACK TEXT (${scrollback.length} chars, last 2000):\n${scrollback.slice(-2000)}`);
       debugLog(`[onWorkerIdle] AFTER captureWorkerScreen (${this.workerScreenText.length} chars):\n${this.workerScreenText}`);
+    }
+
+    // ENG-01: Skip cycle when worker screen is trivial (empty after CLEAR).
+    // Return to idle and let stagnation timer retry after delay.
+    // Skip guard on first cycle (cycleNumber === 0) — the initial prompt legitimately
+    // sends with an empty worker screen (task description only, no prior output).
+    if (this.cycleNumber > 0 && isTrivialCapture(this.workerScreenText)) {
+      debugLog(`[onWorkerIdle] trivial capture (${this.workerScreenText.length} chars) — re-arming idle`);
+      if (this.workerMonitor) {
+        this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
+      }
+      this.setState('idle');  // re-arms stagnation timer automatically
+      return;
     }
 
     // NOW retroactively update previous cycle's outcome with the fresh screen content.
