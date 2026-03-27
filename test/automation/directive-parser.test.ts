@@ -910,16 +910,57 @@ describe('stripAnsi', () => {
     assert.strictEqual(result, 'In the backend-antibot project');
   });
 
-  it('converts CUF with count 3 to 3 spaces', () => {
+  it('converts CUF with count 3 to single space (capped, not inflated)', () => {
     const raw = 'hello\x1b[3Cworld';
     const result = stripAnsi(raw);
-    assert.strictEqual(result, 'hello   world');
+    assert.strictEqual(result, 'hello world');
+  });
+
+  it('caps CUF with large count (40) to single space instead of 40 spaces', () => {
+    const raw = 'start\x1b[40Cend';
+    const result = stripAnsi(raw);
+    assert.strictEqual(result, 'start end');
   });
 
   it('converts CUF with no digit (defaults to 1) to single space', () => {
     const raw = 'foo\x1b[Cbar';
     const result = stripAnsi(raw);
     assert.strictEqual(result, 'foo bar');
+  });
+
+  it('converts cursor-up (no count) to newline preserving line separation', () => {
+    const raw = 'line1\x1b[Aline2';
+    const result = stripAnsi(raw);
+    assert.ok(result.includes('line1\nline2'),
+      `Expected line1 and line2 separated by newline, got: ${JSON.stringify(result)}`);
+  });
+
+  it('converts cursor-up with count to newline preserving line separation', () => {
+    const raw = 'content\x1b[3Amore content';
+    const result = stripAnsi(raw);
+    assert.ok(result.includes('content\nmore content'),
+      `Expected content separated by newline, got: ${JSON.stringify(result)}`);
+  });
+
+  it('preserves directive after cursor-up sequences (TERM-01 regression)', () => {
+    // Ink TUI uses cursor-up before rendering directive line
+    const raw = 'some text\x1b[2A\u25CF CLEAR\n';
+    const result = stripAnsi(raw);
+    // Directive must be on its own line, not collapsed into previous line
+    const lines = result.split('\n').filter(l => l.trim().length > 0);
+    const clearLine = lines.find(l => l.includes('\u25CF CLEAR'));
+    assert.ok(clearLine, `Should find CLEAR directive on its own line, got: ${JSON.stringify(result)}`);
+  });
+
+  it('cursor-up is not silently removed by catch-all CSI regex', () => {
+    // Cursor-up \x1b[A has letter A which matches CSI catch-all
+    // It must be handled BEFORE the catch-all to convert to newline
+    const raw = 'before\x1b[Aafter';
+    const result = stripAnsi(raw);
+    // If caught by catch-all, result would be 'beforeafter' (no separator)
+    // Correct behavior: 'before\nafter' (newline separator)
+    assert.ok(result.includes('\n'),
+      `Cursor-up should produce newline, not be silently removed. Got: ${JSON.stringify(result)}`);
   });
 });
 
