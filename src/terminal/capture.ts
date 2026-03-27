@@ -533,6 +533,19 @@ export class ScreenCapture {
         return;
       }
 
+      // ENG-03: Positive check that the prompt input field (❯) is visible.
+      // Claude Code only renders the bare ❯ prompt when truly idle and awaiting input.
+      // During active work (subagents, tool calls, processing), the ❯ line is absent.
+      // This catches false notifications where * and · spinners fool the hasActiveSpinner guard.
+      // Only apply when requireMarker=true (normal completion path, not /clear path).
+      if (this.requireMarker) {
+        const hasIdlePrompt = lines.some(line => /^\s*\u276F\s*$/.test(line));
+        if (!hasIdlePrompt) {
+          this.crunched = false;
+          return;
+        }
+      }
+
       // Record the latest marker text that triggered this notification to prevent re-firing.
       // Use matchAll and take the last match — old markers may precede the new one in the buffer.
       const firedMatches = [...freshText.matchAll(/\u273B .+ for (?:\d+m )?\d+s/g)];

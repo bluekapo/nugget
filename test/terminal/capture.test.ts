@@ -467,8 +467,8 @@ describe('ScreenCapture', () => {
     let completionFired = false;
     capture.onPromptComplete = () => { completionFired = true; };
 
-    // Write data containing the "Crunched for" marker
-    await capture.onData('\u273B Crunched for 1m 22s\r\n');
+    // Write data containing the "Crunched for" marker AND bare ❯ prompt (Claude is idle)
+    await capture.onData('\u273B Crunched for 1m 22s\r\n\u276F \r\n');
     timer.advance(50); // debounce fires, capture runs, crunched=true, idle timer starts
 
     // Advance past idle delay
@@ -526,7 +526,7 @@ describe('ScreenCapture', () => {
     let completionFired = false;
     capture.onPromptComplete = () => { completionFired = true; };
 
-    await capture.onData('\u273B Crunched for 8s\r\n');
+    await capture.onData('\u273B Crunched for 8s\r\n\u276F \r\n');
     timer.advance(50); // debounce fires
     timer.advance(200); // idle fires
     assert.equal(completionFired, true, 'Should fire for short Crunched marker without minutes');
@@ -586,7 +586,7 @@ describe('ScreenCapture', () => {
     let completionFired = false;
     capture.onPromptComplete = () => { completionFired = true; };
 
-    await capture.onData('\u273B Brewed for 2m 15s\r\n');
+    await capture.onData('\u273B Brewed for 2m 15s\r\n\u276F \r\n');
     timer.advance(50); // debounce fires
     timer.advance(200); // idle fires
     assert.equal(completionFired, true, 'onPromptComplete should fire for "Brewed for"');
@@ -597,7 +597,7 @@ describe('ScreenCapture', () => {
     let completionFired = false;
     capture.onPromptComplete = () => { completionFired = true; };
 
-    await capture.onData('\u273B Crafted for 45s\r\n');
+    await capture.onData('\u273B Crafted for 45s\r\n\u276F \r\n');
     timer.advance(50); // debounce fires
     timer.advance(200); // idle fires
     assert.equal(completionFired, true, 'onPromptComplete should fire for "Crafted for"');
@@ -608,7 +608,7 @@ describe('ScreenCapture', () => {
     let completionFired = false;
     capture.onPromptComplete = () => { completionFired = true; };
 
-    await capture.onData('\u273B Forged for 3m 5s\r\n');
+    await capture.onData('\u273B Forged for 3m 5s\r\n\u276F \r\n');
     timer.advance(50); // debounce fires
     timer.advance(200); // idle fires
     assert.equal(completionFired, true, 'onPromptComplete should fire for "Forged for"');
@@ -619,8 +619,8 @@ describe('ScreenCapture', () => {
     let completionFired = false;
     capture.onPromptComplete = () => { completionFired = true; };
 
-    // Write data containing the "Crunched for" marker
-    await capture.onData('\u273B Crunched for 2m 30s\r\n');
+    // Write data containing the "Crunched for" marker AND bare ❯ prompt
+    await capture.onData('\u273B Crunched for 2m 30s\r\n\u276F \r\n');
     timer.advance(50); // debounce fires, capture runs, crunched=true, idle timer starts
     timer.advance(200); // idle fires -> onPromptComplete fires
     assert.equal(completionFired, true, 'onPromptComplete should fire first time');
@@ -631,7 +631,7 @@ describe('ScreenCapture', () => {
     // User sends new input
     capture.markInputSent();
 
-    // New output arrives but old marker is still in the screen buffer
+    // New output arrives but old marker is still in the screen buffer (no ❯ — processing)
     await capture.onData('new output but old marker still on screen\r\n');
     timer.advance(50); // debounce fires, capture runs — old marker still visible
     timer.advance(200); // idle fires
@@ -645,8 +645,8 @@ describe('ScreenCapture', () => {
     let completionFired = false;
     capture.onPromptComplete = () => { completionFired = true; };
 
-    // First completion
-    await capture.onData('\u273B Crunched for 2m 30s\r\n');
+    // First completion with bare ❯ prompt
+    await capture.onData('\u273B Crunched for 2m 30s\r\n\u276F \r\n');
     timer.advance(50); // debounce fires
     timer.advance(200); // idle fires
     assert.equal(completionFired, true, 'should fire for first marker');
@@ -655,8 +655,8 @@ describe('ScreenCapture', () => {
     completionFired = false;
     capture.markInputSent();
 
-    // New output with a DIFFERENT completion marker
-    await capture.onData('some output\r\n\u273B Brewed for 1m 15s\r\n');
+    // New output with a DIFFERENT completion marker and bare ❯ prompt
+    await capture.onData('some output\r\n\u273B Brewed for 1m 15s\r\n\u276F \r\n');
     timer.advance(50); // debounce fires
     timer.advance(200); // idle fires
 
@@ -683,8 +683,8 @@ describe('ScreenCapture', () => {
     let completionFired = false;
     capture.onPromptComplete = () => { completionFired = true; };
 
-    // Completion marker on one line, bare prompt indicator (\u273B) on the next
-    await capture.onData('\u273B Baked for 40s\r\n\u273B\r\n');
+    // Completion marker on one line, bare prompt indicator (\u273B) on the next, plus ❯ idle prompt
+    await capture.onData('\u273B Baked for 40s\r\n\u273B\r\n\u276F \r\n');
     timer.advance(50); // debounce fires, capture runs, crunched=true, idle timer starts
     timer.advance(200); // idle fires
     assert.equal(completionFired, true, 'onPromptComplete should fire for "Baked for 40s" with bare prompt indicator');
@@ -697,9 +697,8 @@ describe('ScreenCapture', () => {
 
     // Completion marker + prompt indicator with a short non-whitespace TUI artifact
     // (e.g., cursor remnant ">") that survives translateToString(true) trimming.
-    // This is the real bug: the existing regex ^\s*\u273B\s*$ won't match "\u273B >"
-    // because it has non-whitespace after the marker.
-    await capture.onData('\u273B Crafted for 12s\r\n\u273B >\r\n');
+    // Plus bare ❯ idle prompt for ENG-03 guard.
+    await capture.onData('\u273B Crafted for 12s\r\n\u273B >\r\n\u276F \r\n');
     timer.advance(50); // debounce fires
     timer.advance(200); // idle fires
     assert.equal(completionFired, true, 'onPromptComplete should fire for prompt indicator with short TUI artifact');
@@ -710,8 +709,8 @@ describe('ScreenCapture', () => {
     let completionFired = false;
     capture.onPromptComplete = () => { completionFired = true; };
 
-    // Single non-whitespace character after marker (cursor fragment)
-    await capture.onData('\u273B Baked for 40s\r\n\u273B.\r\n');
+    // Single non-whitespace character after marker (cursor fragment), plus bare ❯ idle prompt
+    await capture.onData('\u273B Baked for 40s\r\n\u273B.\r\n\u276F \r\n');
     timer.advance(50); // debounce fires
     timer.advance(200); // idle fires
     assert.equal(completionFired, true, 'onPromptComplete should fire for prompt indicator with single non-ws char');
@@ -751,8 +750,8 @@ describe('ScreenCapture', () => {
     let completionFired = false;
     capture.onPromptComplete = () => { completionFired = true; };
 
-    // Write data with completion marker
-    await capture.onData('\u273B Crunched for 1m 22s\r\n');
+    // Write data with completion marker and bare ❯ idle prompt
+    await capture.onData('\u273B Crunched for 1m 22s\r\n\u276F \r\n');
     timer.advance(50); // debounce fires, crunched=true, idle timer starts
 
     // Simulate periodic invisible PTY data (cursor repositioning)
