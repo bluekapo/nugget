@@ -71,4 +71,11 @@ export class HistoryStore {
     logDebug('[history-store] clearAll()');
     this.db.prepare('DELETE FROM automation_history').run();
   }
+
+  /** Remove a single history record by ID. Returns true if a record was deleted. */
+  deleteById(id: number): boolean {
+    logDebug(`[history-store] deleteById(${id})`);
+    const result = this.db.prepare('DELETE FROM automation_history WHERE id = ?').run(id);
+    return result.changes > 0;
+  }
 }

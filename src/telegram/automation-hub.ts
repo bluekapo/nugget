@@ -70,6 +70,7 @@ export class AutomationHubRenderer {
   private nextAutomationId = 1;
   private detailViewId: number | null = null;
   private historyView = false;
+  private historyDetailId: number | null = null;
 
   /** Optional callback invoked when automation state changes and a re-render is needed. */
   onRender: (() => void | Promise<void>) | null = null;
@@ -105,20 +106,23 @@ export class AutomationHubRenderer {
 
   /** Whether the history view is currently active. Used by HubRenderer for render delegation. */
   get isInHistoryView(): boolean {
-    return this.historyView;
+    return this.historyView || this.historyDetailId !== null;
   }
 
   /** Rendered history text (HTML). Only meaningful when isInHistoryView is true. */
   get historyText(): string {
+    if (this.historyDetailId !== null) {
+      return this.buildHistoryDetailText();
+    }
     return this.buildHistoryText();
   }
 
   /** Rendered history keyboard. Only meaningful when isInHistoryView is true. */
   get historyKeyboard(): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
-    const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
-    keyboard.push([{ text: '\uD83D\uDDD1 Clear History', callback_data: 'auto:clear-history' }]);
-    keyboard.push([{ text: '\u2190 Back', callback_data: 'auto:back' }]);
-    return { inline_keyboard: keyboard };
+    if (this.historyDetailId !== null) {
+      return this.buildHistoryDetailKeyboard();
+    }
+    return this.buildHistoryListKeyboard();
   }
 
   constructor(
@@ -273,8 +277,28 @@ export class AutomationHubRenderer {
       return 'Enter your task description';
     }
 
+    // History detail view: auto:history-detail:N
+    if (data.startsWith('auto:history-detail:')) {
+      const id = parseInt(data.slice('auto:history-detail:'.length), 10);
+      this.historyDetailId = id;
+      await this.onRender?.();
+      return 'Viewing history details';
+    }
+
+    // Per-entry history delete: auto:delete-history:N
+    if (data.startsWith('auto:delete-history:')) {
+      const id = parseInt(data.slice('auto:delete-history:'.length), 10);
+      this.historyStore?.deleteById(id);
+      if (this.historyDetailId === id) {
+        this.historyDetailId = null;
+      }
+      await this.onRender?.();
+      return 'Entry deleted';
+    }
+
     if (data === 'auto:history') {
       this.historyView = true;
+      this.historyDetailId = null;
       this.detailViewId = null;
       await this.onRender?.();
       return 'Viewing history';
@@ -282,6 +306,7 @@ export class AutomationHubRenderer {
 
     if (data === 'auto:clear-history') {
       this.historyStore?.clearAll();
+      this.historyDetailId = null;
       this.historyView = true;
       await this.onRender?.();
       return 'History cleared';
@@ -298,8 +323,14 @@ export class AutomationHubRenderer {
       return '';
     }
 
-    // Back to list view (or back from history)
+    // Back: most specific sub-state first (historyDetailId > historyView > detailViewId)
     if (data === 'auto:back') {
+      if (this.historyDetailId !== null) {
+        this.historyDetailId = null;
+        // Stay in history list view (historyView remains true)
+        await this.onRender?.();
+        return 'Back to history';
+      }
       if (this.historyView) {
         this.historyView = false;
         await this.onRender?.();
@@ -732,6 +763,63 @@ export class AutomationHubRenderer {
     return `${minutes}m ago`;
   }
 
+  /** Build per-entry history list keyboard with View + Delete buttons per row. */
+  private buildHistoryListKeyboard(): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
+    const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
+    const records = this.historyStore?.loadAll() ?? [];
+    for (const r of records) {
+      const outcomeEmoji = r.outcome === 'done' ? '\u2705' : r.outcome === 'error' ? '\u274C' : '\uD83D\uDED1';
+      const task = r.taskDescription.length > 20 ? r.taskDescription.slice(0, 20) + '...' : r.taskDescription;
+      keyboard.push([
+        { text: `${outcomeEmoji} ${task}`, callback_data: `auto:history-detail:${r.id}` },
+        { text: '\uD83D\uDDD1', callback_data: `auto:delete-history:${r.id}` },
+      ]);
+    }
+    if (records.length > 0) {
+      keyboard.push([{ text: '\uD83D\uDDD1 Clear All', callback_data: 'auto:clear-history' }]);
+    }
+    keyboard.push([{ text: '\u2190 Back', callback_data: 'auto:back' }]);
+    return { inline_keyboard: keyboard };
+  }
+
+  /** Build keyboard for history detail view: Delete Entry + Back. */
+  private buildHistoryDetailKeyboard(): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
+    const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
+    if (this.historyDetailId !== null) {
+      keyboard.push([{ text: '\uD83D\uDDD1 Delete Entry', callback_data: `auto:delete-history:${this.historyDetailId}` }]);
+    }
+    keyboard.push([{ text: '\u2190 Back', callback_data: 'auto:back' }]);
+    return { inline_keyboard: keyboard };
+  }
+
+  /** Build detail text for a single history record. */
+  private buildHistoryDetailText(): string {
+    const records = this.historyStore?.loadAll() ?? [];
+    const record = records.find(r => r.id === this.historyDetailId);
+    if (!record) {
+      this.historyDetailId = null;
+      return this.buildHistoryText();
+    }
+    const outcomeEmoji = record.outcome === 'done' ? '\u2705'
+      : record.outcome === 'error' ? '\u274C' : '\uD83D\uDED1';
+    const startDate = new Date(record.startTime);
+    const lines = [
+      '<b>Automation History — Details</b>',
+      '',
+      `${outcomeEmoji} <b>${record.outcome.toUpperCase()}</b>`,
+      '',
+      `<b>Task:</b> ${record.taskDescription}`,
+      '',
+      `<b>Orchestrator:</b> ${record.orchestratorSession}`,
+      `<b>Worker:</b> ${record.workerSession}`,
+      '',
+      `<b>Started:</b> ${startDate.toLocaleString()}`,
+      `<b>Duration:</b> ${formatDuration(record.durationMs)}`,
+      `<b>Cycles:</b> ${record.cycleCount}`,
+    ];
+    return lines.join('\n');
+  }
+
   /** Build history view text with all records or empty-state. */
   private buildHistoryText(): string {
     const records = this.historyStore?.loadAll() ?? [];
@@ -750,7 +838,12 @@ export class AutomationHubRenderer {
 
   /** Build HTML text based on current state. */
   private buildText(): string {
-    // History view
+    // History detail view (sub-state of history)
+    if (this.historyDetailId !== null) {
+      return this.buildHistoryDetailText();
+    }
+
+    // History list view
     if (this.historyView) {
       return this.buildHistoryText();
     }
@@ -851,8 +944,8 @@ export class AutomationHubRenderer {
   private buildKeyboard(): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
     const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
 
-    // History view: delegate to historyKeyboard getter
-    if (this.historyView) {
+    // History detail or list view: delegate to historyKeyboard getter
+    if (this.historyDetailId !== null || this.historyView) {
       return this.historyKeyboard;
     }
 
