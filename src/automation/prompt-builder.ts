@@ -97,6 +97,12 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('```');
   lines.push('');
 
+  // ENG-02: SELECT menu hint when menu detected on worker screen
+  if (ctx.selectMenuDetected) {
+    lines.push('HINT: The worker is showing a SELECT menu (interactive list). You MUST respond with `SELECT: <number>` to choose an option from the menu above. Do NOT send a COMMAND -- the worker is waiting for a menu selection, not text input.');
+    lines.push('');
+  }
+
   // Action log section (compressed format)
   renderActionLog(lines, ctx.actionLog, ctx.cycleNumber);
 

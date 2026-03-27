@@ -275,6 +275,7 @@ export class AutomationEngine {
   private readonly maxConsultationRetries = 3;
   private consecutiveTrivialStagnations = 0;
   private readonly maxTrivialStagnations = 3;
+  private selectMenuDetected = false;
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
   private readonly idleDelay: number;
@@ -548,7 +549,10 @@ export class AutomationEngine {
     // Must happen before updateLastOutcome so we use the fresh screen, not the stale
     // one from the previous cycle's capture (which was taken before that command was sent).
     if (this.workerMonitor) {
-      this.workerScreenText = this.captureWorkerScreen();
+      // ENG-02: Skip re-capture if SELECT menu path already set viewport text
+      if (!this.selectMenuDetected) {
+        this.workerScreenText = this.captureWorkerScreen();
+      }
 
       // Debug: dump buffer diagnostics
       const diag = this.workerMonitor.emulator.getBufferDiagnostics();
@@ -645,7 +649,10 @@ export class AutomationEngine {
       actionLog: this.actionLog.getCompressed(),
       cycleNumber: this.cycleNumber,
       persistentContext: this.persistentContext,
+      selectMenuDetected: this.selectMenuDetected,
     });
+    // ENG-02: Reset SELECT menu flag after use
+    this.selectMenuDetected = false;
 
     debugLog(`[onClearComplete] PROMPT BEING SENT (${prompt.length} chars):\n${prompt}`);
 
@@ -1332,8 +1339,12 @@ export class AutomationEngine {
     if (this.workerMonitor) {
       const screenText = this.captureWorkerScreen();
       if (hasSelectMenu(screenText)) {
+        // ENG-02: Capture viewport text specifically for SELECT menus.
+        // Scrollback doesn't contain the Ink TUI menu; viewport does.
+        const viewportText = stripSpinners(this.workerMonitor.emulator.getScreenText());
         debugLog('[onWorkerStagnation] SELECT menu detected — bypassing consultation, starting full directive cycle');
-        this.workerScreenText = screenText;
+        this.workerScreenText = viewportText;
+        this.selectMenuDetected = true;
         this.retryAttempted = false;
         this.needsFullPrompt = true;
         this.consultationMode = false;
