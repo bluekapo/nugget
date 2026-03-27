@@ -2635,4 +2635,122 @@ describe('AutomationHubRenderer', () => {
       });
     });
   });
+
+  describe('pendingCreation cleanup on termination (HUB-02)', () => {
+    /** Helper: create a hub with an active automation AND a second creation in progress. */
+    async function setupWithActiveAndPending() {
+      const api = createMockApi();
+      const bus = new EventBus();
+      const engines: ReturnType<typeof createMockEngine>[] = [];
+      const factory = () => {
+        const eng = createMockEngine('idle');
+        engines.push(eng);
+        return eng;
+      };
+      const { hub } = createHub(api, {
+        sessions: ['w1', 'o1', 'w2', 'o2'],
+        engineFactory: factory as any,
+        bus,
+      });
+
+      // Create first automation: w1 -> o1
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w1');
+      await hub.handleCallback('auto:o:o1');
+      await hub.completeCreation('first task');
+
+      // Start a second creation flow (mid-flight) -- this leaves pendingCreation non-null
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:w2');
+      // pendingCreation is now { step: 'select-orchestrator', workerSession: 'w2' }
+
+      return { api, bus, hub, engines };
+    }
+
+    it('pendingCreation is null after automation:done event (clears mid-flight creation)', async () => {
+      const { bus, hub, engines } = await setupWithActiveAndPending();
+      assert.ok(hub.pendingCreationInfo !== null, 'setup: should have pending creation mid-flight');
+
+      // Emit done event for the running automation
+      bus.emit('automation:done', engines[0].engineId, 'All done');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      assert.equal(hub.pendingCreationInfo, null, 'pendingCreation should be null after done');
+    });
+
+    it('pendingCreation is null after automation:error event (clears mid-flight creation)', async () => {
+      const { bus, hub, engines } = await setupWithActiveAndPending();
+      assert.ok(hub.pendingCreationInfo !== null, 'setup: should have pending creation mid-flight');
+
+      // Emit error event for the running automation
+      bus.emit('automation:error', engines[0].engineId, 'something broke');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      assert.equal(hub.pendingCreationInfo, null, 'pendingCreation should be null after error');
+    });
+
+    it('pendingCreation is null after auto:stop callback (clears mid-flight creation)', async () => {
+      const { hub } = await setupWithActiveAndPending();
+      assert.ok(hub.pendingCreationInfo !== null, 'setup: should have pending creation mid-flight');
+
+      // Navigate to detail view and stop
+      await hub.handleCallback('auto:details:1');
+      await hub.handleCallback('auto:stop');
+
+      assert.equal(hub.pendingCreationInfo, null, 'pendingCreation should be null after stop');
+    });
+
+    it('auto:new after done starts fresh at select-worker with no stale fields', async () => {
+      const { bus, hub, engines } = await setupWithActiveAndPending();
+
+      // Emit done event
+      bus.emit('automation:done', engines[0].engineId, 'All done');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Start new creation
+      await hub.handleCallback('auto:new');
+
+      const pending = hub.pendingCreationInfo;
+      assert.ok(pending, 'should have pending creation after auto:new');
+      assert.equal(pending!.step, 'select-worker', 'should start at select-worker');
+      assert.equal(pending!.workerSession, undefined, 'workerSession should be undefined (fresh)');
+      assert.equal(pending!.orchestratorSession, undefined, 'orchestratorSession should be undefined (fresh)');
+      assert.equal(pending!.taskDescription, undefined, 'taskDescription should be undefined (fresh)');
+    });
+
+    it('auto:new after error starts fresh at select-worker with no stale fields', async () => {
+      const { bus, hub, engines } = await setupWithActiveAndPending();
+
+      // Emit error event
+      bus.emit('automation:error', engines[0].engineId, 'fatal');
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Start new creation
+      await hub.handleCallback('auto:new');
+
+      const pending = hub.pendingCreationInfo;
+      assert.ok(pending, 'should have pending creation after auto:new');
+      assert.equal(pending!.step, 'select-worker', 'should start at select-worker');
+      assert.equal(pending!.workerSession, undefined, 'workerSession should be undefined (fresh)');
+      assert.equal(pending!.orchestratorSession, undefined, 'orchestratorSession should be undefined (fresh)');
+    });
+
+    it('auto:new after stop starts fresh at select-worker with no stale fields', async () => {
+      const { hub } = await setupWithActiveAndPending();
+
+      // Stop the automation
+      await hub.handleCallback('auto:details:1');
+      await hub.handleCallback('auto:stop');
+
+      // Start new creation
+      await hub.handleCallback('auto:new');
+
+      const pending = hub.pendingCreationInfo;
+      assert.ok(pending, 'should have pending creation after auto:new');
+      assert.equal(pending!.step, 'select-worker', 'should start at select-worker');
+      assert.equal(pending!.workerSession, undefined, 'workerSession should be undefined (fresh)');
+      assert.equal(pending!.orchestratorSession, undefined, 'orchestratorSession should be undefined (fresh)');
+    });
+  });
 });
