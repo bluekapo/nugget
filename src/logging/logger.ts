@@ -5,11 +5,26 @@
  * This prevents interleaving with PTY data that corrupts the terminal display.
  */
 
-import { appendFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { logDir } from '../config/paths.js';
 
 const LOG_PATH = join(logDir, 'nugget.log');
+
+/**
+ * Rotate the current nugget.log to a timestamped file.
+ * Called once on primary startup so each run starts with a fresh log.
+ * The rotated file will be cleaned up by cleanOldLogs() based on TTL.
+ */
+export function rotateLog(): void {
+  try {
+    if (!existsSync(LOG_PATH)) return;
+    // Use filesystem-safe timestamp: colons replaced with dashes
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('Z', '');
+    const dest = join(logDir, `nugget-${stamp}.log`);
+    renameSync(LOG_PATH, dest);
+  } catch { /* ignore — fresh log will be created on first write */ }
+}
 
 function ts(): string {
   return new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
