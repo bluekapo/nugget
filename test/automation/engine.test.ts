@@ -3008,6 +3008,111 @@ describe('AutomationEngine', () => {
         'legitimate response (● then ✻) should trigger onResponseReady');
     });
 
+    it('ENG-01: Ink TUI redraw replays code-fenced worker markers after Enter -- does not trigger false positive', async () => {
+      // Real scenario: After Enter is sent and state becomes waiting-response,
+      // an Ink TUI redraw replays the prompt text (containing worker ● and ✻ inside
+      // ``` code fences) into the PTY. This data enters responseBuffer. The current
+      // hasCompletionMarkerAfterResponse would see ● and ✻ and return true.
+      // Fix: skip ● lines inside code fences.
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // First cycle -> clearing-orchestrator
+      timer.advance(1);
+      assert.equal(engine.state, 'clearing-orchestrator');
+
+      // Orchestrator clears
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); // poll fires, finds "(no content)"
+      timer.advance(500);  // settling delay -> onClearComplete
+      timer.advance(50);   // delayed Enter -> waiting-response
+
+      assert.equal(engine.state, 'waiting-response', 'should be waiting for response');
+
+      // Ink TUI redraw replays the echoed prompt with worker markers in code fences
+      // The prompt template wraps worker output in ``` fences (see prompt-builder.ts)
+      await emitOutput(bus, 'orchestrator',
+        '## Current Worker Terminal Output\r\n```\r\n\u25CF worker did stuff\r\n\u273B Crunched for 1m 22s\r\n```\r\n'
+      );
+
+      // Poll fires — should NOT trigger because ● is inside code fences
+      timer.advance(1000);
+
+      assert.equal(engine.state, 'waiting-response',
+        'ENG-01: code-fenced worker markers (● inside ```) should not trigger false positive');
+    });
+
+    it('ENG-01: code-fenced echo followed by orchestrator ● then Ink replays unfenced ✻ -- no false positive', async () => {
+      // Ink TUI redraw may replay ✻ from echo OUTSIDE the code fence, after the
+      // orchestrator's ● line. This would be a false positive with current code.
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // First cycle -> clearing-orchestrator
+      timer.advance(1);
+      assert.equal(engine.state, 'clearing-orchestrator');
+
+      // Orchestrator clears
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000);
+      timer.advance(500);
+      timer.advance(50); // Enter sent -> waiting-response
+
+      assert.equal(engine.state, 'waiting-response');
+
+      // Code-fenced echo with ● and ✻ inside fences
+      await emitOutput(bus, 'orchestrator',
+        '## Current Worker Terminal Output\r\n```\r\n\u25CF worker output\r\n\u273B Crunched for 1m 22s\r\n```\r\n'
+      );
+
+      // Orchestrator writes its own non-directive ● line
+      await emitOutput(bus, 'orchestrator',
+        '\u25CF I need to think about this...\r\n'
+      );
+
+      // Ink TUI replays ✻ from somewhere (stale redraw) AFTER the ● line
+      await emitOutput(bus, 'orchestrator',
+        '\u273B Crunched for 1m 22s\r\n'
+      );
+
+      // responseBuffer: "```\n● worker...\n✻ Crunched...\n```\n● I need to think...\n✻ Crunched..."
+      // Last ● is unfenced, and ✻ appears after it => false positive with current code.
+      // Fix needs to distinguish this replayed ✻ from a genuine one.
+      timer.advance(1000);
+
+      assert.equal(engine.state, 'waiting-response',
+        'ENG-01: Ink-replayed ✻ after unfenced ● should not trigger false positive');
+    });
+
+    it('ENG-01: genuine post-Enter ● followed by ✻ still triggers onResponseReady', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // First cycle -> clearing-orchestrator
+      timer.advance(1);
+      assert.equal(engine.state, 'clearing-orchestrator');
+
+      // Orchestrator clears
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000);
+      timer.advance(500);
+      timer.advance(50); // Enter sent -> waiting-response
+
+      assert.equal(engine.state, 'waiting-response');
+
+      // Now emit genuine orchestrator response AFTER Enter
+      // This goes into responseOnlyBuffer
+      await emitOutput(bus, 'orchestrator',
+        '\u25CF I think we should run tests\r\n\u273B Brewed for 30s\r\n'
+      );
+
+      // Poll fires — should trigger onResponseReady because ● then ✻ in responseOnlyBuffer
+      timer.advance(1000);
+
+      assert.notEqual(engine.state, 'waiting-response',
+        'ENG-01: genuine post-Enter completion marker should trigger onResponseReady');
+    });
+
   });
 
   // ========== WAIT directive no-op ==========

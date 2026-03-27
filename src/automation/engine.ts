@@ -93,16 +93,40 @@ export function hasSelectMenu(screenText: string): boolean {
 
 /** Check if buffer has both an orchestrator response (●) and a completion marker (✻)
  *  where the marker appears AFTER the last ● line. Prevents matching echoed prompt markers
- *  that appear before (above) the orchestrator's actual response. */
+ *  that appear before (above) the orchestrator's actual response.
+ *
+ *  ENG-01 fix: Ignores ● lines inside markdown code fences (``` blocks) because the
+ *  prompt template wraps worker screen text in fences. Ink TUI redraws may replay
+ *  this fenced content into the response buffer, causing false positives. Additionally,
+ *  any ✻ line whose text was already seen inside a code fence is treated as a replay
+ *  and ignored -- Ink redraws can re-render the ✻ outside the fence after the
+ *  orchestrator's ● line. */
 function hasCompletionMarkerAfterResponse(text: string): boolean {
   const lines = text.split('\n');
   let lastBulletIdx = -1;
+  let inCodeBlock = false;
+  const fencedCompletionMarkers = new Set<string>();
+
   for (let i = 0; i < lines.length; i++) {
-    if (/^●/.test(lines[i])) lastBulletIdx = i;
+    if (/^```/.test(lines[i].trim())) inCodeBlock = !inCodeBlock;
+    if (inCodeBlock) {
+      // Collect ✻ lines seen inside code fences for deduplication
+      if (/^\u273B\s+.+ for/.test(lines[i])) {
+        fencedCompletionMarkers.add(lines[i].trim());
+      }
+    } else {
+      if (/^●/.test(lines[i])) lastBulletIdx = i;
+    }
   }
+
   if (lastBulletIdx === -1) return false;
+
   for (let i = lastBulletIdx + 1; i < lines.length; i++) {
-    if (/^\u273B\s+.+ for/.test(lines[i])) return true;
+    if (/^\u273B\s+.+ for/.test(lines[i])) {
+      // Skip if this ✻ text was already seen inside a code fence (likely Ink replay)
+      if (fencedCompletionMarkers.has(lines[i].trim())) continue;
+      return true;
+    }
   }
   return false;
 }
