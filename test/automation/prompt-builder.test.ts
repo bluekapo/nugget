@@ -226,6 +226,36 @@ describe('buildPrompt', () => {
     );
   });
 
+  it('includes SELECT menu HINT when selectMenuDetected is true', () => {
+    const selectPacket: ContextPacket = {
+      ...basePacket,
+      workerScreen: '\u276F Use existing CONTEXT.md\n  Start fresh discussion\n  Review first',
+      selectMenuDetected: true,
+    };
+    const prompt = buildPrompt(selectPacket);
+    const hints = prompt.split('\n').filter(l => l.startsWith('HINT:'));
+    const selectHint = hints.find(h => h.includes('SELECT menu'));
+    assert.ok(selectHint,
+      `Expected a HINT line containing "SELECT menu" when selectMenuDetected is true:\n${prompt}`);
+    assert.ok(selectHint!.includes('SELECT:'),
+      `SELECT HINT should reference the SELECT: directive format:\n${selectHint}`);
+  });
+
+  it('omits SELECT menu HINT when selectMenuDetected is false or undefined', () => {
+    // Test with undefined (default basePacket has no selectMenuDetected)
+    const prompt1 = buildPrompt(basePacket);
+    const hints1 = prompt1.split('\n').filter(l => l.startsWith('HINT:'));
+    assert.ok(!hints1.some(h => h.includes('SELECT menu')),
+      `Should NOT include SELECT menu HINT when selectMenuDetected is undefined:\n${prompt1}`);
+
+    // Test with explicit false
+    const falsePacket: ContextPacket = { ...basePacket, selectMenuDetected: false };
+    const prompt2 = buildPrompt(falsePacket);
+    const hints2 = prompt2.split('\n').filter(l => l.startsWith('HINT:'));
+    assert.ok(!hints2.some(h => h.includes('SELECT menu')),
+      `Should NOT include SELECT menu HINT when selectMenuDetected is false:\n${prompt2}`);
+  });
+
   it('directive reference includes CLEAR and RESET', () => {
     const prompt = buildPrompt(basePacket);
     const lines = prompt.split('\n');

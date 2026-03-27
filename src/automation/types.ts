@@ -91,6 +91,7 @@ export interface ContextPacket {
   actionLog: CompressedActionLog;
   cycleNumber: number;
   persistentContext?: string[];
+  selectMenuDetected?: boolean;
 }
 
 // --- Follow-Up Types ---

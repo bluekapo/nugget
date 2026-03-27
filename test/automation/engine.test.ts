@@ -1889,6 +1889,116 @@ describe('AutomationEngine', () => {
       'engine should return to idle after SELECT directive execution');
   });
 
+  // ---------- ENG-02: SELECT menu viewport capture ----------
+
+  it('ENG-02: SELECT menu stagnation captures viewport text not scrollback', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle to get engine back to idle
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000);
+
+    assert.equal(engine.state, 'idle', 'should be idle after first cycle');
+
+    // Emit worker output: scrollback has old text, viewport has SELECT menu
+    // The SELECT menu pattern is in the worker output (viewport)
+    const selectMenu = 'This phase has a CONTEXT.md from a previous discussion.\r\n\r\n\u276F Use existing CONTEXT.md (skip discussion)\r\n  Start fresh discussion\r\n  Review CONTEXT.md first\r\n';
+    await emitOutput(bus, 'worker', selectMenu);
+
+    // Let stagnation timer fire
+    timer.advance(200);
+
+    // Complete the directive cycle
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    // Check the prompt sent to orchestrator contains the viewport SELECT menu text
+    const promptWrite = writes
+      .filter(w => w.name === 'orchestrator' && w.data.includes('## Current Worker Terminal Output'))
+      .pop();
+    assert.ok(promptWrite, 'should have sent a prompt to orchestrator');
+
+    // The prompt must contain viewport text (the SELECT menu options)
+    assert.ok(promptWrite!.data.includes('Use existing CONTEXT.md'),
+      'orchestrator prompt should contain viewport SELECT menu text (Use existing CONTEXT.md)');
+    assert.ok(promptWrite!.data.includes('Start fresh discussion'),
+      'orchestrator prompt should contain viewport SELECT menu option (Start fresh discussion)');
+  });
+
+  it('ENG-02: SELECT menu path skips re-capture in onWorkerIdle', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle to get engine back to idle
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000);
+
+    assert.equal(engine.state, 'idle', 'should be idle after first cycle');
+
+    // Emit SELECT menu on worker
+    const selectMenu = 'Choose an option:\r\n\r\n\u276F Use existing CONTEXT.md\r\n  Start fresh discussion\r\n  Review first\r\n';
+    await emitOutput(bus, 'worker', selectMenu);
+
+    // Let stagnation fire
+    timer.advance(200);
+
+    // Complete directive cycle to get the prompt
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    // The prompt must contain viewport text with menu options, proving
+    // onWorkerIdle did NOT re-capture via captureWorkerScreen (which would prefer scrollback)
+    const promptWrite = writes
+      .filter(w => w.name === 'orchestrator' && w.data.includes('## Current Worker Terminal Output'))
+      .pop();
+    assert.ok(promptWrite, 'should have sent a prompt to orchestrator');
+    assert.ok(promptWrite!.data.includes('Use existing CONTEXT.md'),
+      'prompt should contain viewport menu text, proving onWorkerIdle did not overwrite with scrollback');
+  });
+
+  it('ENG-02: SELECT menu prompt includes SELECT HINT', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle to get engine back to idle
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000);
+
+    assert.equal(engine.state, 'idle', 'should be idle after first cycle');
+
+    // Emit SELECT menu
+    const selectMenu = 'Choose:\r\n\u276F Option A\r\n  Option B\r\n  Option C\r\n';
+    await emitOutput(bus, 'worker', selectMenu);
+
+    // Let stagnation fire
+    timer.advance(200);
+
+    // Complete directive cycle
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    // The prompt must contain the SELECT HINT line
+    const promptWrite = writes
+      .filter(w => w.name === 'orchestrator' && w.data.includes('## Current Worker Terminal Output'))
+      .pop();
+    assert.ok(promptWrite, 'should have sent a prompt to orchestrator');
+    assert.ok(promptWrite!.data.includes('HINT:') && promptWrite!.data.includes('SELECT menu'),
+      `orchestrator prompt should contain SELECT menu HINT:\n${promptWrite!.data.slice(0, 500)}`);
+  });
+
   // ---------- Test: spinner lines stripped from workerScreenText ----------
 
   it('spinner lines stripped from workerScreenText before prompt', async () => {
