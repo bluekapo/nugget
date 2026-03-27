@@ -273,6 +273,8 @@ export class AutomationEngine {
   private needsFullPrompt = true;
   private workerBusy = false;
   private readonly maxConsultationRetries = 3;
+  private consecutiveTrivialStagnations = 0;
+  private readonly maxTrivialStagnations = 3;
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
   private readonly idleDelay: number;
@@ -319,6 +321,9 @@ export class AutomationEngine {
     if (this._state !== 'stopped') return;
 
     debugLog(`[start] worker="${this.config.workerSession}" orchestrator="${this.config.orchestratorSession}"`);
+
+    // Reset ENG-03 counter on engine start
+    this.consecutiveTrivialStagnations = 0;
 
     // Create dedicated monitors for each session
     this.workerMonitor = this.createMonitor();
@@ -570,6 +575,9 @@ export class AutomationEngine {
       return;
     }
 
+    // Reset consecutive trivial stagnation counter on successful non-trivial capture
+    this.consecutiveTrivialStagnations = 0;
+
     // NOW retroactively update previous cycle's outcome with the fresh screen content.
     // Use scrollback + viewport for a fuller picture of the worker's response.
     if (this.workerMonitor) {
@@ -623,6 +631,11 @@ export class AutomationEngine {
     }
 
     this.setState('prompting-orchestrator');
+
+    // Defense-in-depth: ensure orchestrator never receives blank worker screen
+    if (isTrivialCapture(this.workerScreenText)) {
+      this.workerScreenText = '[Worker screen empty — context was recently cleared]';
+    }
 
     // Build prompt with context
     this.cycleNumber++;
@@ -683,6 +696,11 @@ export class AutomationEngine {
   /** Send a short follow-up prompt directly (no /clear), used for cycles 2+. */
   private sendFollowUpPrompt(): void {
     this.setState('prompting-orchestrator');
+
+    // Defense-in-depth: ensure orchestrator never receives blank worker screen
+    if (isTrivialCapture(this.workerScreenText)) {
+      this.workerScreenText = '[Worker screen empty — context was recently cleared]';
+    }
 
     this.cycleNumber++;
     const recentActions = this.actionLog.getRecent(1);
@@ -1323,6 +1341,20 @@ export class AutomationEngine {
         this.onWorkerIdle();
         return;
       }
+
+      // ENG-03: Skip consultation when worker screen is trivial.
+      // Re-arm stagnation timer instead of wasting an orchestrator call.
+      if (isTrivialCapture(screenText)) {
+        this.consecutiveTrivialStagnations++;
+        if (this.consecutiveTrivialStagnations < this.maxTrivialStagnations) {
+          debugLog(`[onWorkerStagnation] worker screen trivial (${this.consecutiveTrivialStagnations}/${this.maxTrivialStagnations}) — re-arming stagnation timer`);
+          this.startStagnationTimer();
+          return;
+        }
+        // Exceeded max trivial stagnations — fall through to consultation with annotation
+        debugLog(`[onWorkerStagnation] max trivial stagnations reached (${this.maxTrivialStagnations}) — proceeding to consultation with annotation`);
+        this.workerScreenText = '[Worker screen empty — context was recently cleared. The worker may need a new command.]';
+      }
     }
 
     // Enter consultation mode -- re-arm full prompt since consultation clears orchestrator context
@@ -1336,7 +1368,7 @@ export class AutomationEngine {
     this.idleDurationMs = this.timer.now() - this.idleEnteredAt;
 
     // Capture worker screen text for the consultation prompt (scrollback-preferred)
-    if (this.workerMonitor) {
+    if (this.workerMonitor && !isTrivialCapture(this.workerScreenText)) {
       this.workerScreenText = this.captureWorkerScreen();
 
       // Debug: dump buffer diagnostics for consultation capture

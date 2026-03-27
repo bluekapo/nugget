@@ -4023,15 +4023,15 @@ describe('ENG-03: trivial capture guard in onWorkerStagnation', () => {
     timer.advance(50);   // debounce
     timer.advance(100);  // idle -> onWorkerIdle (non-trivial, resets counter)
 
-    // Engine should proceed (not idle anymore)
+    // Engine should proceed (not idle anymore) - follow-up prompt path (needsFullPrompt=false)
     assert.notEqual(engine.state, 'idle',
       'engine should proceed after real worker output');
 
-    // Complete this cycle (orchestrator clear + prompt + directive)
-    await emitOutput(bus, 'orchestrator', clearOutput());
-    timer.advance(1000); timer.advance(500); timer.advance(50);
+    // Complete this cycle -- follow-up prompt path sends prompt directly (no /clear)
+    // Wait for Enter delay + response poll
+    timer.advance(50);  // baseDelay -> Enter sent -> waiting-response
     await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test2'));
-    timer.advance(1000);
+    timer.advance(1000); // response poll -> finds directive -> executes -> idle
 
     // Now stagnation fires again -- should be first trivial (counter was reset)
     timer.advance(200);
