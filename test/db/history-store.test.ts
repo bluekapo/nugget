@@ -96,4 +96,43 @@ describe('HistoryStore', () => {
     const outcomes = loaded.map(r => r.outcome).sort();
     assert.deepEqual(outcomes, ['done', 'error', 'stopped']);
   });
+
+  it('deleteById() removes a single entry by ID and returns true', () => {
+    store.insert(makeRecord({ workerSession: 'worker-1' }));
+    store.insert(makeRecord({ workerSession: 'worker-2', endTime: 1700000070000 }));
+
+    const records = store.loadAll();
+    assert.equal(records.length, 2);
+
+    const deleted = store.deleteById(records[0].id);
+    assert.equal(deleted, true, 'deleteById should return true for existing record');
+
+    const remaining = store.loadAll();
+    assert.equal(remaining.length, 1, 'should have 1 record remaining');
+    assert.equal(remaining[0].id, records[1].id, 'remaining record should be the one not deleted');
+  });
+
+  it('deleteById() returns false for non-existent ID', () => {
+    const deleted = store.deleteById(99999);
+    assert.equal(deleted, false, 'deleteById should return false for non-existent ID');
+  });
+
+  it('deleteById() does not affect other entries', () => {
+    store.insert(makeRecord({ workerSession: 'alpha', endTime: 1700000010000 }));
+    store.insert(makeRecord({ workerSession: 'beta', endTime: 1700000020000 }));
+    store.insert(makeRecord({ workerSession: 'gamma', endTime: 1700000030000 }));
+
+    const records = store.loadAll();
+    assert.equal(records.length, 3);
+
+    // Delete the middle one (beta is at index 1 when sorted by endTime DESC: gamma, beta, alpha)
+    const betaRecord = records.find(r => r.workerSession === 'beta');
+    assert.ok(betaRecord, 'beta record should exist');
+    store.deleteById(betaRecord.id);
+
+    const remaining = store.loadAll();
+    assert.equal(remaining.length, 2, 'should have 2 records remaining');
+    const remainingWorkers = remaining.map(r => r.workerSession).sort();
+    assert.deepEqual(remainingWorkers, ['alpha', 'gamma'], 'alpha and gamma should remain');
+  });
 });

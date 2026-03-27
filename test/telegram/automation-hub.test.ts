@@ -2346,12 +2346,15 @@ describe('AutomationHubRenderer', () => {
         outcome: 'done' | 'error' | 'stopped';
       }> = [];
       let clearCalled = false;
+      const deletedIds: number[] = [];
       return {
         insert(record: unknown) { inserted.push(record); },
         loadAll() { return loadAllResult; },
         clearAll() { clearCalled = true; loadAllResult = []; },
+        deleteById(id: number) { deletedIds.push(id); loadAllResult = loadAllResult.filter(r => r.id !== id); return true; },
         // Test helpers
         inserted,
+        deletedIds,
         get clearCalled() { return clearCalled; },
         set _loadAllResult(v: typeof loadAllResult) { loadAllResult = v; },
       };
@@ -2633,6 +2636,229 @@ describe('AutomationHubRenderer', () => {
         // Should not crash, just return acknowledgment
         assert.equal(result, 'History cleared');
       });
+    });
+  });
+
+  describe('History detail and per-entry delete (HIST-01, HIST-02)', () => {
+    function createMockHistoryStoreForDetail() {
+      let loadAllResult: Array<{
+        id: number;
+        orchestratorSession: string;
+        workerSession: string;
+        taskDescription: string;
+        startTime: number;
+        endTime: number;
+        durationMs: number;
+        cycleCount: number;
+        outcome: 'done' | 'error' | 'stopped';
+      }> = [];
+      let clearCalled = false;
+      const deletedIds: number[] = [];
+      return {
+        insert(record: unknown) {},
+        loadAll() { return loadAllResult; },
+        clearAll() { clearCalled = true; loadAllResult = []; },
+        deleteById(id: number) { deletedIds.push(id); loadAllResult = loadAllResult.filter(r => r.id !== id); return true; },
+        // Test helpers
+        deletedIds,
+        get clearCalled() { return clearCalled; },
+        set _loadAllResult(v: typeof loadAllResult) { loadAllResult = v; },
+      };
+    }
+
+    function createHubWithDetailHistory(
+      api: ReturnType<typeof createMockApi>,
+      opts?: {
+        sessions?: string[];
+        historyStore?: ReturnType<typeof createMockHistoryStoreForDetail>;
+        bus?: EventBus;
+      },
+    ) {
+      const sessions = opts?.sessions ?? [];
+      const bus = opts?.bus ?? new EventBus();
+      const mockEngine = createMockEngine();
+      const engineFactory = () => mockEngine;
+      const hub = new AutomationHubRenderer(
+        api as any,
+        123,
+        () => sessions,
+        engineFactory as any,
+        bus,
+        undefined, // automationStore
+        opts?.historyStore as any,
+      );
+      hub.onRender = async () => { await hub.render(); };
+      return { hub, bus, mockEngine };
+    }
+
+    const sampleRecords = [
+      {
+        id: 1,
+        orchestratorSession: 'orch-a',
+        workerSession: 'worker-a',
+        taskDescription: 'Run the full test suite',
+        startTime: 1700000000000,
+        endTime: 1700000060000,
+        durationMs: 60000,
+        cycleCount: 5,
+        outcome: 'done' as const,
+      },
+      {
+        id: 2,
+        orchestratorSession: 'orch-b',
+        workerSession: 'worker-b',
+        taskDescription: 'Deploy staging',
+        startTime: 1700000100000,
+        endTime: 1700000160000,
+        durationMs: 60000,
+        cycleCount: 3,
+        outcome: 'error' as const,
+      },
+    ];
+
+    it('auto:history-detail:N sets historyDetailId and triggers render with detail header', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStoreForDetail();
+      historyStore._loadAllResult = [...sampleRecords];
+      const { hub } = createHubWithDetailHistory(api, { historyStore });
+
+      await hub.render();
+      await hub.handleCallback('auto:history');
+      const result = await hub.handleCallback('auto:history-detail:1');
+
+      assert.equal(result, 'Viewing history details');
+      assert.equal(hub.isInHistoryView, true, 'should still be in history view');
+
+      const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+      const lastEdit = editCalls[editCalls.length - 1];
+      const text = lastEdit.args[2] as string;
+      assert.ok(text.includes('Details'), 'detail view should contain Details header');
+    });
+
+    it('history detail text shows all record fields', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStoreForDetail();
+      historyStore._loadAllResult = [...sampleRecords];
+      const { hub } = createHubWithDetailHistory(api, { historyStore });
+
+      await hub.render();
+      await hub.handleCallback('auto:history');
+      await hub.handleCallback('auto:history-detail:1');
+
+      const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+      const lastEdit = editCalls[editCalls.length - 1];
+      const text = lastEdit.args[2] as string;
+
+      assert.ok(text.includes('Run the full test suite'), 'should show full task description');
+      assert.ok(text.includes('orch-a'), 'should show orchestrator session');
+      assert.ok(text.includes('worker-a'), 'should show worker session');
+      assert.ok(text.includes('1m'), 'should show duration');
+      assert.ok(text.includes('5'), 'should show cycle count');
+      assert.ok(text.includes('DONE'), 'should show outcome');
+    });
+
+    it('auto:back from history detail returns to history list (not automation list)', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStoreForDetail();
+      historyStore._loadAllResult = [...sampleRecords];
+      const { hub } = createHubWithDetailHistory(api, { historyStore });
+
+      await hub.render();
+      await hub.handleCallback('auto:history');
+      await hub.handleCallback('auto:history-detail:1');
+
+      const backResult = await hub.handleCallback('auto:back');
+      assert.equal(backResult, 'Back to history');
+      assert.equal(hub.isInHistoryView, true, 'should still be in history view after back from detail');
+
+      const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+      const lastEdit = editCalls[editCalls.length - 1];
+      const text = lastEdit.args[2] as string;
+      assert.ok(text.includes('Automation Hub — History'), 'should show history list header after back');
+      assert.ok(!text.includes('Details'), 'should NOT show detail header after back');
+    });
+
+    it('auto:delete-history:N calls deleteById and triggers render', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStoreForDetail();
+      historyStore._loadAllResult = [...sampleRecords];
+      const { hub } = createHubWithDetailHistory(api, { historyStore });
+
+      await hub.render();
+      await hub.handleCallback('auto:history');
+      const result = await hub.handleCallback('auto:delete-history:1');
+
+      assert.equal(result, 'Entry deleted');
+      assert.ok(historyStore.deletedIds.includes(1), 'deleteById should have been called with id 1');
+    });
+
+    it('deleting entry while viewing its detail navigates back to list', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStoreForDetail();
+      historyStore._loadAllResult = [...sampleRecords];
+      const { hub } = createHubWithDetailHistory(api, { historyStore });
+
+      await hub.render();
+      await hub.handleCallback('auto:history');
+      await hub.handleCallback('auto:history-detail:1');
+
+      // Now delete the entry we're viewing
+      await hub.handleCallback('auto:delete-history:1');
+
+      // Should navigate back to history list (historyDetailId cleared)
+      assert.equal(hub.isInHistoryView, true, 'should still be in history view');
+      const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+      const lastEdit = editCalls[editCalls.length - 1];
+      const text = lastEdit.args[2] as string;
+      assert.ok(text.includes('Automation Hub — History'), 'should show history list after deleting viewed entry');
+      assert.ok(!text.includes('Details'), 'should NOT show detail view after deleting viewed entry');
+    });
+
+    it('history list keyboard shows per-entry View and Delete buttons', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStoreForDetail();
+      historyStore._loadAllResult = [...sampleRecords];
+      const { hub } = createHubWithDetailHistory(api, { historyStore });
+
+      await hub.render();
+      await hub.handleCallback('auto:history');
+
+      const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+      const lastEdit = editCalls[editCalls.length - 1];
+      const opts = lastEdit.args[3] as any;
+      const keyboard = opts.reply_markup.inline_keyboard as Array<Array<{ text: string; callback_data: string }>>;
+      const allButtons = keyboard.flat();
+
+      // Per-entry buttons
+      assert.ok(allButtons.some(b => b.callback_data === 'auto:history-detail:1'), 'should have detail button for record 1');
+      assert.ok(allButtons.some(b => b.callback_data === 'auto:history-detail:2'), 'should have detail button for record 2');
+      assert.ok(allButtons.some(b => b.callback_data === 'auto:delete-history:1'), 'should have delete button for record 1');
+      assert.ok(allButtons.some(b => b.callback_data === 'auto:delete-history:2'), 'should have delete button for record 2');
+
+      // Bottom rows: Clear All and Back
+      assert.ok(allButtons.some(b => b.callback_data === 'auto:clear-history'), 'should have Clear All button');
+      assert.ok(allButtons.some(b => b.callback_data === 'auto:back'), 'should have Back button');
+    });
+
+    it('history detail keyboard shows Delete Entry and Back buttons', async () => {
+      const api = createMockApi();
+      const historyStore = createMockHistoryStoreForDetail();
+      historyStore._loadAllResult = [...sampleRecords];
+      const { hub } = createHubWithDetailHistory(api, { historyStore });
+
+      await hub.render();
+      await hub.handleCallback('auto:history');
+      await hub.handleCallback('auto:history-detail:1');
+
+      const editCalls = api.calls.filter(c => c.method === 'editMessageText');
+      const lastEdit = editCalls[editCalls.length - 1];
+      const opts = lastEdit.args[3] as any;
+      const keyboard = opts.reply_markup.inline_keyboard as Array<Array<{ text: string; callback_data: string }>>;
+      const allButtons = keyboard.flat();
+
+      assert.ok(allButtons.some(b => b.callback_data === 'auto:delete-history:1'), 'should have Delete Entry button for record 1');
+      assert.ok(allButtons.some(b => b.callback_data === 'auto:back'), 'should have Back button');
+      assert.ok(!allButtons.some(b => b.callback_data === 'auto:clear-history'), 'should NOT have Clear All in detail view');
     });
   });
 
