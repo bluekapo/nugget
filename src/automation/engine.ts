@@ -440,6 +440,25 @@ export class AutomationEngine {
     return { emulator, capture };
   }
 
+  /**
+   * Capture worker screen text, preferring scrollback (clean) over viewport (garbled by Ink TUI).
+   * Scrollback content has been "committed" by the terminal — Ink's cursor-based rendering
+   * cannot overwrite it, so it's always clean text. The viewport may contain overlapping
+   * cursor-positioned elements from Ink's TUI rendering.
+   *
+   * Falls back to viewport (getScreenText) when scrollback is empty (e.g., short responses
+   * that haven't scrolled past the viewport yet).
+   */
+  private captureWorkerScreen(): string {
+    if (!this.workerMonitor) return '';
+    const scrollback = this.workerMonitor.emulator.getScrollbackText();
+    if (scrollback.length > 0) {
+      return stripSpinners(scrollback);
+    }
+    // No scrollback — response fits in viewport. Viewport text is the only option.
+    return stripSpinners(this.workerMonitor.emulator.getScreenText());
+  }
+
   private setState(newState: EngineState): void {
     const oldState = this._state;
     debugLog(`[setState] ${oldState} -> ${newState}`);
@@ -484,20 +503,18 @@ export class AutomationEngine {
     // Must happen before updateLastOutcome so we use the fresh screen, not the stale
     // one from the previous cycle's capture (which was taken before that command was sent).
     if (this.workerMonitor) {
-      const rawScreen = this.workerMonitor.emulator.getScreenText();
-      this.workerScreenText = stripSpinners(rawScreen);
+      this.workerScreenText = this.captureWorkerScreen();
 
       // Debug: dump buffer diagnostics
       const diag = this.workerMonitor.emulator.getBufferDiagnostics();
       debugLog(`[onWorkerIdle] BUFFER DIAG: bufLen=${diag.bufferLength} baseY=${diag.baseY} viewportY=${diag.viewportY} cursor=(${diag.cursorX},${diag.cursorY}) dims=${diag.cols}x${diag.rows} scrollback=${diag.scrollbackLines}`);
       debugLog(`[onWorkerIdle] SCROLLBACK TAIL (last ${diag.scrollbackTail.length} lines):\n${diag.scrollbackTail.join('\n')}`);
       debugLog(`[onWorkerIdle] VIEWPORT (${diag.viewportLines.length} lines):\n${diag.viewportLines.join('\n')}`);
+      const rawScreen = this.workerMonitor.emulator.getScreenText();
       debugLog(`[onWorkerIdle] RAW getScreenText (${rawScreen.length} chars):\n${rawScreen}`);
-      debugLog(`[onWorkerIdle] AFTER stripSpinners (${this.workerScreenText.length} chars):\n${this.workerScreenText}`);
-
-      // Log scrollback text — Ink doesn't touch scrollback, so it's clean
       const scrollback = this.workerMonitor.emulator.getScrollbackText();
       debugLog(`[onWorkerIdle] SCROLLBACK TEXT (${scrollback.length} chars, last 2000):\n${scrollback.slice(-2000)}`);
+      debugLog(`[onWorkerIdle] AFTER captureWorkerScreen (${this.workerScreenText.length} chars):\n${this.workerScreenText}`);
     }
 
     // NOW retroactively update previous cycle's outcome with the fresh screen content.
@@ -1212,8 +1229,7 @@ export class AutomationEngine {
     // If so, bypass consultation and trigger a full directive cycle instead.
     // The orchestrator needs the full prompt (with SELECT directive reference) to answer.
     if (this.workerMonitor) {
-      const rawScreen = this.workerMonitor.emulator.getScreenText();
-      const screenText = stripSpinners(rawScreen);
+      const screenText = this.captureWorkerScreen();
       if (hasSelectMenu(screenText)) {
         debugLog('[onWorkerStagnation] SELECT menu detected — bypassing consultation, starting full directive cycle');
         this.workerScreenText = screenText;
@@ -1236,22 +1252,20 @@ export class AutomationEngine {
     // Calculate idle duration for consultation context
     this.idleDurationMs = this.timer.now() - this.idleEnteredAt;
 
-    // Capture worker screen text for the consultation prompt (with spinner stripping)
+    // Capture worker screen text for the consultation prompt (scrollback-preferred)
     if (this.workerMonitor) {
-      const rawScreen = this.workerMonitor.emulator.getScreenText();
-      this.workerScreenText = stripSpinners(rawScreen);
+      this.workerScreenText = this.captureWorkerScreen();
 
       // Debug: dump buffer diagnostics for consultation capture
       const diag = this.workerMonitor.emulator.getBufferDiagnostics();
       debugLog(`[onWorkerStagnation] BUFFER DIAG: bufLen=${diag.bufferLength} baseY=${diag.baseY} viewportY=${diag.viewportY} cursor=(${diag.cursorX},${diag.cursorY}) dims=${diag.cols}x${diag.rows} scrollback=${diag.scrollbackLines}`);
       debugLog(`[onWorkerStagnation] SCROLLBACK TAIL (last ${diag.scrollbackTail.length} lines):\n${diag.scrollbackTail.join('\n')}`);
       debugLog(`[onWorkerStagnation] VIEWPORT (${diag.viewportLines.length} lines):\n${diag.viewportLines.join('\n')}`);
+      const rawScreen = this.workerMonitor.emulator.getScreenText();
       debugLog(`[onWorkerStagnation] RAW getScreenText (${rawScreen.length} chars):\n${rawScreen}`);
-      debugLog(`[onWorkerStagnation] AFTER stripSpinners (${this.workerScreenText.length} chars):\n${this.workerScreenText}`);
-
-      // Log scrollback text — clean content not affected by Ink's cursor rendering
       const scrollback = this.workerMonitor.emulator.getScrollbackText();
       debugLog(`[onWorkerStagnation] SCROLLBACK TEXT (${scrollback.length} chars, last 2000):\n${scrollback.slice(-2000)}`);
+      debugLog(`[onWorkerStagnation] AFTER captureWorkerScreen (${this.workerScreenText.length} chars):\n${this.workerScreenText}`);
 
       // Update action log with fresh screen content so consultation prompt is accurate
       const fullText = scrollback ? scrollback + '\n' + this.workerScreenText : this.workerScreenText;
@@ -1404,7 +1418,7 @@ export class AutomationEngine {
         // TUI even while the worker is actively working, so checking it would
         // always false-positive into a normal cycle, treating NO as YES.
         if (this.workerMonitor) {
-          const screen = this.workerMonitor.emulator.getScreenText();
+          const screen = this.captureWorkerScreen();
           const hasMarker = screen.split('\n').some(
             line => /\u273B .+ for (?:\d+m )?\d+s/.test(line)
           );
