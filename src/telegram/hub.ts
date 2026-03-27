@@ -537,6 +537,7 @@ function buildKeyboard(
       keyboard.push([{ text: '\uD83D\uDCDC History', callback_data: 'auto:history' }]);
     }
     if (!allAutos || allAutos.size === 0) {
+      keyboard.push([{ text: '\uD83E\uDD16 New Automation', callback_data: 'auto:new' }]);
       keyboard.push([{ text: '\uD83D\uDCDC History', callback_data: 'auto:history' }]);
     }
     keyboard.push([{ text: '\u2190 Back to Sessions', callback_data: 'hub:auto-back' }]);
@@ -583,7 +584,7 @@ function buildKeyboard(
   if (autoCount > 0) {
     keyboard.push([{ text: `\uD83E\uDD16 Automations (${autoCount})`, callback_data: 'hub:automations' }]);
   } else if (automationHub) {
-    keyboard.push([{ text: '\uD83E\uDD16 Automate', callback_data: 'auto:new' }]);
+    keyboard.push([{ text: '\uD83E\uDD16 Automate', callback_data: 'hub:automations' }]);
   }
 
   return { inline_keyboard: keyboard };
