@@ -337,6 +337,7 @@ export class AutomationHubRenderer {
         const auto = this.activeAutomations.get(id);
         if (auto) {
           this.writeHistory(auto, 'stopped');
+          this.pendingCreation = null;
           this.removeAutomation(id);
           // Return to list or clear detail view
           this.detailViewId = null;
@@ -427,6 +428,7 @@ export class AutomationHubRenderer {
             inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
           },
         }).catch(() => {});
+        this.pendingCreation = null;
         this.activeAutomations.delete(id);
         if (this.detailViewId === id) this.detailViewId = null;
         this.onRender?.();
@@ -442,6 +444,7 @@ export class AutomationHubRenderer {
             inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
           },
         }).catch(() => {});
+        this.pendingCreation = null;
         this.activeAutomations.delete(id);
         if (this.detailViewId === id) this.detailViewId = null;
         this.onRender?.();
@@ -635,6 +638,7 @@ export class AutomationHubRenderer {
               inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
             },
           }).catch(() => {});
+          this.pendingCreation = null;
           this.activeAutomations.delete(id);
           if (this.detailViewId === id) this.detailViewId = null;
           this.onRender?.();
@@ -650,6 +654,7 @@ export class AutomationHubRenderer {
               inline_keyboard: [[{ text: '\uD83D\uDDD1 Delete', callback_data: 'action:delete' }]],
             },
           }).catch(() => {});
+          this.pendingCreation = null;
           this.activeAutomations.delete(id);
           if (this.detailViewId === id) this.detailViewId = null;
           this.onRender?.();
