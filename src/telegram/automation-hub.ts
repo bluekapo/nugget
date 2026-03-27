@@ -247,14 +247,25 @@ export class AutomationHubRenderer {
     }
 
     if (data.startsWith('auto:o:')) {
+      if (!this.pendingCreation || this.pendingCreation.step !== 'select-orchestrator') {
+        this.pendingCreation = null;
+        await this.onRender?.();
+        return 'No selection in progress';
+      }
       const sessionName = data.slice('auto:o:'.length);
+      const sessions = this.getAllSessions();
+      if (!sessions.includes(sessionName)) {
+        this.pendingCreation = null;
+        await this.onRender?.();
+        return 'Session not found';
+      }
       if (this.isAutomatedSession(sessionName)) {
         this.pendingCreation = null;
         await this.onRender?.();
         return `Session "${sessionName}" is already in use by an active automation`;
       }
       this.pendingCreation = {
-        ...this.pendingCreation!,
+        ...this.pendingCreation,
         step: 'enter-task',
         orchestratorSession: sessionName,
       };
