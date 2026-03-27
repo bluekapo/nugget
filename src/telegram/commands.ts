@@ -239,7 +239,7 @@ export function registerCommands(
           await ctx.reply('No active session. Use /hub to see available sessions.');
           return;
         }
-        writeToSession(session, gsdCommand + (args ? ' ' + args : '') + '\n');
+        writeToSession(session, gsdCommand + (args ? ' ' + args : '') + ' ');
         try { await ctx.deleteMessage(); } catch { /* ignore */ }
       });
     }
