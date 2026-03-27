@@ -3142,6 +3142,62 @@ describe('AutomationEngine', () => {
       'engine should start cycle after worker completes post-resume');
   });
 
+  // ---------- Test: scrollback-preferred worker capture (TERM-03) ----------
+
+  it('prefers scrollback text over viewport when worker has scrollback content', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Generate enough worker output to cause scrollback (>40 lines for default 40-row viewport)
+    // Each unique line has a marker so we can verify scrollback content appears in the prompt
+    const lines: string[] = [];
+    for (let i = 1; i <= 60; i++) {
+      lines.push(`SCROLLBACK_LINE_${i}: test output data`);
+    }
+    const bulkOutput = lines.join('\r\n') + '\r\n\u273B Crunched for 1m 22s\r\n';
+
+    await emitOutput(bus, 'worker', bulkOutput);
+    timer.advance(50);  // debounce
+    timer.advance(100); // idle -> onPromptComplete -> onWorkerIdle
+
+    // Complete clear and get prompt
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    // The prompt should contain early scrollback lines (which scrolled off the viewport)
+    // Lines 1-20 would be in scrollback, not viewport (viewport shows only last ~40 lines)
+    const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('## Task'));
+    assert.ok(promptWrite, 'should send prompt to orchestrator');
+    // Early lines should be captured via scrollback-preferred path
+    assert.ok(promptWrite!.data.includes('SCROLLBACK_LINE_1'),
+      'prompt should contain early scrollback lines (line 1) — scrollback-preferred capture');
+    assert.ok(promptWrite!.data.includes('SCROLLBACK_LINE_10'),
+      'prompt should contain early scrollback lines (line 10) — scrollback-preferred capture');
+  });
+
+  it('falls back to viewport text when worker has no scrollback (short output)', async () => {
+    engine = new AutomationEngine(config, mockSessionManager, bus);
+    engine.start();
+
+    // Short output that fits in viewport — no scrollback generated
+    const shortOutput = 'SHORT_VIEWPORT_LINE_1: hello\r\nSHORT_VIEWPORT_LINE_2: world\r\n\u273B Crunched for 5s\r\n';
+    await emitOutput(bus, 'worker', shortOutput);
+    timer.advance(50);  // debounce
+    timer.advance(100); // idle -> onPromptComplete -> onWorkerIdle
+
+    // Complete clear and get prompt
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    // Should fall back to viewport and still capture the output
+    const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('## Task'));
+    assert.ok(promptWrite, 'should send prompt to orchestrator');
+    assert.ok(promptWrite!.data.includes('SHORT_VIEWPORT_LINE_1'),
+      'prompt should contain viewport text when no scrollback exists');
+    assert.ok(promptWrite!.data.includes('SHORT_VIEWPORT_LINE_2'),
+      'prompt should contain all viewport lines');
+  });
+
 });
 
 // ---------- SettingsStore numeric methods ----------
