@@ -237,6 +237,62 @@ describe('AutomationHubRenderer', () => {
       await hub.handleCallback('auto:o:o');
       assert.equal(hub.isAwaitingTaskInput(), true, 'true during enter-task');
     });
+
+    it('auto:o: with pendingCreation null returns rejection and keeps pendingCreation null', async () => {
+      const api = createMockApi();
+      const { hub } = createHub(api, { sessions: ['worker-1', 'orch-1'] });
+
+      await hub.render();
+      // pendingCreation is null (no auto:new called)
+      const result = await hub.handleCallback('auto:o:orch-1');
+
+      assert.ok(result.length > 0, 'should return a non-empty rejection string');
+      assert.equal(hub.pendingCreationInfo, null, 'pendingCreation should remain null');
+    });
+
+    it('auto:o: at wrong step (select-worker) returns rejection and resets pendingCreation', async () => {
+      const api = createMockApi();
+      const { hub } = createHub(api, { sessions: ['worker-1', 'orch-1'] });
+
+      await hub.render();
+      await hub.handleCallback('auto:new'); // step = select-worker
+      assert.equal(hub.pendingCreationInfo!.step, 'select-worker');
+
+      const result = await hub.handleCallback('auto:o:orch-1');
+
+      assert.ok(result.length > 0, 'should return a non-empty rejection string');
+      assert.equal(hub.pendingCreationInfo, null, 'pendingCreation should be reset to null');
+    });
+
+    it('auto:o: with nonexistent session returns "Session not found" and resets pendingCreation', async () => {
+      const api = createMockApi();
+      const { hub } = createHub(api, { sessions: ['worker-1', 'orch-1'] });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:worker-1'); // step = select-orchestrator
+
+      const result = await hub.handleCallback('auto:o:ghost-session');
+
+      assert.ok(result.includes('Session not found'), 'should return "Session not found"');
+      assert.equal(hub.pendingCreationInfo, null, 'pendingCreation should be reset to null');
+    });
+
+    it('auto:o: with correct step and existing session proceeds normally', async () => {
+      const api = createMockApi();
+      const { hub } = createHub(api, { sessions: ['worker-1', 'orch-1'] });
+
+      await hub.render();
+      await hub.handleCallback('auto:new');
+      await hub.handleCallback('auto:w:worker-1'); // step = select-orchestrator
+
+      const result = await hub.handleCallback('auto:o:orch-1');
+
+      assert.equal(result, 'Enter your task description');
+      assert.ok(hub.pendingCreationInfo !== null, 'pendingCreation should exist');
+      assert.equal(hub.pendingCreationInfo!.step, 'enter-task');
+      assert.equal(hub.pendingCreationInfo!.orchestratorSession, 'orch-1');
+    });
   });
 
   describe('active automation rendering', () => {
