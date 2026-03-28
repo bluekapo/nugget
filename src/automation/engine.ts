@@ -1491,8 +1491,8 @@ export class AutomationEngine {
     this.cancelResponsePolling();
     if (this._state === 'paused' || this._state === 'stopped') return;
 
-    // Parse directive from raw PTY buffer
-    const stripped = stripAnsi(this.responseBuffer);
+    // Parse directive from raw PTY buffer (stripSpinners matches other preprocessing sites)
+    const stripped = stripSpinners(stripAnsi(this.responseBuffer));
     const directive = parseDirective(stripped);
 
     if (directive && directive.type === 'YES') {
