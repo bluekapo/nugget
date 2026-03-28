@@ -23,7 +23,7 @@ const program = new Command();
 program
   .name('nugget')
   .description('Nugget — Run Claude Code sessions from Telegram')
-  .version(pkg.version);
+  .version(pkg.version, '-v, --version');
 
 program
   .command('start')
