@@ -271,6 +271,7 @@ export class AutomationEngine {
   private workerClearDeadlineTimer: unknown = null;
   private resetMode = false;
   private needsFullPrompt = true;
+  private postClearCycle = false;
   private workerBusy = false;
   private readonly maxConsultationRetries = 3;
   private consecutiveTrivialStagnations = 0;
@@ -435,6 +436,7 @@ export class AutomationEngine {
     this.workerClearBuffer = '';
     this.resetMode = false;
     this.needsFullPrompt = true;
+    this.postClearCycle = false;
 
     this.setState('stopped');
   }
@@ -570,7 +572,7 @@ export class AutomationEngine {
     // Return to idle and let stagnation timer retry after delay.
     // Skip guard on first cycle (cycleNumber === 0) — the initial prompt legitimately
     // sends with an empty worker screen (task description only, no prior output).
-    if (this.cycleNumber > 0 && isTrivialCapture(this.workerScreenText)) {
+    if (this.cycleNumber > 0 && !this.postClearCycle && isTrivialCapture(this.workerScreenText)) {
       debugLog(`[onWorkerIdle] trivial capture (${this.workerScreenText.length} chars) — re-arming idle`);
       if (this.workerMonitor) {
         this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
@@ -578,6 +580,7 @@ export class AutomationEngine {
       this.setState('idle');  // re-arms stagnation timer automatically
       return;
     }
+    this.postClearCycle = false;
 
     // Reset consecutive trivial stagnation counter on successful non-trivial capture
     this.consecutiveTrivialStagnations = 0;
@@ -1237,6 +1240,7 @@ export class AutomationEngine {
       }
 
       this.timer.setTimeout(() => {
+        this.postClearCycle = true;  // Signal onWorkerIdle to skip trivial guard
         this.setState('idle');
         this.cancelStagnationTimer();
         this.onWorkerIdle();
@@ -1276,6 +1280,7 @@ export class AutomationEngine {
           // /clear produces no completion marker, so onPromptComplete never fires.
           // We call onWorkerIdle() directly to continue the automation cycle.
           this.timer.setTimeout(() => {
+            this.postClearCycle = true;  // Signal onWorkerIdle to skip trivial guard
             this.setState('idle');
             this.cancelStagnationTimer();
             this.onWorkerIdle();
