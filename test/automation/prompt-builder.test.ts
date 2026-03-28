@@ -713,6 +713,60 @@ describe('buildFollowUpPrompt', () => {
     );
   });
 
+  it('includes SELECT HINT when selectMenuDetected is true', () => {
+    const packet: FollowUpPacket = {
+      ...baseFollowUp,
+      selectMenuDetected: true,
+    };
+    const prompt = buildFollowUpPrompt(packet);
+    const hints = prompt.split('\n').filter(l => l.startsWith('HINT:'));
+    const selectHint = hints.find(h => h.includes('SELECT menu'));
+    assert.ok(selectHint,
+      `Expected a HINT line containing "SELECT menu" when selectMenuDetected is true:\n${prompt}`);
+    assert.ok(selectHint!.includes('SELECT:'),
+      `SELECT HINT should reference the SELECT: directive format:\n${selectHint}`);
+  });
+
+  it('omits SELECT HINT when selectMenuDetected is false or undefined', () => {
+    // Test with undefined (default baseFollowUp has no selectMenuDetected)
+    const prompt1 = buildFollowUpPrompt(baseFollowUp);
+    assert.ok(!prompt1.includes('SELECT menu'),
+      `Should NOT include SELECT menu HINT when selectMenuDetected is undefined:\n${prompt1}`);
+
+    // Test with explicit false
+    const falsePacket: FollowUpPacket = { ...baseFollowUp, selectMenuDetected: false };
+    const prompt2 = buildFollowUpPrompt(falsePacket);
+    assert.ok(!prompt2.includes('SELECT menu'),
+      `Should NOT include SELECT menu HINT when selectMenuDetected is false:\n${prompt2}`);
+  });
+
+  it('SELECT HINT text matches mama prompt HINT', () => {
+    // Build mama prompt with selectMenuDetected
+    const mamaPacket: ContextPacket = {
+      taskDescription: 'Test task',
+      workerScreen: 'screen',
+      actionLog: { summary: null, recent: [], totalCount: 0 },
+      cycleNumber: 1,
+      selectMenuDetected: true,
+    };
+    const mamaPrompt = buildPrompt(mamaPacket);
+    const mamaHints = mamaPrompt.split('\n').filter(l => l.startsWith('HINT:') && l.includes('SELECT menu'));
+    assert.equal(mamaHints.length, 1, 'mama prompt should have exactly 1 SELECT HINT');
+
+    // Build follow-up prompt with selectMenuDetected
+    const followUpPacket: FollowUpPacket = {
+      ...baseFollowUp,
+      selectMenuDetected: true,
+    };
+    const followUpPrompt = buildFollowUpPrompt(followUpPacket);
+    const followUpHints = followUpPrompt.split('\n').filter(l => l.startsWith('HINT:') && l.includes('SELECT menu'));
+    assert.equal(followUpHints.length, 1, 'follow-up prompt should have exactly 1 SELECT HINT');
+
+    // They must be identical
+    assert.equal(followUpHints[0], mamaHints[0],
+      `SELECT HINT text must be identical between mama and follow-up prompts.\nMama: ${mamaHints[0]}\nFollowUp: ${followUpHints[0]}`);
+  });
+
   it('mama prompt (buildPrompt) still contains all PRM-02 sections', () => {
     const mamaPacket: ContextPacket = {
       taskDescription: 'Run the tests',

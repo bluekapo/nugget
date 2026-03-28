@@ -100,6 +100,7 @@ export interface FollowUpPacket {
   workerScreen: string;
   lastAction: ActionEntry | null;
   cycleNumber: number;
+  selectMenuDetected?: boolean;
 }
 
 // --- Consultation Types ---
