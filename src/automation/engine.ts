@@ -490,21 +490,22 @@ export class AutomationEngine {
   }
 
   /**
-   * Capture worker screen text, preferring scrollback (clean) over viewport (garbled by Ink TUI).
-   * Scrollback content has been "committed" by the terminal — Ink's cursor-based rendering
-   * cannot overwrite it, so it's always clean text. The viewport may contain overlapping
-   * cursor-positioned elements from Ink's TUI rendering.
+   * Capture worker screen text using full buffer (scrollback + viewport).
+   * The full buffer ensures completion markers and idle prompts in the viewport
+   * are visible to the orchestrator even when scrollback exists (baseY > 0).
+   * Scrollback content is clean (committed by the terminal), and the viewport
+   * portion captures the current state including any markers at the end.
    *
-   * Falls back to viewport (getScreenText) when scrollback is empty (e.g., short responses
-   * that haven't scrolled past the viewport yet).
+   * Falls back to viewport (getScreenText) when the full buffer is completely empty
+   * (e.g., freshly cleared terminal with no content at all).
    */
   private captureWorkerScreen(): string {
     if (!this.workerMonitor) return '';
-    const scrollback = this.workerMonitor.emulator.getScrollbackText();
-    if (scrollback.length > 0) {
-      return stripSpinners(scrollback);
+    const fullBuffer = this.workerMonitor.emulator.getFullBufferText();
+    if (fullBuffer.length > 0) {
+      return stripSpinners(fullBuffer);
     }
-    // No scrollback — response fits in viewport. Viewport text is the only option.
+    // Fallback: viewport-only when buffer is completely empty
     return stripSpinners(this.workerMonitor.emulator.getScreenText());
   }
 
@@ -587,14 +588,8 @@ export class AutomationEngine {
     this.consecutiveTrivialStagnations = 0;
 
     // NOW retroactively update previous cycle's outcome with the fresh screen content.
-    // Use scrollback + viewport for a fuller picture of the worker's response.
-    if (this.workerMonitor) {
-      const scrollback = this.workerMonitor.emulator.getScrollbackText();
-      const fullText = scrollback ? scrollback + '\n' + this.workerScreenText : this.workerScreenText;
-      this.actionLog.updateLastOutcome(fullText.slice(-1000));
-    } else {
-      this.actionLog.updateLastOutcome(this.workerScreenText.slice(-1000));
-    }
+    // workerScreenText now contains full buffer (scrollback + viewport), no manual concatenation needed.
+    this.actionLog.updateLastOutcome(this.workerScreenText.slice(-1000));
 
     // Follow-up prompt path: skip /clear and send short prompt directly
     if (!this.needsFullPrompt) {
@@ -1389,7 +1384,7 @@ export class AutomationEngine {
     // Calculate idle duration for consultation context
     this.idleDurationMs = this.timer.now() - this.idleEnteredAt;
 
-    // Capture worker screen text for the consultation prompt (scrollback-preferred)
+    // Capture worker screen text for the consultation prompt (full buffer: scrollback + viewport)
     if (this.workerMonitor && !isTrivialCapture(this.workerScreenText)) {
       this.workerScreenText = this.captureWorkerScreen();
 
@@ -1403,13 +1398,11 @@ export class AutomationEngine {
       const scrollback = this.workerMonitor.emulator.getScrollbackText();
       debugLog(`[onWorkerStagnation] SCROLLBACK TEXT (${scrollback.length} chars, last 2000):\n${scrollback.slice(-2000)}`);
       debugLog(`[onWorkerStagnation] AFTER captureWorkerScreen (${this.workerScreenText.length} chars):\n${this.workerScreenText}`);
-
-      // Update action log with fresh screen content so consultation prompt is accurate
-      const fullText = scrollback ? scrollback + '\n' + this.workerScreenText : this.workerScreenText;
-      this.actionLog.updateLastOutcome(fullText.slice(-1000));
-    } else {
-      this.actionLog.updateLastOutcome(this.workerScreenText.slice(-1000));
     }
+
+    // Update action log with fresh screen content so consultation prompt is accurate.
+    // workerScreenText now contains full buffer (scrollback + viewport), no manual concatenation needed.
+    this.actionLog.updateLastOutcome(this.workerScreenText.slice(-1000));
 
     // Reset clearing buffer before sending /clear
     this.clearingBuffer = '';
