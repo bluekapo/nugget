@@ -163,7 +163,8 @@ export const RETRY_PROMPT = 'Your previous response could not be parsed as a val
   + '\n'
   + 'Example:\n'
   + 'CONTEXT: The project uses React 18\n'
-  + 'COMMAND: Fix the hook dependency array in useEffect';
+  + 'COMMAND: Fix the hook dependency array in useEffect'
+  + '\n\nYOUR ENTIRE RESPONSE MUST BE EXACTLY ONE DIRECTIVE LINE. NOTHING ELSE.';
 
 const CONSULTATION_RETRY_PROMPT = 'Your previous response could not be parsed. '
   + 'Do NOT use tools, read files, or investigate the project. '

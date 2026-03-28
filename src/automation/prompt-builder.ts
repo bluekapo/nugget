@@ -55,6 +55,8 @@ export function buildPrompt(ctx: ContextPacket): string {
   lines.push('5. When the human explicitly instructs a specific directive (e.g., "clear the worker", "stop"), you MUST issue that directive immediately. Do not substitute your own judgment for an explicit human instruction.');
   lines.push('6. NEVER use DONE while the worker is actively processing. If the terminal shows running agents, spinners (\'Frolicking...\', \'Crunching...\', etc.), progress indicators, or \'esc to interrupt\' — the worker has NOT finished. Wait for the next cycle. DONE terminates the automation permanently.');
   lines.push('');
+  lines.push('YOUR ENTIRE RESPONSE MUST BE EXACTLY ONE DIRECTIVE LINE. NO COMMENTARY, NO EXPLANATION, NO PREAMBLE.');
+  lines.push('');
 
   // Task section — wrap in ``` to prevent orchestrator from interpreting it as instructions
   lines.push('## Task');
