@@ -40,12 +40,12 @@ describe('buildPrompt', () => {
     assert.ok(afterScreen !== -1, 'Expected ``` after screen text');
   });
 
-  it('output contains action log entries with "Sent:" and "Result:" labels wrapped in backticks', () => {
+  it('output contains action log entries with "Sent:" and "Result:" labels wrapped in triple backtick code blocks', () => {
     const prompt = buildPrompt(basePacket);
-    assert.ok(prompt.includes('Sent: `COMMAND: npm test`'), `Expected backtick-wrapped "Sent:" label in prompt`);
-    assert.ok(prompt.includes('Result: `Tests executed successfully`'), `Expected backtick-wrapped "Result:" label in prompt`);
-    assert.ok(prompt.includes('Sent: `COMMAND: npm run lint`'), `Expected second backtick-wrapped "Sent:" label in prompt`);
-    assert.ok(prompt.includes('Result: `No lint errors found`'), `Expected second backtick-wrapped "Result:" label in prompt`);
+    assert.ok(prompt.includes('1. Sent:\n```\nCOMMAND: npm test\n```'), 'Expected triple-backtick wrapped action');
+    assert.ok(prompt.includes('Result:\n```\nTests executed successfully\n```'), 'Expected triple-backtick wrapped result');
+    assert.ok(prompt.includes('2. Sent:\n```\nCOMMAND: npm run lint\n```'), 'Expected second triple-backtick wrapped action');
+    assert.ok(prompt.includes('Result:\n```\nNo lint errors found\n```'), 'Expected second triple-backtick wrapped result');
   });
 
   it('with empty action log shows "(no actions taken yet" message', () => {
@@ -362,10 +362,10 @@ describe('buildConsultationPrompt', () => {
     );
   });
 
-  it('output contains action log entries wrapped in backticks', () => {
+  it('output contains action log entries wrapped in triple backtick code blocks', () => {
     const prompt = buildConsultationPrompt(basePacket);
-    assert.ok(prompt.includes('Sent: `COMMAND: npm test`'), 'Expected backtick-wrapped action log entry');
-    assert.ok(prompt.includes('Result: `Tests executed successfully`'), 'Expected backtick-wrapped action log outcome');
+    assert.ok(prompt.includes('1. Sent:\n```\nCOMMAND: npm test\n```'), 'Expected triple-backtick wrapped action log entry');
+    assert.ok(prompt.includes('Result:\n```\nTests executed successfully\n```'), 'Expected triple-backtick wrapped action log outcome');
   });
 
   it('output instructs to respond with YES or NO only', () => {
@@ -480,7 +480,7 @@ describe('compressed action log rendering', () => {
     // Should NOT contain a blockquote summary
     assert.ok(!prompt.includes('> Summary'), 'Should not contain summary blockquote when summary is null');
     // Should contain the entry
-    assert.ok(prompt.includes('Sent: `COMMAND: npm test`'), 'Should contain action entry');
+    assert.ok(prompt.includes('1. Sent:\n```\nCOMMAND: npm test\n```'), 'Should contain triple-backtick wrapped action entry');
   });
 
   it('buildPrompt with summary string renders summary paragraph BEFORE recent entries', () => {
@@ -503,7 +503,7 @@ describe('compressed action log rendering', () => {
       `Expected summary as blockquote in prompt:\n${prompt}`);
     // Summary should come before recent entries
     const summaryIdx = prompt.indexOf('> Summary of actions');
-    const entryIdx = prompt.indexOf('Sent: `COMMAND: npm test`');
+    const entryIdx = prompt.indexOf('41. Sent:\n```\nCOMMAND: npm test\n```');
     assert.ok(summaryIdx < entryIdx, 'Summary should appear before recent entries');
   });
 
@@ -544,10 +544,10 @@ describe('compressed action log rendering', () => {
     };
     const prompt = buildPrompt(packet);
     // Entry numbering should start from totalCount - recent.length + 1 = 41
-    assert.ok(prompt.includes('41. Sent: `COMMAND: action-41`'),
-      `Expected entry numbered 41 in prompt:\n${prompt}`);
-    assert.ok(prompt.includes('42. Sent: `COMMAND: action-42`'),
-      `Expected entry numbered 42 in prompt:\n${prompt}`);
+    assert.ok(prompt.includes('41. Sent:\n```\nCOMMAND: action-41\n```'),
+      `Expected entry numbered 41 with triple backtick in prompt:\n${prompt}`);
+    assert.ok(prompt.includes('42. Sent:\n```\nCOMMAND: action-42\n```'),
+      `Expected entry numbered 42 with triple backtick in prompt:\n${prompt}`);
   });
 
   it('buildConsultationPrompt renders compressed format identically', () => {
@@ -598,19 +598,19 @@ describe('buildFollowUpPrompt', () => {
     assert.ok(afterScreen !== -1, 'Expected ``` after screen text');
   });
 
-  it('contains last action with action and outcome', () => {
+  it('contains last action with action and outcome in triple backtick code blocks', () => {
     const prompt = buildFollowUpPrompt(baseFollowUp);
     assert.ok(
       prompt.includes('## Last Action'),
       `Expected "## Last Action" header in follow-up prompt:\n${prompt}`
     );
     assert.ok(
-      prompt.includes('COMMAND: npm test'),
-      `Expected last action text in follow-up prompt:\n${prompt}`
+      prompt.includes('Sent:\n```\nCOMMAND: npm test\n```'),
+      `Expected triple-backtick wrapped last action text in follow-up prompt:\n${prompt}`
     );
     assert.ok(
-      prompt.includes('Tests passed'),
-      `Expected last action outcome in follow-up prompt:\n${prompt}`
+      prompt.includes('Result:\n```\nTests passed\n```'),
+      `Expected triple-backtick wrapped last action outcome in follow-up prompt:\n${prompt}`
     );
   });
 
