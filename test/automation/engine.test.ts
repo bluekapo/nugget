@@ -2343,6 +2343,44 @@ describe('AutomationEngine', () => {
       assert.notEqual(engine.state, 'consulting-orchestrator',
         'no stagnation should fire after worker CLEAR continuation');
     });
+
+    it('worker CLEAR timeout path also bypasses trivial guard', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      const consultationEvents: string[] = [];
+      bus.on('automation:state-change', (_engineId: string, state: string) => {
+        if (state === 'clearing-orchestrator' || state === 'consulting-orchestrator') {
+          consultationEvents.push(state);
+        }
+      });
+
+      engine.start();
+
+      // Cycle 1: advance to waiting-response
+      timer.advance(1); // deferred start -> clearing-orchestrator
+      consultationEvents.length = 0; // ignore the initial clearing-orchestrator
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(1000); timer.advance(500); timer.advance(50);
+
+      // Orchestrator responds with CLEAR directive
+      await emitOutput(bus, 'orchestrator', directiveOutput('CLEAR'));
+      timer.advance(1000); // response poll fires, finds CLEAR -> clearing-worker
+
+      assert.equal(engine.state, 'clearing-worker', 'should be in clearing-worker state');
+
+      // Do NOT send worker "(no content)" — let the CLEAR_TIMEOUT_MS (30s) elapse
+      timer.advance(30000); // CLEAR timeout fires
+      timer.advance(500);   // 500ms settling delay fires, sets idle + calls onWorkerIdle
+
+      // After settling delay, onWorkerIdle should have advanced past idle
+      assert.notEqual(engine.state, 'idle',
+        'engine should advance past idle after worker CLEAR timeout settling delay');
+      assert.notEqual(engine.state, 'clearing-worker',
+        'engine should not still be clearing worker after timeout');
+
+      // No consultation events should have occurred
+      assert.equal(consultationEvents.length, 0,
+        'no consultation-related state transitions should occur after worker CLEAR timeout');
+    });
   });
 
   // ========== RESET directive flow ==========
