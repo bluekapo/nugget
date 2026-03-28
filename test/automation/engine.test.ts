@@ -3407,9 +3407,9 @@ describe('AutomationEngine', () => {
       'engine should start cycle after worker completes post-resume');
   });
 
-  // ---------- Test: scrollback-preferred worker capture (TERM-03) ----------
+  // ---------- Test: full-buffer worker capture (CAPT-01) ----------
 
-  it('prefers scrollback text over viewport when worker has scrollback content', async () => {
+  it('captures full buffer including both scrollback and viewport content', async () => {
     engine = new AutomationEngine(config, mockSessionManager, bus);
     engine.start();
 
@@ -3419,6 +3419,8 @@ describe('AutomationEngine', () => {
     for (let i = 1; i <= 60; i++) {
       lines.push(`SCROLLBACK_LINE_${i}: test output data`);
     }
+    // Add a distinctive viewport marker after line 55 — guaranteed to be in viewport (last ~40 lines)
+    lines.splice(54, 0, 'VIEWPORT_MARKER_VISIBLE: this line is only in viewport rows');
     const bulkOutput = lines.join('\r\n') + '\r\n\u273B Crunched for 1m 22s\r\n';
 
     await emitOutput(bus, 'worker', bulkOutput);
@@ -3429,15 +3431,60 @@ describe('AutomationEngine', () => {
     await emitOutput(bus, 'orchestrator', clearOutput());
     timer.advance(1000); timer.advance(500); timer.advance(50);
 
-    // The prompt should contain early scrollback lines (which scrolled off the viewport)
-    // Lines 1-20 would be in scrollback, not viewport (viewport shows only last ~40 lines)
+    // The prompt should contain BOTH early scrollback lines AND viewport content
     const promptWrite = writes.find(w => w.name === 'orchestrator' && w.data.includes('## Task'));
     assert.ok(promptWrite, 'should send prompt to orchestrator');
-    // Early lines should be captured via scrollback-preferred path
+    // Early lines should be captured (scrollback region)
     assert.ok(promptWrite!.data.includes('SCROLLBACK_LINE_1'),
-      'prompt should contain early scrollback lines (line 1) — scrollback-preferred capture');
+      'prompt should contain early scrollback lines (line 1) — full buffer capture');
     assert.ok(promptWrite!.data.includes('SCROLLBACK_LINE_10'),
-      'prompt should contain early scrollback lines (line 10) — scrollback-preferred capture');
+      'prompt should contain early scrollback lines (line 10) — full buffer capture');
+    // Viewport-only content must also be present (CAPT-01: proves full buffer, not scrollback-only)
+    assert.ok(promptWrite!.data.includes('VIEWPORT_MARKER_VISIBLE'),
+      'prompt should contain viewport marker — full buffer includes viewport rows');
+  });
+
+  it('action log uses workerScreenText directly without scrollback duplication', async () => {
+    // Use stagnation path to trigger action log update with scrollback-producing output.
+    // The stagnation handler captures workerScreenText and updates action log at lines 1407-1409.
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle to get engine back to idle
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000); // response poll fires, finds COMMAND directive
+
+    assert.equal(engine.state, 'idle', 'should be idle after first cycle');
+
+    // Now emit scrollback-producing worker output (>40 lines)
+    const lines: string[] = [];
+    for (let i = 1; i <= 60; i++) {
+      lines.push(`DUPE_CHECK_LINE_${i}: test data`);
+    }
+    const bulkOutput = lines.join('\r\n') + '\r\n\u273B Crunched for 1m 22s\r\n';
+    await emitOutput(bus, 'worker', bulkOutput);
+    timer.advance(50);  // debounce
+    timer.advance(100); // idle -> onPromptComplete -> onWorkerIdle -> cycle 2 starts
+
+    // onWorkerIdle fires for cycle 2 — action log gets updateLastOutcome at line 591
+    // Check the action log outcome for duplication
+    const { actionLog } = engine.getSerializableState();
+    const lastEntry = actionLog[actionLog.length - 1];
+    assert.ok(lastEntry, 'action log should have at least one entry');
+    assert.ok(typeof lastEntry.outcome === 'string', 'outcome should be a string');
+
+    // Count occurrences of a scrollback line — should appear at most once.
+    // Use LINE_10 which is firmly in scrollback region (baseY ~20 for 60 lines in 40-row viewport).
+    // The old code concatenated scrollback + workerScreenText (which was also scrollback-only),
+    // causing lines to appear twice. After .slice(-1000) the duplication is still visible for LINE_10.
+    const occurrences = (lastEntry.outcome.match(/DUPE_CHECK_LINE_10:/g) || []).length;
+    assert.ok(occurrences <= 1,
+      `scrollback line should not be duplicated in action log (found ${occurrences} times)`);
   });
 
   it('falls back to viewport text when worker has no scrollback (short output)', async () => {
