@@ -1529,6 +1529,31 @@ describe('AutomationEngine', () => {
     assert.equal(cycleEvents.length, 2, 'should have completed initial cycle + post-YES cycle');
   });
 
+  it('consultation response applies stripSpinners to remove spinner lines before YES/NO parsing', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200, consultationWaitDelay: 300 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    await driveToConsultationWaiting(engine, bus, timer);
+    assert.equal(engine.state, 'waiting-consultation', 'should be waiting for consultation response');
+
+    // Inject spinner lines mixed with YES into the orchestrator output.
+    // Spinner lines use Unicode symbols that stripSpinners removes.
+    await emitOutput(bus, 'orchestrator', '\u2736 Scurrying...\r\n\u25CF YES\r\n\u273D Analyzing...\r\n\u273B Crunched for 5s\r\n');
+    timer.advance(1000); // response poll fires
+
+    // With stripSpinners fix: YES is parsed correctly, engine proceeds
+    // Without fix: spinner lines corrupt the parse, YES may not be found
+    assert.notEqual(engine.state, 'waiting-consultation',
+      'engine should have processed YES and left waiting-consultation');
+    assert.notEqual(engine.state, 'consultation-wait',
+      'engine should not be in consultation-wait (that means NO was parsed)');
+
+    // After YES: consultationMode is reset, engine triggers normal cycle
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'YES response with spinners should trigger normal directive cycle');
+  });
+
   it('consultation NO: orchestrator says NO -> engine waits then re-checks', async () => {
     const stagnationConfig = { ...config, stagnationDelay: 200, consultationWaitDelay: 300 };
     engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
