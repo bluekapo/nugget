@@ -1800,7 +1800,7 @@ describe('AutomationEngine', () => {
     engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
     engine.start();
 
-    // Complete first cycle to get engine back to idle
+    // Complete first cycle to get engine back to idle (needsFullPrompt=false)
     timer.advance(1); // deferred start -> clearing-orchestrator
     await emitOutput(bus, 'orchestrator', clearOutput());
     timer.advance(1000); timer.advance(500); timer.advance(50);
@@ -1816,25 +1816,21 @@ describe('AutomationEngine', () => {
     // Let stagnation timer fire (200ms from last worker output)
     timer.advance(200);
 
-    // Engine should have detected SELECT menu and entered full directive cycle
-    // (capturing-worker), NOT consultation (clearing-orchestrator via consultationMode)
+    // Engine should have detected SELECT menu and entered directive cycle,
+    // NOT consultation. FLOW-01: mid-automation SELECT uses follow-up path
+    // (prompting-orchestrator), NOT mama path (clearing-orchestrator).
     assert.notEqual(engine.state, 'consulting-orchestrator',
       'should NOT enter consulting-orchestrator when SELECT menu detected');
-    // The engine should be in the directive cycle flow (clearing-orchestrator but NOT in consultation mode)
-    // Since onWorkerIdle transitions through capturing-worker -> clearing-orchestrator,
-    // we check the state and verify it's a directive prompt (not consultation)
-    assert.equal(engine.state, 'clearing-orchestrator',
-      'SELECT menu detection should trigger full directive cycle (clearing-orchestrator)');
+    assert.equal(engine.state, 'prompting-orchestrator',
+      'SELECT menu detection mid-automation should trigger follow-up directive prompt');
 
-    // Complete the directive cycle and verify it sends a directive prompt (not consultation)
-    await emitOutput(bus, 'orchestrator', clearOutput());
-    timer.advance(1000); timer.advance(500); timer.advance(50);
-
-    const lastPromptWrite = writes
-      .filter(w => w.name === 'orchestrator' && (w.data.includes('## Question') || w.data.includes('## Your Response')))
+    // Verify it sends a directive prompt (not consultation)
+    const promptWrite = writes
+      .filter(w => w.name === 'orchestrator' && w.data.includes('## Worker Terminal Output'))
       .pop();
-    assert.ok(lastPromptWrite?.data.includes('## Your Response'),
-      'SELECT menu detection should send directive prompt (## Your Response), not consultation (## Question)');
+    assert.ok(promptWrite, 'should have sent a follow-up prompt to orchestrator');
+    assert.ok(!promptWrite!.data.includes('## Question'),
+      'SELECT menu detection should send directive prompt, not consultation');
   });
 
   it('normal stagnation without SELECT menu still enters consultation', async () => {
@@ -1923,7 +1919,7 @@ describe('AutomationEngine', () => {
     engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
     engine.start();
 
-    // Complete first cycle to get engine back to idle
+    // Complete first cycle to get engine back to idle (needsFullPrompt=false)
     timer.advance(1); // deferred start -> clearing-orchestrator
     await emitOutput(bus, 'orchestrator', clearOutput());
     timer.advance(1000); timer.advance(500); timer.advance(50);
@@ -1937,18 +1933,15 @@ describe('AutomationEngine', () => {
     const selectMenu = 'This phase has a CONTEXT.md from a previous discussion.\r\n\r\n\u276F Use existing CONTEXT.md (skip discussion)\r\n  Start fresh discussion\r\n  Review CONTEXT.md first\r\n';
     await emitOutput(bus, 'worker', selectMenu);
 
-    // Let stagnation timer fire
+    // Let stagnation timer fire -> SELECT detected -> follow-up path (FLOW-01)
     timer.advance(200);
 
-    // Complete the directive cycle
-    await emitOutput(bus, 'orchestrator', clearOutput());
-    timer.advance(1000); timer.advance(500); timer.advance(50);
-
+    // FLOW-01: mid-automation SELECT uses follow-up prompt (no /clear)
     // Check the prompt sent to orchestrator contains the viewport SELECT menu text
     const promptWrite = writes
-      .filter(w => w.name === 'orchestrator' && w.data.includes('## Current Worker Terminal Output'))
+      .filter(w => w.name === 'orchestrator' && w.data.includes('## Worker Terminal Output'))
       .pop();
-    assert.ok(promptWrite, 'should have sent a prompt to orchestrator');
+    assert.ok(promptWrite, 'should have sent a follow-up prompt to orchestrator');
 
     // The prompt must contain viewport text (the SELECT menu options)
     assert.ok(promptWrite!.data.includes('Use existing CONTEXT.md'),
@@ -1962,7 +1955,7 @@ describe('AutomationEngine', () => {
     engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
     engine.start();
 
-    // Complete first cycle to get engine back to idle
+    // Complete first cycle to get engine back to idle (needsFullPrompt=false)
     timer.advance(1); // deferred start -> clearing-orchestrator
     await emitOutput(bus, 'orchestrator', clearOutput());
     timer.advance(1000); timer.advance(500); timer.advance(50);
@@ -1975,19 +1968,16 @@ describe('AutomationEngine', () => {
     const selectMenu = 'Choose an option:\r\n\r\n\u276F Use existing CONTEXT.md\r\n  Start fresh discussion\r\n  Review first\r\n';
     await emitOutput(bus, 'worker', selectMenu);
 
-    // Let stagnation fire
+    // Let stagnation fire -> SELECT detected -> follow-up path (FLOW-01)
     timer.advance(200);
 
-    // Complete directive cycle to get the prompt
-    await emitOutput(bus, 'orchestrator', clearOutput());
-    timer.advance(1000); timer.advance(500); timer.advance(50);
-
+    // FLOW-01: mid-automation SELECT uses follow-up prompt (no /clear)
     // The prompt must contain viewport text with menu options, proving
     // onWorkerIdle did NOT re-capture via captureWorkerScreen (which would prefer scrollback)
     const promptWrite = writes
-      .filter(w => w.name === 'orchestrator' && w.data.includes('## Current Worker Terminal Output'))
+      .filter(w => w.name === 'orchestrator' && w.data.includes('## Worker Terminal Output'))
       .pop();
-    assert.ok(promptWrite, 'should have sent a prompt to orchestrator');
+    assert.ok(promptWrite, 'should have sent a follow-up prompt to orchestrator');
     assert.ok(promptWrite!.data.includes('Use existing CONTEXT.md'),
       'prompt should contain viewport menu text, proving onWorkerIdle did not overwrite with scrollback');
   });
@@ -1997,7 +1987,7 @@ describe('AutomationEngine', () => {
     engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
     engine.start();
 
-    // Complete first cycle to get engine back to idle
+    // Complete first cycle to get engine back to idle (needsFullPrompt=false)
     timer.advance(1); // deferred start -> clearing-orchestrator
     await emitOutput(bus, 'orchestrator', clearOutput());
     timer.advance(1000); timer.advance(500); timer.advance(50);
@@ -2010,18 +2000,15 @@ describe('AutomationEngine', () => {
     const selectMenu = 'Choose:\r\n\u276F Option A\r\n  Option B\r\n  Option C\r\n';
     await emitOutput(bus, 'worker', selectMenu);
 
-    // Let stagnation fire
+    // Let stagnation fire -> SELECT detected -> follow-up path (FLOW-01)
     timer.advance(200);
 
-    // Complete directive cycle
-    await emitOutput(bus, 'orchestrator', clearOutput());
-    timer.advance(1000); timer.advance(500); timer.advance(50);
-
+    // FLOW-01: mid-automation SELECT uses follow-up prompt (no /clear)
     // The prompt must contain the SELECT HINT line
     const promptWrite = writes
-      .filter(w => w.name === 'orchestrator' && w.data.includes('## Current Worker Terminal Output'))
+      .filter(w => w.name === 'orchestrator' && w.data.includes('## Worker Terminal Output'))
       .pop();
-    assert.ok(promptWrite, 'should have sent a prompt to orchestrator');
+    assert.ok(promptWrite, 'should have sent a follow-up prompt to orchestrator');
     assert.ok(promptWrite!.data.includes('HINT:') && promptWrite!.data.includes('SELECT menu'),
       `orchestrator prompt should contain SELECT menu HINT:\n${promptWrite!.data.slice(0, 500)}`);
   });
@@ -4325,5 +4312,140 @@ describe('Defense-in-depth: trivial capture annotation in prompts', () => {
     );
     assert.ok(promptWrite,
       'consultation prompt should contain [Worker screen empty] annotation');
+  });
+
+  // ---------- FLOW-01: SELECT menu follow-up prompt routing ----------
+
+  it('FLOW-01a: SELECT mid-automation sends follow-up prompt when orchestrator has context', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle to get needsFullPrompt=false
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000);
+
+    assert.equal(engine.state, 'idle', 'should be idle after first cycle');
+
+    // Emit SELECT menu on worker
+    const selectMenu = 'Choose an option:\r\n\r\n\u276F Use existing CONTEXT.md\r\n  Start fresh discussion\r\n  Review first\r\n';
+    await emitOutput(bus, 'worker', selectMenu);
+
+    // Let stagnation fire
+    timer.advance(200);
+
+    // Key assertion: engine should NOT enter clearing-orchestrator (mama path).
+    // It should go through follow-up path (capturing-worker -> prompting-orchestrator).
+    assert.notEqual(engine.state, 'clearing-orchestrator',
+      'SELECT mid-automation should NOT clear orchestrator (should use follow-up path)');
+
+    // The prompt written to orchestrator should be follow-up format (has "## Worker Terminal Output")
+    // but NOT mama format (should NOT have "## Your Role")
+    const promptWrite = writes
+      .filter(w => w.name === 'orchestrator' && w.data.includes('## Worker Terminal Output'))
+      .pop();
+    assert.ok(promptWrite, 'should have sent a follow-up prompt to orchestrator');
+    assert.ok(!promptWrite!.data.includes('## Your Role'),
+      'follow-up prompt should NOT contain "## Your Role" (mama format)');
+    assert.ok(promptWrite!.data.includes('HINT:') && promptWrite!.data.includes('SELECT menu'),
+      'follow-up prompt should contain SELECT HINT');
+  });
+
+  it('FLOW-01c: SELECT on first cycle still sends mama prompt', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Do NOT complete any cycle -- needsFullPrompt is still true
+    // Wait for deferred start and let it proceed through first cycle clearing
+    timer.advance(1); // deferred start -> clearing-orchestrator
+
+    // Instead of completing the first cycle, emit SELECT menu on worker
+    // and wait for stagnation. But engine is in clearing-orchestrator state,
+    // not idle, so stagnation won't fire from here.
+    // Reset: start fresh -- the first cycle path means needsFullPrompt=true
+    engine.stop();
+
+    // New engine: emit SELECT before first cycle completes
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    writes.length = 0;
+    engine.start();
+
+    // Emit SELECT menu on worker during idle phase (before deferred timer fires)
+    const selectMenu = 'Choose:\r\n\u276F Option A\r\n  Option B\r\n';
+    await emitOutput(bus, 'worker', selectMenu);
+
+    // Fire deferred start timer (first cycle always has needsFullPrompt=true)
+    timer.advance(1);
+
+    // First cycle should always use mama prompt path (clearing-orchestrator)
+    assert.equal(engine.state, 'clearing-orchestrator',
+      'first cycle should use clearing-orchestrator (mama path) even with SELECT menu');
+
+    // Complete the clear and get the prompt
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+
+    // The prompt should contain "## Your Role" (mama format)
+    const promptWrite = writes
+      .filter(w => w.name === 'orchestrator' && w.data.includes('## Your Role'))
+      .pop();
+    assert.ok(promptWrite, 'first cycle should send mama prompt with "## Your Role"');
+  });
+
+  it('FLOW-01e: selectMenuDetected resets after follow-up path use', async () => {
+    const stagnationConfig = { ...config, stagnationDelay: 200 };
+    engine = new AutomationEngine(stagnationConfig, mockSessionManager, bus);
+    engine.start();
+
+    // Complete first cycle to get needsFullPrompt=false
+    timer.advance(1); // deferred start -> clearing-orchestrator
+    await emitOutput(bus, 'orchestrator', clearOutput());
+    timer.advance(1000); timer.advance(500); timer.advance(50);
+    await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: echo test'));
+    timer.advance(1000);
+
+    assert.equal(engine.state, 'idle', 'should be idle after first cycle');
+
+    // Second idle: Emit SELECT menu on worker, let stagnation fire
+    const selectMenu = 'Choose:\r\n\u276F Option A\r\n  Option B\r\n  Option C\r\n';
+    await emitOutput(bus, 'worker', selectMenu);
+    timer.advance(200); // stagnation fires -> SELECT detected -> follow-up path
+
+    // Verify follow-up prompt was sent with SELECT HINT
+    const selectPrompt = writes
+      .filter(w => w.name === 'orchestrator' && w.data.includes('## Worker Terminal Output'))
+      .pop();
+    assert.ok(selectPrompt, 'should have sent follow-up prompt with SELECT menu');
+    assert.ok(selectPrompt!.data.includes('SELECT menu'),
+      'follow-up prompt should contain SELECT HINT');
+
+    // Complete the SELECT directive cycle
+    timer.advance(50); // baseDelay for Enter in sendFollowUpPrompt
+    await emitOutput(bus, 'orchestrator', directiveOutput('SELECT: 1'));
+    timer.advance(1000); // response poll fires -> onResponseReady -> sendSelect(1) -> idle
+
+    assert.equal(engine.state, 'idle', 'should be idle after SELECT directive');
+
+    // Emit normal worker output with a DIFFERENT completion marker (no SELECT menu).
+    // Must use different marker text than cycle 1 to avoid lastFiredMarker dedup.
+    // The completion marker triggers onPromptComplete -> onWorkerIdle,
+    // which takes follow-up path (needsFullPrompt=false).
+    await emitOutput(bus, 'worker', 'Selected option A\r\n\u273B Brewed for 2m 10s\r\n\u276F \r\n');
+    timer.advance(50);  // debounce fires
+    timer.advance(100); // idle fires -> onWorkerIdle -> sendFollowUpPrompt
+
+    // The last follow-up prompt should NOT contain SELECT HINT
+    // (selectMenuDetected was reset after the previous follow-up used it)
+    const allFollowUps = writes
+      .filter(w => w.name === 'orchestrator' && w.data.includes('## Worker Terminal Output'));
+    assert.ok(allFollowUps.length >= 2,
+      `Expected at least 2 follow-up prompts (SELECT + normal), got ${allFollowUps.length}`);
+    const lastFollowUp = allFollowUps[allFollowUps.length - 1];
+    assert.ok(!lastFollowUp.data.includes('SELECT menu'),
+      'follow-up prompt after reset should NOT contain SELECT HINT');
   });
 });

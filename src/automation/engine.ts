@@ -719,7 +719,10 @@ export class AutomationEngine {
       workerScreen: this.workerScreenText,
       lastAction: recentActions.length > 0 ? recentActions[0] : null,
       cycleNumber: this.cycleNumber,
+      selectMenuDetected: this.selectMenuDetected,
     });
+    // FLOW-01: Reset SELECT menu flag after use (mirrors onClearComplete line 659)
+    this.selectMenuDetected = false;
 
     debugLog(`[sendFollowUpPrompt] FOLLOW-UP PROMPT (${prompt.length} chars):\n${prompt}`);
 
@@ -1348,11 +1351,13 @@ export class AutomationEngine {
         // ENG-02: Capture viewport text specifically for SELECT menus.
         // Scrollback doesn't contain the Ink TUI menu; viewport does.
         const viewportText = stripSpinners(this.workerMonitor.emulator.getScreenText());
-        debugLog('[onWorkerStagnation] SELECT menu detected — bypassing consultation, starting full directive cycle');
+        debugLog('[onWorkerStagnation] SELECT menu detected — bypassing consultation, starting directive cycle');
         this.workerScreenText = viewportText;
         this.selectMenuDetected = true;
         this.retryAttempted = false;
-        this.needsFullPrompt = true;
+        // FLOW-01: needsFullPrompt retains current value instead of being forced to true.
+        //   true on first cycle/post-RESET -> mama prompt path (full context)
+        //   false on subsequent cycles -> follow-up prompt path (preserves orchestrator context)
         this.consultationMode = false;
         // Stay in 'idle' state so onWorkerIdle() passes its state guard
         this.onWorkerIdle();
