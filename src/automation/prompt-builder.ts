@@ -25,8 +25,14 @@ function renderActionLog(lines: string[], actionLog: CompressedActionLog, cycleN
     const startNum = summary !== null ? totalCount - recent.length + 1 : 1;
     for (let i = 0; i < recent.length; i++) {
       const entry = recent[i];
-      lines.push(`${startNum + i}. Sent: \`${entry.action}\``);
-      lines.push(`   Result: \`${entry.outcome}\``);
+      lines.push(`${startNum + i}. Sent:`);
+      lines.push('```');
+      lines.push(entry.action);
+      lines.push('```');
+      lines.push(`   Result:`);
+      lines.push('```');
+      lines.push(entry.outcome);
+      lines.push('```');
     }
   }
   lines.push('');
@@ -153,8 +159,14 @@ export function buildFollowUpPrompt(ctx: FollowUpPacket): string {
   // Last action
   lines.push('## Last Action');
   if (ctx.lastAction !== null) {
-    lines.push(`Sent: \`${ctx.lastAction.action}\``);
-    lines.push(`Result: \`${ctx.lastAction.outcome}\``);
+    lines.push('Sent:');
+    lines.push('```');
+    lines.push(ctx.lastAction.action);
+    lines.push('```');
+    lines.push('Result:');
+    lines.push('```');
+    lines.push(ctx.lastAction.outcome);
+    lines.push('```');
   } else {
     lines.push('(first cycle after reset)');
   }
