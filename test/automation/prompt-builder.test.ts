@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildPrompt, buildConsultationPrompt, buildFollowUpPrompt } from '../../src/automation/prompt-builder.js';
+import { RETRY_PROMPT } from '../../src/automation/engine.js';
 import type { ContextPacket, ConsultationPacket, FollowUpPacket } from '../../src/automation/types.js';
 
 describe('buildPrompt', () => {
@@ -317,6 +318,23 @@ describe('buildPrompt', () => {
       `Expected '/gsd:validate-phase N' with phase number placeholder in prompt:\n${prompt}`,
     );
   });
+
+  it('contains ALL CAPS reinforcement for single directive line output', () => {
+    const prompt = buildPrompt(basePacket);
+    assert.ok(
+      prompt.includes('YOUR ENTIRE RESPONSE MUST BE EXACTLY ONE DIRECTIVE LINE'),
+      'Expected ALL CAPS reinforcement in mama prompt'
+    );
+  });
+});
+
+describe('RETRY_PROMPT', () => {
+  it('contains ALL CAPS reinforcement for single directive line output', () => {
+    assert.ok(
+      RETRY_PROMPT.includes('YOUR ENTIRE RESPONSE MUST BE EXACTLY ONE DIRECTIVE LINE'),
+      'Expected ALL CAPS reinforcement in retry prompt'
+    );
+  });
 });
 
 describe('buildConsultationPrompt', () => {
@@ -458,6 +476,14 @@ describe('buildConsultationPrompt', () => {
     assert.ok(
       !prompt.includes('DONE: <'),
       `Consultation prompt should NOT contain DONE directive format:\n${prompt}`
+    );
+  });
+
+  it('does NOT contain directive-line ALL CAPS reinforcement', () => {
+    const prompt = buildConsultationPrompt(basePacket);
+    assert.ok(
+      !prompt.includes('YOUR ENTIRE RESPONSE MUST BE EXACTLY ONE DIRECTIVE LINE'),
+      'Consultation prompt should NOT contain directive-line reinforcement'
     );
   });
 });
