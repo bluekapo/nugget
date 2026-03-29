@@ -347,6 +347,94 @@ describe('registerCommands', () => {
     });
   });
 
+  describe('/settings version display', () => {
+    /** Minimal mock for SettingsStore */
+    function createVersionMockSettingsStore(overrides: Record<string, boolean | number> = {}) {
+      const store: Record<string, string> = {};
+      for (const [k, v] of Object.entries(overrides)) {
+        store[k] = String(v);
+      }
+      return {
+        get(key: string): boolean { return store[key] === 'true'; },
+        set(key: string, value: boolean) { store[key] = value ? 'true' : 'false'; },
+        getNumber(key: string, defaultValue: number): number {
+          const v = store[key];
+          if (v === undefined) return defaultValue;
+          const n = parseInt(v, 10);
+          return Number.isNaN(n) ? defaultValue : n;
+        },
+        setNumber(key: string, value: number) { store[key] = String(value); },
+        getUpdatedAt(_key: string): string | null { return null; },
+      };
+    }
+
+    function createVersionMockBotWithCallbacks() {
+      const commands: { command: string; handler: (ctx: any) => Promise<void> }[] = [];
+      const callbacks: { trigger: string; handler: (ctx: any) => Promise<void> }[] = [];
+      return {
+        command(name: string, handler: (ctx: any) => Promise<void>) {
+          commands.push({ command: name, handler });
+        },
+        callbackQuery(trigger: string, handler: (ctx: any) => Promise<void>) {
+          callbacks.push({ trigger, handler });
+        },
+        on(_filter: string, _handler: unknown) {},
+        commands,
+        callbacks,
+      };
+    }
+
+    it('/settings reply includes nugget version from package.json', async () => {
+      const bot = createVersionMockBotWithCallbacks();
+      const manager = createMockSessionManager();
+      const settingsStore = createVersionMockSettingsStore({ notifications: true });
+      registerCommands(bot as any, manager as any, () => null, undefined, undefined, settingsStore as any);
+
+      const settingsCmd = bot.commands.find(c => c.command === 'settings')!;
+      assert.ok(settingsCmd, '/settings should be registered');
+
+      const replies: any[] = [];
+      const ctx = {
+        async reply(text: string, opts?: unknown) { replies.push({ text, opts }); return { message_id: 1 }; },
+        async deleteMessage() {},
+      };
+      await settingsCmd.handler(ctx);
+
+      const text = replies[0].text as string;
+      // Version should match semver pattern like "nugget v1.12.3"
+      assert.ok(
+        /nugget v\d+\.\d+\.\d+/.test(text),
+        `settings message should include "nugget v<semver>" but got:\n${text}`,
+      );
+    });
+
+    it('version in settings matches package.json version (not hardcoded)', async () => {
+      const { readFileSync } = await import('node:fs');
+      const { resolve } = await import('node:path');
+      const pkgPath = resolve(import.meta.dirname!, '..', '..', 'package.json');
+      const expectedVersion = JSON.parse(readFileSync(pkgPath, 'utf8')).version;
+
+      const bot = createVersionMockBotWithCallbacks();
+      const manager = createMockSessionManager();
+      const settingsStore = createVersionMockSettingsStore({});
+      registerCommands(bot as any, manager as any, () => null, undefined, undefined, settingsStore as any);
+
+      const settingsCmd = bot.commands.find(c => c.command === 'settings')!;
+      const replies: any[] = [];
+      const ctx = {
+        async reply(text: string, opts?: unknown) { replies.push({ text, opts }); return { message_id: 1 }; },
+        async deleteMessage() {},
+      };
+      await settingsCmd.handler(ctx);
+
+      const text = replies[0].text as string;
+      assert.ok(
+        text.includes(`nugget v${expectedVersion}`),
+        `settings should contain "nugget v${expectedVersion}" but got:\n${text}`,
+      );
+    });
+  });
+
   describe('/settings Confirm Enter toggle', () => {
     /** Minimal mock for SettingsStore */
     function createMockSettingsStore(overrides: Record<string, boolean | number> = {}) {
