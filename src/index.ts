@@ -601,7 +601,10 @@ async function startSecondary(
     }
   });
 
-  // Unregister on session exit
+  // Unregister from primary on session exit.
+  // The IPC bridge's internal unregistering flag prevents this from
+  // triggering the onDisconnect handler (which would falsely interpret
+  // this self-initiated disconnect as the primary dying).
   bus.on('session:exit', (name: string) => {
     if (name === sessionName) {
       ipcBridge.unregister();
