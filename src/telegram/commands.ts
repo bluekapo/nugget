@@ -1,7 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { SessionManager } from '../session/manager.js';
 import type { SettingsStore } from '../db/settings-store.js';
 import { logInfo, logError } from '../logging/logger.js';
 import { isNotModifiedError } from './hub.js';
+import { packageRoot } from '../config/paths.js';
+
+const pkg = JSON.parse(readFileSync(resolve(packageRoot, 'package.json'), 'utf8'));
 
 /**
  * Tracks the last ephemeral bot message so it can be deleted when a new command is issued.
@@ -279,6 +284,8 @@ function buildSettingsMessage(store: SettingsStore): {
     `Confirm Enter: <b>${enterConfirm ? 'ON' : 'OFF'}</b>`,
     `Cycle limit: <b>${cycleLimit}</b>`,
     `Last updated: ${lastUpdated}`,
+    '',
+    `<i>nugget v${pkg.version}</i>`,
   ].join('\n');
 
   const toggleLabel = enabled ? '\uD83D\uDD15 Turn OFF' : '\uD83D\uDD14 Turn ON';
