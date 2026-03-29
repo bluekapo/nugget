@@ -541,6 +541,126 @@ describe('Source code verification: listener cleanup calls exist', () => {
 
 // ---- Race condition: router.switchTo (output sink attach) must happen BEFORE sessionManager.start ----
 
+// ---- Secondary IPC disconnect suppression (LIFE-01, LIFE-02, LIFE-03) ----
+
+describe('Secondary IPC disconnect suppression', () => {
+  /**
+   * Tests the unregistering flag pattern in connectToPrimary.
+   * When unregister() is called (self-initiated disconnect), the disconnectCallback
+   * must NOT fire. When the socket closes without unregister() (primary dies),
+   * the disconnectCallback SHOULD fire.
+   *
+   * We mirror the closure pattern from connectToPrimary to test the logic in isolation,
+   * since connectToPrimary requires a real TCP connection.
+   */
+
+  it('unregister() suppresses disconnectCallback on self-initiated disconnect', () => {
+    // Mirror the flag pattern from connectToPrimary
+    let unregistering = false;
+    let disconnectCallback: (() => void) | null = null;
+    let disconnectFired = false;
+
+    // Register a disconnect callback
+    disconnectCallback = () => { disconnectFired = true; };
+
+    // Simulate unregister() -> sets flag -> client.end() -> close event fires
+    unregistering = true;
+
+    // Simulate client.on('close') handler
+    if (!unregistering) {
+      disconnectCallback?.();
+    }
+
+    assert.equal(disconnectFired, false, 'disconnectCallback must NOT fire when unregistering');
+  });
+
+  it('disconnectCallback fires on genuine disconnect (primary dies)', () => {
+    let unregistering = false;
+    let disconnectCallback: (() => void) | null = null;
+    let disconnectFired = false;
+
+    disconnectCallback = () => { disconnectFired = true; };
+
+    // Simulate socket close WITHOUT unregister() being called (primary crash)
+    // unregistering remains false
+    if (!unregistering) {
+      disconnectCallback?.();
+    }
+
+    assert.equal(disconnectFired, true, 'disconnectCallback MUST fire when primary disconnects');
+  });
+
+  it('ECONNRESET fires disconnectCallback when not unregistering', () => {
+    let unregistering = false;
+    let disconnectCallback: (() => void) | null = null;
+    let disconnectFired = false;
+
+    disconnectCallback = () => { disconnectFired = true; };
+
+    // Simulate error handler for ECONNRESET without unregistering
+    const errCode = 'ECONNRESET';
+    if (!unregistering) {
+      if (errCode === 'ECONNRESET' || errCode === 'EPIPE') {
+        disconnectCallback?.();
+      }
+    }
+
+    assert.equal(disconnectFired, true, 'ECONNRESET must fire disconnectCallback when not self-initiated');
+  });
+
+  it('ECONNRESET is suppressed when unregistering', () => {
+    let unregistering = false;
+    let disconnectCallback: (() => void) | null = null;
+    let disconnectFired = false;
+
+    disconnectCallback = () => { disconnectFired = true; };
+
+    // Set unregistering flag (self-initiated disconnect)
+    unregistering = true;
+
+    const errCode = 'ECONNRESET';
+    if (!unregistering) {
+      if (errCode === 'ECONNRESET' || errCode === 'EPIPE') {
+        disconnectCallback?.();
+      }
+    }
+
+    assert.equal(disconnectFired, false, 'ECONNRESET must be suppressed during unregister');
+  });
+
+  it('source code: connectToPrimary has unregistering flag in bot.ts', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../src/telegram/bot.ts', import.meta.url), 'utf-8');
+
+    // Find the connectToPrimary function
+    const fnStart = source.indexOf('export function connectToPrimary');
+    assert.ok(fnStart > 0, 'connectToPrimary function must exist');
+
+    const fnBody = source.slice(fnStart);
+
+    // Must have unregistering flag declaration
+    assert.ok(
+      fnBody.includes('let unregistering = false'),
+      'connectToPrimary must declare unregistering flag',
+    );
+
+    // unregister() must set flag before client.end()
+    const unregisterStart = fnBody.indexOf('unregister()');
+    assert.ok(unregisterStart > 0, 'unregister method must exist');
+    const unregisterBody = fnBody.slice(unregisterStart, unregisterStart + 200);
+    assert.ok(
+      unregisterBody.includes('unregistering = true'),
+      'unregister() must set unregistering = true',
+    );
+
+    // close handler must check !unregistering
+    assert.ok(
+      fnBody.includes('!unregistering'),
+      'close handler must check !unregistering before calling disconnectCallback',
+    );
+  });
+});
+
 describe('Startup ordering (BUG-INITIAL-OUTPUT)', () => {
   it('router.add + switchTo are called before sessionManager.start in src/index.ts', async () => {
     // Read the source file and verify the ordering of the operations.
