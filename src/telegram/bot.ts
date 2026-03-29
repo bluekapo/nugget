@@ -494,6 +494,7 @@ export function connectToPrimary(
   let promoteCallback: (() => void) | null = null;
   let connectCallback: (() => void) | null = null;
   let exitCallback: (() => void) | null = null;
+  let unregistering = false;
   let buffer = '';
 
   const client = connect({ port, host: '127.0.0.1' }, () => {
@@ -535,6 +536,7 @@ export function connectToPrimary(
   });
 
   client.on('error', (err: NodeJS.ErrnoException) => {
+    if (unregistering) return;
     if (err.code === 'ECONNREFUSED') {
       logError('Could not connect to primary instance IPC -- is it running?');
       disconnectCallback?.();
@@ -546,7 +548,9 @@ export function connectToPrimary(
   });
 
   client.on('close', () => {
-    disconnectCallback?.();
+    if (!unregistering) {
+      disconnectCallback?.();
+    }
   });
 
   return {
@@ -576,6 +580,7 @@ export function connectToPrimary(
     },
     unregister(): void {
       if (!client.destroyed) {
+        unregistering = true;
         client.write(`unregister:${sessionName}\n`);
         client.end();
       }

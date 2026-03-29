@@ -645,7 +645,7 @@ describe('Secondary IPC disconnect suppression', () => {
     );
 
     // unregister() must set flag before client.end()
-    const unregisterStart = fnBody.indexOf('unregister()');
+    const unregisterStart = fnBody.indexOf('unregister(): void {');
     assert.ok(unregisterStart > 0, 'unregister method must exist');
     const unregisterBody = fnBody.slice(unregisterStart, unregisterStart + 200);
     assert.ok(
