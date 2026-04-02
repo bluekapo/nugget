@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ownerOnly } from './auth.js';
 import { logInfo, logWarn, logError } from '../logging/logger.js';
+import { RateLimiter } from './rate-limiter.js';
 
 /** In-process bot cache keyed by token (prevents duplicate bots in same process). */
 const botCache = new Map<string, Bot>();
@@ -149,7 +150,7 @@ export function releaseBotLock(token: string): void {
   }
 }
 
-export async function createBot(token: string, ownerId: number): Promise<Bot> {
+export async function createBot(token: string, ownerId: number, rateLimiter?: RateLimiter): Promise<Bot> {
   // Return cached bot if same process already created one for this token
   const cached = botCache.get(token);
   if (cached) return cached;
@@ -158,6 +159,20 @@ export async function createBot(token: string, ownerId: number): Promise<Bot> {
   // Do NOT call acquireBotLock here — it was the root cause of the double-acquire bug.
 
   const bot = new Bot(token);
+
+  // Install backoff-notifier transformer BEFORE autoRetry so it is the inner call:
+  // autoRetry -> backoffNotifier -> HTTP. When HTTP returns 429, backoffNotifier
+  // sees it first and records the backoff, then autoRetry handles per-request retry.
+  // Meanwhile, the RateLimiter prevents new requests from firing during the backoff window.
+  if (rateLimiter) {
+    bot.api.config.use(async (prev, method, payload, signal) => {
+      const result = await prev(method, payload, signal);
+      if (!result.ok && typeof result.parameters?.retry_after === 'number' && result.parameters.retry_after > 0) {
+        rateLimiter.notifyBackoff(result.parameters.retry_after);
+      }
+      return result;
+    });
+  }
 
   // Install auto-retry transformer -- catches 429 responses and retries with backoff
   bot.api.config.use(autoRetry({

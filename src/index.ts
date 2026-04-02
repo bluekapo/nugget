@@ -130,7 +130,8 @@ async function startPrimary(
   });
 
   // 8. Create Telegram bot (validates token via getMe)
-  const bot = await createBot(config.botToken, config.ownerId);
+  const rateLimiter = new RateLimiter();
+  const bot = await createBot(config.botToken, config.ownerId, rateLimiter);
 
   // 8b. Create SettingsStore early (needed by keyboard builders below)
   const settingsStore = new SettingsStore(db);
@@ -168,7 +169,6 @@ async function startPrimary(
 
   // 11. Create HubRenderer with session name getter that includes remote sessions
   const hubStore = new HubStore(db);
-  const rateLimiter = new RateLimiter();
   const hubRenderer = new HubRenderer(
     bot.api,
     config.ownerId,
@@ -693,7 +693,8 @@ async function becomeNewPrimary(
       logInfo(`Cleaned up ${cleanedPromoted} stale session record(s) from crashed primary`);
     }
 
-    const bot = await createBot(config.botToken, config.ownerId);
+    const rateLimiter = new RateLimiter();
+    const bot = await createBot(config.botToken, config.ownerId, rateLimiter);
     const settingsStore = new SettingsStore(db);
 
     const emulators = new Map<string, TerminalEmulator>();
@@ -747,7 +748,6 @@ async function becomeNewPrimary(
     });
 
     const hubStore = new HubStore(db);
-    const rateLimiter = new RateLimiter();
     const hubRenderer = new HubRenderer(
       bot.api, config.ownerId, sessionManager,
       () => router.activeSession,
