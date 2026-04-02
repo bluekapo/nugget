@@ -299,6 +299,57 @@ describe('buildPrompt', () => {
     );
   });
 
+  it('GSD pipeline hint step 1 includes fresh context window reasoning', () => {
+    const packet: ContextPacket = {
+      ...basePacket,
+      taskDescription: 'Run gsd pipeline for phase 10',
+    };
+    const prompt = buildPrompt(packet);
+    // Step 1 must contain "fresh context" reasoning, not just "CLEAR the worker"
+    const step1Line = prompt.split('\n').find(l => l.includes('1.') && l.toLowerCase().includes('clear'));
+    assert.ok(step1Line, `Expected step 1 line with CLEAR in GSD hint:\n${prompt}`);
+    assert.ok(
+      step1Line!.toLowerCase().includes('fresh context'),
+      `Step 1 should include "fresh context" reasoning, got: ${step1Line}`
+    );
+  });
+
+  it('GSD pipeline hint emphasizes pre-plan-phase CLEAR is critical', () => {
+    const packet: ContextPacket = {
+      ...basePacket,
+      taskDescription: 'Execute the gsd milestone pipeline',
+    };
+    const prompt = buildPrompt(packet);
+    // The GSD hint block should contain emphasis language (CRITICAL, IMPORTANT, MUST, etc.)
+    const hintBlock = prompt.split('\n').filter(l =>
+      l.includes('GSD pipeline') || l.includes('CLEAR the worker') || l.includes('plan-phase')
+    );
+    const hintText = hintBlock.join(' ');
+    assert.ok(
+      /\b(CRITICAL|IMPORTANT|MUST)\b/.test(hintText),
+      `GSD hint block should contain emphasis language (CRITICAL/IMPORTANT/MUST), got:\n${hintText}`
+    );
+  });
+
+  it('fresh context reasoning appears within the GSD pipeline hint block, not as a separate hint', () => {
+    const packet: ContextPacket = {
+      ...basePacket,
+      taskDescription: 'gsd pipeline execution',
+    };
+    const prompt = buildPrompt(packet);
+    const lines = prompt.split('\n');
+    // Find the GSD pipeline HINT line
+    const gsdHintIdx = lines.findIndex(l => l.startsWith('HINT:') && l.includes('GSD pipeline'));
+    assert.ok(gsdHintIdx !== -1, `Expected GSD pipeline HINT line:\n${prompt}`);
+    // "fresh context" must appear in the hint intro or in the numbered steps that follow
+    // (within 10 lines of the HINT: line, before the next section)
+    const hintBlock = lines.slice(gsdHintIdx, gsdHintIdx + 10).join('\n');
+    assert.ok(
+      hintBlock.toLowerCase().includes('fresh context'),
+      `"fresh context" should appear in the GSD pipeline hint block, not elsewhere. Block:\n${hintBlock}`
+    );
+  });
+
   it('GSD pipeline hint includes phase number N in command examples', () => {
     const packet: ContextPacket = {
       ...basePacket,
