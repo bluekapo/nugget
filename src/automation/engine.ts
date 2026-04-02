@@ -278,6 +278,9 @@ export class AutomationEngine {
   private consecutiveTrivialStagnations = 0;
   private readonly maxTrivialStagnations = 3;
   private selectMenuDetected = false;
+  private commandPending = false;
+  private lastDispatchedCommand: string | null = null;
+  private workerScreenAtDispatch = '';
   private readonly timer: TimerProvider;
   private readonly baseDelay: number;
   private readonly idleDelay: number;
@@ -438,6 +441,9 @@ export class AutomationEngine {
     this.resetMode = false;
     this.needsFullPrompt = true;
     this.postClearCycle = false;
+    this.commandPending = false;
+    this.lastDispatchedCommand = null;
+    this.workerScreenAtDispatch = '';
 
     this.setState('stopped');
   }
@@ -532,6 +538,26 @@ export class AutomationEngine {
     debugLog(`[onWorkerIdle] state=${this._state} cycle=${this.cycleNumber}`);
     if (this._state !== 'idle') return;
     this.workerBusy = false;
+
+    // ENG-01: Guard against duplicate dispatch when command was just sent
+    if (this.commandPending) {
+      // Re-capture worker screen to check if command has produced output
+      if (this.workerMonitor) {
+        this.workerScreenText = this.captureWorkerScreen();
+      }
+      if (isTrivialCapture(this.workerScreenText)) {
+        debugLog(`[onWorkerIdle] commandPending -- worker screen still trivial, re-arming`);
+        if (this.workerMonitor) {
+          this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
+        }
+        this.setState('idle');
+        return;
+      }
+      debugLog(`[onWorkerIdle] commandPending cleared -- worker screen now has content`);
+      this.commandPending = false;
+      this.lastDispatchedCommand = null;
+      this.workerScreenAtDispatch = '';
+    }
 
     // SAF-01: Cycle limit guard
     if (this.cycleNumber >= this.maxCycles) {
@@ -979,6 +1005,9 @@ export class AutomationEngine {
       this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
     }
     this.workerBusy = true; // Worker is now processing the command
+    this.commandPending = true;
+    this.lastDispatchedCommand = result.description;
+    this.workerScreenAtDispatch = this.workerScreenText;
     this.setState('idle');
   }
 
@@ -1032,6 +1061,9 @@ export class AutomationEngine {
           this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
         }
         this.workerBusy = true; // Worker is now processing the selection
+        this.commandPending = true;
+        this.lastDispatchedCommand = description;
+        this.workerScreenAtDispatch = this.workerScreenText;
         this.setState('idle');
       }
     };
@@ -1071,6 +1103,9 @@ export class AutomationEngine {
         this.workerMonitor.capture.onPromptComplete = () => this.onWorkerIdle();
       }
       this.workerBusy = true;
+      this.commandPending = true;
+      this.lastDispatchedCommand = description;
+      this.workerScreenAtDispatch = this.workerScreenText;
       this.setState('idle');
     }
   }
@@ -1336,6 +1371,30 @@ export class AutomationEngine {
   private onWorkerStagnation(): void {
     debugLog(`[onWorkerStagnation] state=${this._state}`);
     if (this._state !== 'idle') return;
+
+    // ENG-01: Suppress consultation when a command was just dispatched and screen is still trivial.
+    // Integrates with ENG-03 trivial stagnation counter: if the counter exceeds maxTrivialStagnations,
+    // commandPending is cleared so consultation can proceed (prevents indefinite suppression).
+    if (this.commandPending) {
+      // Re-capture worker screen to check for new content since dispatch
+      const currentScreen = this.workerMonitor ? this.captureWorkerScreen() : this.workerScreenText;
+      if (isTrivialCapture(currentScreen)) {
+        // Count toward ENG-03 trivial stagnation threshold
+        this.consecutiveTrivialStagnations++;
+        if (this.consecutiveTrivialStagnations < this.maxTrivialStagnations) {
+          debugLog(`[onWorkerStagnation] command pending ("${this.lastDispatchedCommand}") -- worker screen still trivial (${this.consecutiveTrivialStagnations}/${this.maxTrivialStagnations}), suppressing consultation, re-arming timer`);
+          this.startStagnationTimer();
+          return;
+        }
+        // Exceeded max trivial stagnations -- clear commandPending and fall through to consultation
+        debugLog(`[onWorkerStagnation] command pending -- max trivial stagnations reached (${this.maxTrivialStagnations}), clearing commandPending`);
+      } else {
+        debugLog(`[onWorkerStagnation] command pending cleared -- worker screen now has content`);
+      }
+      this.commandPending = false;
+      this.lastDispatchedCommand = null;
+      this.workerScreenAtDispatch = '';
+    }
 
     // ENG-01: Check if worker is showing a SELECT menu (AskUserQuestion)
     // If so, bypass consultation and trigger a full directive cycle instead.
