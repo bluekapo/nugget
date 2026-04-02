@@ -28,6 +28,7 @@ import { CommandAllowlist } from './security/allowlist.js';
 import { TerminalEmulator } from './terminal/emulator.js';
 import { ScreenCapture } from './terminal/capture.js';
 import { CompletionTracker } from './terminal/completion-tracker.js';
+import { makeCleanupSession } from './cleanup.js';
 import { TERMINAL_COLS, TERMINAL_ROWS } from './terminal/constants.js';
 import { AutomationHubRenderer } from './telegram/automation-hub.js';
 import { AutomationEngine } from './automation/engine.js';
@@ -301,22 +302,9 @@ async function startPrimary(
   // NOTE: session:started does NOT re-render the hub here.
   // The hub is already rendered by router.switchTo() -> onHubUpdate().
   // Adding hubRenderer.render() here caused duplicate hub messages.
+  const cleanupSession = makeCleanupSession(router, hubRenderer, completionTracker, emulators);
   bus.on('session:exit', (name: string) => {
-    const wasActive = router.activeSession === name;
-    router.remove(name);
-    hubRenderer.clearExecState(name);
-    completionTracker.removeSession(name);
-    // Dispose and remove per-session emulator
-    const emu = emulators.get(name);
-    if (emu) {
-      emu.dispose();
-      emulators.delete(name);
-    }
-    // Auto-switch to next available session if the killed one was active
-    if (wasActive && router.activeSession === null && router.getAll().length > 0) {
-      router.switchTo(router.getAll()[0]);
-    }
-    hubRenderer.render();
+    cleanupSession(name);
   });
 
   // 14b. Wire exec-state changes to hub for dynamic busy/idle display (debounced)
@@ -384,8 +372,22 @@ async function startPrimary(
     },
     onUnregister: (name) => {
       router.removeRemote(name);
-      logInfo(`IPC: Remote session '${name}' unregistered`);
+      // removeRemote already calls router.remove(name) internally, so we
+      // inline the remaining cleanup ops (matching cleanupSession behavior)
+      // rather than calling cleanupSession which would redundantly remove.
+      hubRenderer.clearExecState(name);
+      completionTracker.removeSession(name);
+      const emu = emulators.get(name);
+      if (emu) {
+        emu.dispose();
+        emulators.delete(name);
+      }
+      // Auto-switch if the unregistered remote session was active
+      if (router.activeSession === null && router.getAll().length > 0) {
+        router.switchTo(router.getAll()[0]);
+      }
       hubRenderer.render();
+      logInfo(`IPC: Remote session '${name}' unregistered`);
     },
   };
   startIpcServer(config.botToken, ipcCallbacks);
@@ -872,22 +874,9 @@ async function becomeNewPrimary(
     bot.on('message:text', inputHandler.handler());
     registerCallbackHandlers(bot, sessionManager, () => router.activeSession, router, () => hubRenderer.render(), capture, async () => { hubRenderer.toggleAdvanced(); await hubRenderer.render(); }, async () => { promotedShutdownFn?.('hub-disconnect'); }, async () => { await hubRenderer.delete(); }, async (view: 'sessions' | 'automationHub' | 'automationDetails' | 'cli') => { hubRenderer.setHubView(view); await hubRenderer.render(); }, promotedAutomationHub, settingsStore, (locked: boolean) => { hubRenderer.setCliScrollState(locked, settingsStore.get('enter_confirmation')); });
 
+    const promotedCleanupSession = makeCleanupSession(router, hubRenderer, promotedCompletionTracker, emulators);
     bus.on('session:exit', (name: string) => {
-      const wasActive = router.activeSession === name;
-      router.remove(name);
-      hubRenderer.clearExecState(name);
-      promotedCompletionTracker.removeSession(name);
-      // Dispose and remove per-session emulator
-      const emu = emulators.get(name);
-      if (emu) {
-        emu.dispose();
-        emulators.delete(name);
-      }
-      // Auto-switch to next available session if the killed one was active
-      if (wasActive && router.activeSession === null && router.getAll().length > 0) {
-        router.switchTo(router.getAll()[0]);
-      }
-      hubRenderer.render();
+      promotedCleanupSession(name);
     });
 
     // Wire exec-state changes to hub for dynamic busy/idle display (debounced)
@@ -916,6 +905,18 @@ async function becomeNewPrimary(
       },
       onUnregister: (name) => {
         router.removeRemote(name);
+        // removeRemote already calls router.remove(name) internally, so we
+        // inline the remaining cleanup ops (matching cleanupSession behavior).
+        hubRenderer.clearExecState(name);
+        promotedCompletionTracker.removeSession(name);
+        const emu = emulators.get(name);
+        if (emu) {
+          emu.dispose();
+          emulators.delete(name);
+        }
+        if (router.activeSession === null && router.getAll().length > 0) {
+          router.switchTo(router.getAll()[0]);
+        }
         hubRenderer.render();
       },
     };
