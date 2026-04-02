@@ -4495,4 +4495,181 @@ describe('Defense-in-depth: trivial capture annotation in prompts', () => {
     assert.ok(!lastFollowUp.data.includes('SELECT menu'),
       'follow-up prompt after reset should NOT contain SELECT HINT');
   });
+
+  // ---------- ENG-01: commandPending -- duplicate command prevention ----------
+
+  describe('ENG-01: commandPending duplicate command prevention', () => {
+
+    // ENG-01-a: After COMMAND dispatch, onWorkerStagnation suppresses consultation
+    it('ENG-01-a: onWorkerStagnation suppresses consultation while commandPending is true', async () => {
+      config.stagnationDelay = 200;
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // Trigger first cycle (deferred timer)
+      timer.advance(1);
+      assert.equal(engine.state, 'clearing-orchestrator');
+
+      // Complete clear
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(50);
+
+      // Engine should be prompting orchestrator now
+      assert.equal(engine.state, 'waiting-response');
+
+      // Orchestrator responds with a COMMAND directive
+      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: npm test'));
+      timer.advance(50);
+
+      // Engine should dispatch the command and return to idle with commandPending=true
+      assert.equal(engine.state, 'idle');
+      const cmdWrite = writes.find(w => w.name === 'worker' && w.data.includes('npm test'));
+      assert.ok(cmdWrite, 'COMMAND should have been written to worker');
+
+      // Stagnation fires while command is still pending (screen is still trivial)
+      timer.advance(200);
+
+      // Key assertion: engine should NOT enter consultation -- should stay idle
+      assert.equal(engine.state, 'idle',
+        'onWorkerStagnation should suppress consultation while commandPending is true');
+
+      // Verify no consultation prompt was sent to orchestrator after the stagnation
+      const postCommandWrites = writes.filter(w =>
+        w.name === 'orchestrator' && w.data.includes('Worker appears stalled'));
+      assert.equal(postCommandWrites.length, 0,
+        'No consultation prompt should be sent while commandPending is true');
+    });
+
+    // ENG-01-b: After COMMAND dispatch, onWorkerIdle re-arms when screen still trivial
+    it('ENG-01-b: onWorkerIdle re-arms when commandPending and worker screen trivial', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // First cycle
+      timer.advance(1);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: npm test'));
+      timer.advance(50);
+
+      assert.equal(engine.state, 'idle');
+
+      // Worker sends trivial output (just prompt) -> onPromptComplete fires
+      await emitOutput(bus, 'worker', '\u276F \r\n');
+      timer.advance(50);  // debounce
+      timer.advance(100); // idle delay fires onWorkerIdle
+
+      // Key assertion: engine should stay idle (re-armed), NOT advance to capturing-worker
+      assert.equal(engine.state, 'idle',
+        'onWorkerIdle should re-arm and stay idle when commandPending and screen is trivial');
+    });
+
+    // ENG-01-c: commandPending clears when worker screen transitions to non-trivial
+    it('ENG-01-c: commandPending clears when worker screen transitions to non-trivial content', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // First cycle
+      timer.advance(1);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: npm test'));
+      timer.advance(50);
+
+      assert.equal(engine.state, 'idle');
+
+      // Worker produces substantial output (non-trivial)
+      await emitOutput(bus, 'worker', completionOutput('All tests passed'));
+      timer.advance(50);  // debounce
+      timer.advance(100); // idle delay fires onWorkerIdle
+
+      // Key assertion: engine should proceed through normal cycle (commandPending cleared)
+      assert.notEqual(engine.state, 'idle',
+        'commandPending should clear when worker screen has non-trivial content, allowing normal cycle');
+    });
+
+    // ENG-01-d: After commandPending clears, full normal cycle executes
+    it('ENG-01-d: full normal directive cycle executes after commandPending clears', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // First cycle
+      timer.advance(1);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: npm test'));
+      timer.advance(50);
+
+      assert.equal(engine.state, 'idle');
+
+      // Worker produces substantial output -> commandPending clears -> normal cycle
+      await emitOutput(bus, 'worker', completionOutput('All tests passed'));
+      timer.advance(50);  // debounce
+      timer.advance(100); // idle delay fires onWorkerIdle
+
+      // Engine should advance to clearing-orchestrator (start of normal cycle)
+      assert.equal(engine.state, 'clearing-orchestrator',
+        'Engine should enter clearing-orchestrator after commandPending clears');
+
+      // Complete the clear
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(50);
+
+      // Engine should be in waiting-response (prompt sent to orchestrator)
+      assert.equal(engine.state, 'waiting-response',
+        'Engine should proceed to waiting-response after clearing orchestrator');
+    });
+
+    // ENG-01-e: SELECT and ENTER also set commandPending
+    it('ENG-01-e: SELECT directive also sets commandPending', async () => {
+      config.stagnationDelay = 200;
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // First cycle
+      timer.advance(1);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(50);
+
+      // Orchestrator responds with SELECT directive
+      await emitOutput(bus, 'orchestrator', directiveOutput('SELECT: 1'));
+      timer.advance(50);
+
+      assert.equal(engine.state, 'idle');
+
+      // Stagnation fires while select is pending
+      timer.advance(200);
+
+      // Key assertion: stagnation should be suppressed (commandPending from SELECT)
+      assert.equal(engine.state, 'idle',
+        'onWorkerStagnation should suppress consultation after SELECT dispatch (commandPending)');
+    });
+
+    // ENG-01-f: stop() resets commandPending and related fields
+    it('ENG-01-f: stop() resets commandPending to false', async () => {
+      engine = new AutomationEngine(config, mockSessionManager, bus);
+      engine.start();
+
+      // First cycle -> COMMAND dispatch (sets commandPending)
+      timer.advance(1);
+      await emitOutput(bus, 'orchestrator', clearOutput());
+      timer.advance(50);
+      await emitOutput(bus, 'orchestrator', directiveOutput('COMMAND: npm test'));
+      timer.advance(50);
+
+      assert.equal(engine.state, 'idle');
+
+      // Stop the engine
+      engine.stop();
+      assert.equal(engine.state, 'stopped');
+
+      // Restart the engine -- commandPending should be cleared
+      engine.start();
+      timer.advance(1);
+
+      // Engine should proceed to first cycle normally (not blocked by stale commandPending)
+      assert.equal(engine.state, 'clearing-orchestrator',
+        'After stop()+start(), engine should proceed normally — no stale commandPending');
+    });
+  });
 });
