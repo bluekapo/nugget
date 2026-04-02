@@ -93,4 +93,109 @@ describe('RateLimiter', () => {
     mock.timers.setTime(2000);
     assert.equal(limiter.canSend(false), true);
   });
+
+  describe('backoff', () => {
+    it('mandatory send returns false during backoff window', () => {
+      mock.timers.setTime(1000);
+      limiter.notifyBackoff(5); // backoff until 6000
+
+      mock.timers.setTime(3000);
+      assert.equal(limiter.canSend(true), false);
+    });
+
+    it('deferrable send returns false during backoff window', () => {
+      mock.timers.setTime(1000);
+      limiter.notifyBackoff(5); // backoff until 6000
+
+      mock.timers.setTime(3000);
+      assert.equal(limiter.canSend(false), false);
+    });
+
+    it('mandatory send returns true after backoff expires', () => {
+      mock.timers.setTime(1000);
+      limiter.notifyBackoff(5); // backoff until 6000
+
+      mock.timers.setTime(6001);
+      assert.equal(limiter.canSend(true), true);
+    });
+
+    it('deferrable send resumes normal interval logic after backoff expires', () => {
+      mock.timers.setTime(1000);
+      limiter.notifyBackoff(5); // backoff until 6000
+
+      mock.timers.setTime(7000); // well past backoff, no prior recordSend
+      assert.equal(limiter.canSend(false), true);
+    });
+
+    it('isInBackoff returns true during backoff, false after', () => {
+      mock.timers.setTime(1000);
+      limiter.notifyBackoff(5);
+
+      mock.timers.setTime(3000);
+      assert.equal(limiter.isInBackoff(), true);
+
+      mock.timers.setTime(6001);
+      assert.equal(limiter.isInBackoff(), false);
+    });
+
+    it('longer backoff extends existing shorter backoff', () => {
+      mock.timers.setTime(1000);
+      limiter.notifyBackoff(5); // backoff until 6000
+
+      mock.timers.setTime(2000);
+      limiter.notifyBackoff(10); // backoff until 12000 (longer)
+
+      mock.timers.setTime(6001); // past first backoff but within second
+      assert.equal(limiter.canSend(true), false);
+      assert.equal(limiter.isInBackoff(), true);
+
+      mock.timers.setTime(12001);
+      assert.equal(limiter.canSend(true), true);
+      assert.equal(limiter.isInBackoff(), false);
+    });
+
+    it('shorter backoff does not shorten existing longer backoff', () => {
+      mock.timers.setTime(1000);
+      limiter.notifyBackoff(10); // backoff until 11000
+
+      mock.timers.setTime(2000);
+      limiter.notifyBackoff(3); // would be until 5000, but 11000 is longer
+
+      mock.timers.setTime(5001); // past shorter backoff
+      assert.equal(limiter.canSend(true), false);
+      assert.equal(limiter.isInBackoff(), true);
+
+      mock.timers.setTime(11001);
+      assert.equal(limiter.canSend(true), true);
+    });
+
+    it('notifyBackoff(0) is a no-op', () => {
+      mock.timers.setTime(1000);
+      limiter.notifyBackoff(0);
+
+      assert.equal(limiter.isInBackoff(), false);
+      assert.equal(limiter.canSend(true), true);
+    });
+
+    it('notifyBackoff with negative value is a no-op', () => {
+      mock.timers.setTime(1000);
+      limiter.notifyBackoff(-5);
+
+      assert.equal(limiter.isInBackoff(), false);
+      assert.equal(limiter.canSend(false), true);
+    });
+
+    it('existing interval tests still pass with no backoff active', () => {
+      // This test verifies that the backoff addition doesn't regress interval logic.
+      // canSend(false) should still respect interval when no backoff is active.
+      mock.timers.setTime(1000);
+      limiter.recordSend();
+
+      mock.timers.setTime(1500);
+      assert.equal(limiter.canSend(false), false); // within interval
+
+      mock.timers.setTime(2000);
+      assert.equal(limiter.canSend(false), true); // past interval
+    });
+  });
 });
