@@ -62,6 +62,18 @@ describe('InlineKeyboard', () => {
     it('backspace input is DEL char', () => {
       assert.equal(ACTION_BUTTONS.backspace.input, '\x7f');
     });
+
+    it('has interrupt key', () => {
+      assert.ok('interrupt' in ACTION_BUTTONS);
+    });
+
+    it('interrupt.input is Ctrl+C (\\x03)', () => {
+      assert.equal(ACTION_BUTTONS.interrupt.input, '\x03');
+    });
+
+    it('interrupt.data is action:interrupt', () => {
+      assert.equal(ACTION_BUTTONS.interrupt.data, 'action:interrupt');
+    });
   });
 
   describe('buildCLIKeyboard()', () => {
@@ -123,6 +135,14 @@ describe('InlineKeyboard', () => {
       assert.equal(row4[0].callback_data, 'action:arrow-left');
       assert.equal(row4[1].callback_data, 'action:arrow-down');
       assert.equal(row4[2].callback_data, 'action:arrow-right');
+    });
+
+    it('row 5 has Interrupt button', () => {
+      const kb = buildCLIKeyboard();
+      const row5 = kb.inline_keyboard[4];
+      assert.ok(row5, 'row 5 should exist');
+      assert.equal(row5.length, 1, 'row 5 should have 1 button');
+      assert.equal(row5[0].callback_data, 'action:interrupt');
     });
   });
 
