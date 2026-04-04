@@ -31,6 +31,7 @@ export const ACTION_BUTTONS = {
   arrowLeft:  { label: '\u2B05 Left',     data: 'action:arrow-left',  input: '\x1b[D' },
   arrowRight: { label: '\u27A1 Right',    data: 'action:arrow-right', input: '\x1b[C' },
   escape:     { label: '\u238B Esc',      data: 'action:escape',      input: '\x1b' },
+  interrupt:  { label: '\u26A0 Interrupt', data: 'action:interrupt', input: '\x03' },
   clearInput: { label: '\u2716 Clear',   data: 'action:clear-input', input: '\x7f' },
 } as const;
 
@@ -57,7 +58,9 @@ export function buildCLIKeyboard(locked = true, enterConfirmation = false): Inli
     .row()
     .text(ACTION_BUTTONS.arrowLeft.label, ACTION_BUTTONS.arrowLeft.data)
     .text(ACTION_BUTTONS.arrowDown.label, ACTION_BUTTONS.arrowDown.data)
-    .text(ACTION_BUTTONS.arrowRight.label, ACTION_BUTTONS.arrowRight.data);
+    .text(ACTION_BUTTONS.arrowRight.label, ACTION_BUTTONS.arrowRight.data)
+    .row()
+    .text(ACTION_BUTTONS.interrupt.label, ACTION_BUTTONS.interrupt.data);
 }
 
 /**
