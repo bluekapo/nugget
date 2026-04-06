@@ -1,6 +1,6 @@
 {
   "name": "nugget",
-  "version": "1.13.0",
+  "version": "1.13.1",
   "type": "module",
   "description": "Nugget — Run Claude Code sessions from Telegram",
   "bin": {
