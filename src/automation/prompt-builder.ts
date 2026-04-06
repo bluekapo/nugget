@@ -78,14 +78,15 @@ export function buildPrompt(ctx: ContextPacket): string {
 
   // Show GSD pipeline sequence hint when task involves GSD
   if (taskLower.includes('gsd')) {
-    lines.push('HINT: When executing a full GSD pipeline for phase N, you MUST follow this exact sequence (CLEAR steps are CRITICAL for fresh context windows):');
+    lines.push('HINT: When executing a full GSD pipeline for phase N, the canonical sequence is shown below for REFERENCE. DO NOT auto-advance through these steps — issue ONE command per cycle and wait for the human / worker signal before moving to the next step. The numbered list is informational, not a checklist you should execute back-to-back:');
     lines.push('  1. CLEAR the worker (CRITICAL — plan-phase needs a fresh context window to produce quality plans)');
-    lines.push('  2. Plan the phase (`/gsd:plan-phase N` — use no-discussion flag or click through context prompts)');
+    lines.push('  2. Plan the phase (`/gsd-plan-phase N` — use no-discussion flag or click through context prompts)');
     lines.push('  3. CLEAR the worker');
-    lines.push('  4. Execute the phase (`/gsd:execute-phase N`)');
+    lines.push('  4. Execute the phase (`/gsd-execute-phase N`)');
     lines.push('  5. CLEAR the worker');
-    lines.push('  6. Validate the phase (`/gsd:validate-phase N` — not verify)');
+    lines.push('  6. Validate the phase (`/gsd-validate-phase N` — not verify)');
     lines.push('  7. CLEAR the worker before issuing any further GSD commands');
+    lines.push('REMINDER: DO NOT auto-advance between the steps above. Wait for explicit human instruction or a clear worker signal before issuing each next GSD command.');
     lines.push('');
   }
 

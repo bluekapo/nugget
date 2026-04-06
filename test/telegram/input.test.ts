@@ -154,17 +154,17 @@ describe('TelegramInputHandler', () => {
     assert.equal(nextCalled, true, 'should call next() for bot command');
   });
 
-  it('forwards /gsd:plan-phase to PTY (not a bot command)', async () => {
+  it('forwards /gsd-plan-phase to PTY (not a bot command)', async () => {
     const sm = makeMockSessionManager();
     const al = makeMockAllowlist(true);
     const handler = new TelegramInputHandler(sm as any, () => 'my-session', al as any);
 
-    const ctx = makeMockCtx('/gsd:plan-phase 2');
+    const ctx = makeMockCtx('/gsd-plan-phase 2');
     let nextCalled = false;
     await handler.handler()(ctx as any, async () => { nextCalled = true; });
 
     assert.equal(sm.calls.length, 1, 'should forward to session');
-    assert.equal(sm.calls[0].data, '/gsd:plan-phase 2');
+    assert.equal(sm.calls[0].data, '/gsd-plan-phase 2');
     assert.equal(nextCalled, false, 'should NOT call next()');
   });
 

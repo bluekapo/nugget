@@ -29,12 +29,12 @@ describe('CommandAllowlist', () => {
 
   describe('glob wildcard', () => {
     it('allows commands matching glob pattern', () => {
-      const al = new CommandAllowlist('/gsd:*');
-      assert.equal(al.isAllowed('/gsd:execute'), true);
+      const al = new CommandAllowlist('/gsd-*');
+      assert.equal(al.isAllowed('/gsd-execute'), true);
     });
 
     it('rejects commands not matching glob pattern', () => {
-      const al = new CommandAllowlist('/gsd:*');
+      const al = new CommandAllowlist('/gsd-*');
       assert.equal(al.isAllowed('/other'), false);
     });
   });

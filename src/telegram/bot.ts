@@ -194,12 +194,12 @@ export async function createBot(token: string, ownerId: number, rateLimiter?: Ra
       { command: 'hub', description: 'Show sessions hub with controls' },
       { command: 'settings', description: 'Notification settings' },
       { command: 'help', description: 'Command reference' },
-      { command: 'execute_phase', description: 'Run /gsd:execute-phase <phase>' },
-      { command: 'plan_phase', description: 'Run /gsd:plan-phase <phase>' },
-      { command: 'validate_phase', description: 'Run /gsd:validate-phase <phase>' },
-      { command: 'audit_milestone', description: 'Run /gsd:audit-milestone' },
-      { command: 'complete_milestone', description: 'Run /gsd:complete-milestone' },
-      { command: 'quick', description: 'Run /gsd:quick <description>' },
+      { command: 'execute_phase', description: 'Run /gsd-execute-phase <phase>' },
+      { command: 'plan_phase', description: 'Run /gsd-plan-phase <phase>' },
+      { command: 'validate_phase', description: 'Run /gsd-validate-phase <phase>' },
+      { command: 'audit_milestone', description: 'Run /gsd-audit-milestone' },
+      { command: 'complete_milestone', description: 'Run /gsd-complete-milestone' },
+      { command: 'quick', description: 'Run /gsd-quick <description>' },
     ]);
   } catch (err: unknown) {
     // Release lock on validation failure so another process can try

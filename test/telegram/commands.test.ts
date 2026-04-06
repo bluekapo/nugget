@@ -285,7 +285,7 @@ describe('registerCommands', () => {
       }
     });
 
-    it('/execute_phase with args calls writeToSession with "/gsd:execute-phase <args> "', async () => {
+    it('/execute_phase with args calls writeToSession with "/gsd-execute-phase <args> "', async () => {
       const bot = createMockBot();
       const manager = createMockSessionManager();
       const writes: Array<{ name: string; data: string }> = [];
@@ -302,10 +302,10 @@ describe('registerCommands', () => {
 
       assert.equal(writes.length, 1);
       assert.equal(writes[0].name, 'my-session');
-      assert.equal(writes[0].data, '/gsd:execute-phase 43 ');
+      assert.equal(writes[0].data, '/gsd-execute-phase 43 ');
     });
 
-    it('/quick with no args calls writeToSession with "/gsd:quick "', async () => {
+    it('/quick with no args calls writeToSession with "/gsd-quick "', async () => {
       const bot = createMockBot();
       const manager = createMockSessionManager();
       const writes: Array<{ name: string; data: string }> = [];
@@ -322,7 +322,7 @@ describe('registerCommands', () => {
 
       assert.equal(writes.length, 1);
       assert.equal(writes[0].name, 'my-session');
-      assert.equal(writes[0].data, '/gsd:quick ');
+      assert.equal(writes[0].data, '/gsd-quick ');
     });
 
     it('GSD command with no active session replies with error', async () => {

@@ -211,10 +211,10 @@ describe('buildPrompt', () => {
       taskDescription: 'Run gsd for phase 5',
     };
     const prompt = buildPrompt(packet);
-    assert.ok(prompt.includes('/gsd:plan-phase'), `Expected plan-phase in GSD pipeline hint:\n${prompt}`);
-    assert.ok(prompt.includes('/gsd:execute-phase'), `Expected execute-phase in GSD pipeline hint:\n${prompt}`);
-    assert.ok(prompt.includes('/gsd:validate-phase'), `Expected validate-phase in GSD pipeline hint:\n${prompt}`);
-    assert.ok(!prompt.includes('/gsd:verify-phase'), `Should NOT mention verify-phase:\n${prompt}`);
+    assert.ok(prompt.includes('/gsd-plan-phase'), `Expected plan-phase in GSD pipeline hint:\n${prompt}`);
+    assert.ok(prompt.includes('/gsd-execute-phase'), `Expected execute-phase in GSD pipeline hint:\n${prompt}`);
+    assert.ok(prompt.includes('/gsd-validate-phase'), `Expected validate-phase in GSD pipeline hint:\n${prompt}`);
+    assert.ok(!prompt.includes('/gsd-verify-phase'), `Should NOT mention verify-phase:\n${prompt}`);
   });
 
   it('includes only CLEAR hint when taskDescription has no trigger keywords', () => {
@@ -357,16 +357,16 @@ describe('buildPrompt', () => {
     };
     const prompt = buildPrompt(packet);
     assert.ok(
-      prompt.includes('/gsd:plan-phase N'),
-      `Expected '/gsd:plan-phase N' with phase number placeholder in prompt:\n${prompt}`,
+      prompt.includes('/gsd-plan-phase N'),
+      `Expected '/gsd-plan-phase N' with phase number placeholder in prompt:\n${prompt}`,
     );
     assert.ok(
-      prompt.includes('/gsd:execute-phase N'),
-      `Expected '/gsd:execute-phase N' with phase number placeholder in prompt:\n${prompt}`,
+      prompt.includes('/gsd-execute-phase N'),
+      `Expected '/gsd-execute-phase N' with phase number placeholder in prompt:\n${prompt}`,
     );
     assert.ok(
-      prompt.includes('/gsd:validate-phase N'),
-      `Expected '/gsd:validate-phase N' with phase number placeholder in prompt:\n${prompt}`,
+      prompt.includes('/gsd-validate-phase N'),
+      `Expected '/gsd-validate-phase N' with phase number placeholder in prompt:\n${prompt}`,
     );
   });
 

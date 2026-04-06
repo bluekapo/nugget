@@ -42,12 +42,12 @@ export class EphemeralTracker {
  */
 /** GSD workflow command mapping: Telegram command name -> PTY text prefix. */
 const GSD_COMMANDS: Record<string, string> = {
-  execute_phase: '/gsd:execute-phase',
-  plan_phase: '/gsd:plan-phase',
-  validate_phase: '/gsd:validate-phase',
-  audit_milestone: '/gsd:audit-milestone',
-  complete_milestone: '/gsd:complete-milestone',
-  quick: '/gsd:quick',
+  execute_phase: '/gsd-execute-phase',
+  plan_phase: '/gsd-plan-phase',
+  validate_phase: '/gsd-validate-phase',
+  audit_milestone: '/gsd-audit-milestone',
+  complete_milestone: '/gsd-complete-milestone',
+  quick: '/gsd-quick',
 };
 
 export function registerCommands(
@@ -234,7 +234,7 @@ export function registerCommands(
     });
   }
 
-  // GSD workflow quick commands: forward /gsd:<cmd> to active worker session
+  // GSD workflow quick commands: forward /gsd-<cmd> to active worker session
   if (writeToSession) {
     for (const [cmdName, gsdCommand] of Object.entries(GSD_COMMANDS)) {
       bot.command(cmdName, async (ctx: { message?: { text?: string }; reply(text: string, opts?: unknown): Promise<unknown>; deleteMessage(): Promise<boolean> }) => {

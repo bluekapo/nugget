@@ -88,10 +88,10 @@ describe('parseDirective', () => {
         'COMMAND: Fix the bug in src/session/pty.ts where delete signals are not sent',
         'correctly',
         '',
-        '● COMMAND: /gsd:quick Fix the actual bug',
+        '● COMMAND: /gsd-quick Fix the actual bug',
       ].join('\n');
       const result = parseDirective(screenText);
-      assert.deepStrictEqual(result, { type: 'COMMAND', command: '/gsd:quick Fix the actual bug' });
+      assert.deepStrictEqual(result, { type: 'COMMAND', command: '/gsd-quick Fix the actual bug' });
     });
 
     it('returns null when only bare example exists (no response yet)', () => {
@@ -185,7 +185,7 @@ describe('parseDirective', () => {
   describe('multi-line wrapped COMMAND', () => {
     it('collects indented continuation lines into full command', () => {
       const screenText = [
-        '● COMMAND: /gsd:quick Fix the bug where Clear does not correctly send 300 delete',
+        '● COMMAND: /gsd-quick Fix the bug where Clear does not correctly send 300 delete',
         '   signals - only one delete signal is actually being sent (1 character after',
         '  the cursor gets deleted). Backspaces work well but delete signals are broken.',
         '',
@@ -194,7 +194,7 @@ describe('parseDirective', () => {
       const result = parseDirective(screenText);
       assert.ok(result);
       assert.strictEqual(result!.type, 'COMMAND');
-      assert.ok(result!.command!.includes('/gsd:quick'));
+      assert.ok(result!.command!.includes('/gsd-quick'));
       assert.ok(result!.command!.includes('delete signals are broken.'));
     });
 
@@ -712,7 +712,7 @@ describe('parseDirectiveWithContext', () => {
     it('COMMAND continuation stops at ✻ completion marker', () => {
       const text = [
         '● CONTEXT: info',
-        'COMMAND: /gsd:quick Fix the bug',
+        'COMMAND: /gsd-quick Fix the bug',
         '  with continuation text.',
         '✻ Crunched for 2m 14s',
         '',
@@ -724,7 +724,7 @@ describe('parseDirectiveWithContext', () => {
       assert.strictEqual(result.directive!.type, 'COMMAND');
       const cmd = (result.directive as any).command;
       assert.ok(!cmd.includes('Crunched'), `command should not include completion marker, got: ${cmd}`);
-      assert.strictEqual(cmd, '/gsd:quick Fix the bug with continuation text.');
+      assert.strictEqual(cmd, '/gsd-quick Fix the bug with continuation text.');
     });
 
     it('CONTEXT continuation stops at ✻ completion marker', () => {
@@ -772,7 +772,7 @@ describe('parseDirectiveWithContext', () => {
         // Final repaint (complete)
         '● CONTEXT: Key files for automation hub refactor.',
         '  sub-section accessible via button.',
-        '  COMMAND: /gsd:quick Fix the bug with the automation hub',
+        '  COMMAND: /gsd-quick Fix the bug with the automation hub',
         '   so that hub always renders normally.',
         '✻ Crunched for 2m 14s',
         '',
@@ -806,7 +806,7 @@ describe('parseDirectiveWithContext', () => {
         '',
         // Current cycle 2 response: CONTEXT + COMMAND under single ● bullet
         '● CONTEXT: This is a Telegram bot project. The hub is a Telegram message.',
-        '  COMMAND: Now let us proceed with the task. Use /gsd:quick to implement this',
+        '  COMMAND: Now let us proceed with the task. Use /gsd-quick to implement this',
         '  improvement to the automation workflow.',
         '',
         '✻ Crunched for 1m 30s',
@@ -858,10 +858,10 @@ describe('stripAnsi', () => {
   it('replaces CSI cursor position with newline to preserve line separation', () => {
     // Ink TUI renders response and spinner at different rows via cursor positioning
     // \x1b[5;1H = cursor to row 5, col 1; \x1b[6;1H = cursor to row 6, col 1
-    const raw = '\x1b[5;1H● COMMAND: /gsd:plan-phase 19\x1b[6;1H✶ Scurrying…\x1b[7;1H❯ ';
+    const raw = '\x1b[5;1H● COMMAND: /gsd-plan-phase 19\x1b[6;1H✶ Scurrying…\x1b[7;1H❯ ';
     const result = stripAnsi(raw);
     // Each cursor position becomes a newline — command stays on its own line
-    assert.ok(result.includes('● COMMAND: /gsd:plan-phase 19\n'),
+    assert.ok(result.includes('● COMMAND: /gsd-plan-phase 19\n'),
       `Expected command on own line, got: ${JSON.stringify(result)}`);
     assert.ok(!result.includes('19✶'),
       `Command and spinner should not merge, got: ${JSON.stringify(result)}`);
@@ -895,13 +895,13 @@ describe('stripAnsi', () => {
   it('does not merge response and status areas after cursor positioning strip', () => {
     // Reproduces the exact corruption pattern from Claude Code v2.1.74
     // Response at row 10, spinner at row 38, prompt at row 39
-    const raw = '\x1b[10;1H● COMMAND: /gsd:execute-phase 19\x1b[38;1H✢ Seasoning…\x1b[39;1H❯ \x1b[40;1H  ⏵⏵ bypass permissions on';
+    const raw = '\x1b[10;1H● COMMAND: /gsd-execute-phase 19\x1b[38;1H✢ Seasoning…\x1b[39;1H❯ \x1b[40;1H  ⏵⏵ bypass permissions on';
     const result = stripAnsi(raw);
     // Command must be on its own line, not merged with spinner/prompt/footer
     const lines = result.split('\n');
     const cmdLine = lines.find(l => l.includes('● COMMAND:'));
     assert.ok(cmdLine, `Should find ● COMMAND line in: ${JSON.stringify(result)}`);
-    assert.strictEqual(cmdLine!.trim(), '● COMMAND: /gsd:execute-phase 19');
+    assert.strictEqual(cmdLine!.trim(), '● COMMAND: /gsd-execute-phase 19');
   });
 
   it('converts CUF (\\x1b[1C) between words to single space', () => {
@@ -967,10 +967,10 @@ describe('stripAnsi', () => {
 describe('parseDirective spinner isolation', () => {
   it('does not include spinner text in command via continuation', () => {
     // After cursor positioning fix, spinner ends up on its own line
-    const text = '● COMMAND: /gsd:plan-phase 19\n✶ Scurrying…\n❯ ';
+    const text = '● COMMAND: /gsd-plan-phase 19\n✶ Scurrying…\n❯ ';
     const result = parseDirective(text);
     assert.strictEqual(result?.type, 'COMMAND');
-    assert.strictEqual(result?.command, '/gsd:plan-phase 19');
+    assert.strictEqual(result?.command, '/gsd-plan-phase 19');
   });
 
   it('does not include any spinner variant in continuation', () => {
@@ -981,10 +981,10 @@ describe('parseDirective spinner isolation', () => {
   });
 
   it('does not include middle-dot spinner in continuation', () => {
-    const text = '● COMMAND: /gsd:progress\n· Osmosing…\n❯ ';
+    const text = '● COMMAND: /gsd-progress\n· Osmosing…\n❯ ';
     const result = parseDirective(text);
     assert.strictEqual(result?.type, 'COMMAND');
-    assert.strictEqual(result?.command, '/gsd:progress');
+    assert.strictEqual(result?.command, '/gsd-progress');
   });
 
   it('still collects legitimate indented continuation lines', () => {
@@ -1040,23 +1040,23 @@ describe('AUTO-02: spinner interleaving in COMMAND continuation', () => {
   it('COMMAND with spinner line between directive and numeric continuation', () => {
     // Spinner line ✶ interleaves between COMMAND line and its phase number continuation
     // After stripSpinners removes the spinner line, parseDirective should find the full command
-    const raw = '● COMMAND: /gsd:execute-phase\n✶ Scurrying...\n3\n❯ ';
+    const raw = '● COMMAND: /gsd-execute-phase\n✶ Scurrying...\n3\n❯ ';
     const cleaned = stripSpinners(stripAnsi(raw));
     const result = parseDirective(cleaned);
-    assert.deepStrictEqual(result, { type: 'COMMAND', command: '/gsd:execute-phase 3' });
+    assert.deepStrictEqual(result, { type: 'COMMAND', command: '/gsd-execute-phase 3' });
   });
 
   it('COMMAND with different spinner variant between directive and continuation', () => {
-    const raw = '● COMMAND: /gsd:plan-phase\n✽ Analyzing...\n5\n❯ ';
+    const raw = '● COMMAND: /gsd-plan-phase\n✽ Analyzing...\n5\n❯ ';
     const cleaned = stripSpinners(stripAnsi(raw));
     const result = parseDirective(cleaned);
-    assert.deepStrictEqual(result, { type: 'COMMAND', command: '/gsd:plan-phase 5' });
+    assert.deepStrictEqual(result, { type: 'COMMAND', command: '/gsd-plan-phase 5' });
   });
 });
 
 describe('AUTO-02: stripSpinners extension for Unicode spinners', () => {
   it('strips Unicode spinner line with ✶', () => {
-    const text = '● COMMAND: /gsd:execute-phase\n✶ Scurrying...\n3\n❯ ';
+    const text = '● COMMAND: /gsd-execute-phase\n✶ Scurrying...\n3\n❯ ';
     const result = stripSpinners(text);
     assert.ok(!result.includes('Scurrying'), `should strip ✶ spinner line, got: ${result}`);
   });
@@ -1101,7 +1101,7 @@ describe('ENG-02: stripSpinners strips bypass-permissions banner', () => {
 
   it('full pipeline (stripAnsi + stripSpinners) removes bypass banner from raw PTY data', () => {
     // Raw PTY data from Claude Code v2.1.74 containing bypass banner at row 40
-    const raw = '\x1b[10;1H\u25CF COMMAND: /gsd:execute-phase 19\x1b[38;1H\u2722 Seasoning\u2026\x1b[39;1H\u276F \x1b[40;1H  \u23F5\u23F5 bypass permissions on';
+    const raw = '\x1b[10;1H\u25CF COMMAND: /gsd-execute-phase 19\x1b[38;1H\u2722 Seasoning\u2026\x1b[39;1H\u276F \x1b[40;1H  \u23F5\u23F5 bypass permissions on';
     const cleaned = stripSpinners(stripAnsi(raw));
     assert.ok(!cleaned.includes('bypass permissions'),
       `full pipeline should strip bypass banner, got: ${JSON.stringify(cleaned)}`);
